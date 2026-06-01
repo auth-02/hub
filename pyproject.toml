@@ -1,0 +1,13 @@
+[project]
+name = "hub"
+version = "0.1.0"
+description = "Local markdown/HTML browser with split-pane preview and full-text search"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+hub = "hub:main"
+hub-server = "server:main"
+
+[tool.uv]
+dev-dependencies = []
