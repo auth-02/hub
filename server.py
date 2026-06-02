@@ -18,16 +18,109 @@ import mimetypes
 import os
 import re
 import socketserver
+import sqlite3
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 # ── Scan root resolution (mirrors hub.py) ──────────────────────────────────
 _HERE = Path(__file__).resolve().parent
 _SIDECAR = Path.home() / "agents" / "hub" / ".scan_root"
+_DB_PATH = _HERE / "data" / "hub.db"
+
+
+def _get_lineage(abs_path: str) -> list:
+    """Return lineage links for abs_path from hub.db (empty list if DB missing or file unknown)."""
+    try:
+        if not _DB_PATH.exists():
+            return []
+        conn = sqlite3.connect(f"file:{_DB_PATH}?mode=ro", uri=True)
+        rows = conn.execute(
+            """SELECT f2.abs, f2.rel, f2.kind, l.rel_type
+               FROM lineage l
+               JOIN files f1 ON f1.id = l.src_id
+               JOIN files f2 ON f2.id = l.dst_id
+               WHERE f1.abs = ?""",
+            (abs_path,),
+        ).fetchall()
+        conn.close()
+        return [{"a": r[0], "p": r[1], "k": r[2] or "", "r": r[3]} for r in rows]
+    except Exception:
+        return []
+
+
+_LINEAGE_ORDER = [
+    "belongs_to_task", "task_has_run", "task_has_artifact", "task_has_prompt", "task_has_doc",
+]
+_LINEAGE_LABELS = {
+    "belongs_to_task": "↑ task",
+    "task_has_run": "runs",
+    "task_has_artifact": "artifacts",
+    "task_has_prompt": "prompts",
+    "task_has_doc": "docs",
+}
+
+
+_BACKLINKS_CSS = (
+    ":root{--bg:#F4EFE4;--alt:#ECE5D2;--line:#D9D1BC;--accent:#7A2828;--accent2:#1E5A6B;"
+    "--mute:#8A8377;--mono:'SF Mono',Menlo,'Cascadia Code',monospace;}"
+    ".backlinks{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:10px 0;"
+    "border-bottom:1px solid var(--line);margin-bottom:1.5rem;}"
+    ".backlinks-label{font-family:var(--mono);font-size:9px;letter-spacing:.18em;"
+    "text-transform:uppercase;color:var(--accent);flex-shrink:0;}"
+    ".backlinks-group{display:flex;align-items:center;gap:6px;flex-shrink:0;}"
+    ".backlinks-type{font-family:var(--mono);font-size:9px;color:var(--mute);}"
+    ".backlinks-item{font-family:var(--mono);font-size:10px;padding:3px 8px;"
+    "border:1px solid var(--line);color:var(--mute);background:var(--alt);"
+    "white-space:nowrap;text-decoration:none;display:inline-block;}"
+    ".backlinks-item:hover{border-color:var(--accent2);color:var(--accent2);}"
+)
+
+
+def _inject_into_html(src: str, lineage_html: str) -> str:
+    """Inject backlinks CSS + HTML into an existing HTML document."""
+    style_tag = f"<style>{_BACKLINKS_CSS}</style>"
+    src = re.sub(r"</head>", style_tag + "</head>", src, count=1, flags=re.IGNORECASE)
+    m = re.search(r"</h1>", src, re.IGNORECASE)
+    if m:
+        return src[: m.end()] + lineage_html + src[m.end() :]
+    return re.sub(r"<body[^>]*>", lambda mo: mo.group(0) + lineage_html, src, count=1, flags=re.IGNORECASE)
+
+
+def _render_lineage_html(links: list, port: int) -> str:
+    """Render lineage links as a backlinks section appended to the doc page."""
+    if not links:
+        return ""
+
+    def _esc(s: str) -> str:
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    groups: dict = {}
+    for link in links:
+        groups.setdefault(link["r"], []).append(link)
+
+    parts = ['<div class="backlinks"><div class="backlinks-label">// trace</div>']
+    for rel_type in _LINEAGE_ORDER:
+        if rel_type not in groups:
+            continue
+        label = _LINEAGE_LABELS.get(rel_type, rel_type)
+        parts.append(
+            f'<div class="backlinks-group">'
+            f'<span class="backlinks-type">{_esc(label)}</span>'
+        )
+        for link in groups[rel_type]:
+            name = link["p"].split("/")[-1]
+            href = f"http://localhost:{port}" + quote(link["a"], safe="/:@")
+            parts.append(
+                f'<a class="backlinks-item" href="{href}" title="{_esc(link["p"])}">'
+                f'{_esc(name)}</a>'
+            )
+        parts.append("</div>")
+    parts.append("</div>")
+    return "".join(parts)
 
 
 def _resolve_scan_root() -> Path:
@@ -104,6 +197,14 @@ hr{border:none;border-top:1px solid var(--line);margin:2rem 0;}
 ul,ol{margin:.75rem 0 .75rem 1.75rem;}
 li{margin:.25rem 0;}
 img{max-width:100%;border-radius:4px;display:block;margin:1rem 0;}
+
+/* Backlinks / trace */
+.backlinks{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--line);margin-bottom:1.5rem;}
+.backlinks-label{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);flex-shrink:0;}
+.backlinks-group{display:flex;align-items:center;gap:6px;flex-shrink:0;}
+.backlinks-type{font-family:var(--mono);font-size:9px;color:var(--mute);}
+.backlinks-item{font-family:var(--mono);font-size:10px;padding:3px 8px;border:1px solid var(--line);color:var(--mute);background:var(--alt);white-space:nowrap;text-decoration:none;display:inline-block;}
+.backlinks-item:hover{border-color:var(--accent2);color:var(--accent2);}
 
 /* Directory listing */
 .dir-list{list-style:none;margin:0;padding:0;}
@@ -388,7 +489,12 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         elif fs_path.suffix.lower() == ".md":
             self._serve_md(fs_path)
         elif fs_path.suffix.lower() in (".html", ".htm"):
-            self._send(200, "text/html; charset=utf-8", fs_path.read_bytes())
+            src = fs_path.read_text(encoding="utf-8", errors="replace")
+            links = _get_lineage(str(fs_path.resolve()))
+            if links:
+                lineage_html = _render_lineage_html(links, self.__class__.server_port)
+                src = _inject_into_html(src, lineage_html)
+            self._send(200, "text/html; charset=utf-8", src.encode("utf-8"))
         elif fs_path.suffix.lower() == ".txt":
             src = fs_path.read_text(encoding="utf-8", errors="replace")
             escaped = src.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -476,6 +582,16 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             nav_html = f'<nav>{" / ".join(parts)}</nav>'
         except ValueError:
             nav_html = ""
+
+        links = _get_lineage(str(path.resolve()))
+        lineage_html = _render_lineage_html(links, self.__class__.server_port)
+
+        if lineage_html:
+            m = re.search(r"</h1>", body)
+            if m:
+                body = body[:m.end()] + lineage_html + body[m.end():]
+            else:
+                body = lineage_html + body
 
         html = _PAGE.format(
             title=title,
