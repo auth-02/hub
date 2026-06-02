@@ -79,8 +79,18 @@ h1 .hub{{color:#C15F3C;font-style:italic;}}
 .empty{{color:var(--mute);font-style:italic;}}
 .hidden{{display:none!important;}}
 footer{{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-family:var(--mono);font-size:10px;color:var(--mute);letter-spacing:.1em;}}
-.preview-pane{{flex:0 0 520px;position:sticky;top:16px;height:calc(100vh - 32px);overflow:hidden;display:none;flex-direction:column;background:var(--bg);border:1px solid var(--line);border-top:3px solid var(--accent2);}}
-.preview-pane.open{{display:flex;}}
+.preview-pane{{flex:0 0 520px;position:sticky;top:16px;height:calc(100vh - 32px);overflow:hidden;display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--line);border-top:3px solid var(--accent2);}}
+#hub-feed{{flex:1;overflow-y:auto;padding:12px 14px;min-height:0;}}
+.feed-label{{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:14px;}}
+.feed-item{{padding:10px 0;border-bottom:1px solid var(--line);}}
+.feed-item:last-child{{border-bottom:none;}}
+.feed-ago{{font-family:var(--mono);font-size:9px;color:var(--mute);margin-bottom:4px;}}
+.feed-subject{{font-family:var(--disp);font-style:italic;font-size:15px;margin-bottom:2px;}}
+.feed-subject a{{color:var(--accent2);text-decoration:none;}}
+.feed-subject a:hover{{text-decoration:underline;}}
+.feed-action{{font-family:var(--mono);font-size:10px;color:var(--mute);margin-bottom:1px;}}
+.feed-ctx{{font-family:var(--mono);font-size:9px;color:var(--mute);opacity:.7;}}
+.feed-empty{{font-family:var(--mono);font-size:11px;color:var(--mute);padding:8px 0;}}
 .pv-header{{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);gap:8px;}}
 .pv-title{{font-family:var(--mono);font-size:10px;color:var(--mute);flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}}
 .pv-actions{{display:flex;gap:6px;flex-shrink:0;}}
@@ -143,15 +153,16 @@ footer{{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-f
   <div class="list-pane">{body}</div>
   <aside class="preview-pane" id="preview" aria-label="File preview">
     <div class="pv-header">
-      <span class="pv-title" id="pv-title"></span>
+      <span class="pv-title" id="pv-title">// hub feed</span>
       <div class="pv-actions">
-        <a class="pv-btn primary" id="pv-open" href="#" target="_blank" rel="noopener">Open</a>
-        <button class="pv-btn" id="pv-close">✕</button>
+        <a class="pv-btn primary" id="pv-open" href="#" target="_blank" rel="noopener" style="display:none">Open</a>
+        <button class="pv-btn" id="pv-close" style="display:none">✕</button>
       </div>
     </div>
+    <div id="hub-feed"></div>
     <div class="pv-lineage" id="pv-lineage"></div>
     <div class="pv-body" id="pv-body"></div>
-    <div class="pv-hint">j/k navigate · Enter open · Esc close</div>
+    <div class="pv-hint" id="pv-hint" style="display:none">j/k navigate · Enter open · Esc close</div>
   </aside>
 </div>
 <div id="toast" class="toast"></div>
@@ -173,6 +184,7 @@ footer{{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-f
 const FTS_DATA={fts_json};
 const LINEAGE_DATA={lineage_json};
 const TASK_STATUS_DATA={task_status_json};
+const ACTIVITY_DATA={activity_json};
 const ftsMap=new Map(FTS_DATA.map(d=>[d.a,d]));
 const STATUS_CYCLE=['ongoing','completed','paused'];
 
@@ -183,6 +195,7 @@ const chips=[...document.querySelectorAll('.chip')];
 const preview=document.getElementById('preview');
 const pvTitle=document.getElementById('pv-title');
 const pvOpen=document.getElementById('pv-open');
+const pvClose=document.getElementById('pv-close');
 const pvBody=document.getElementById('pv-body');
 const pvLineage=document.getElementById('pv-lineage');
 let kind=sessionStorage.getItem('docs_hub_kind')||'all';
@@ -261,6 +274,43 @@ apply();
 window.scrollTo(0,parseInt(sessionStorage.getItem('docs_hub_y')||'0'));
 setInterval(()=>{{sessionStorage.setItem('docs_hub_y',window.scrollY);location.reload();}},120000);
 
+// ── Hub Feed ──────────────────────────────────────────────────────────────
+const FEED_ACTIONS={{
+  task:    {{created:'New task started',    updated:'Task plan updated'}},
+  run:     {{created:'Run logged',          updated:'Run notes updated'}},
+  artifact:{{created:'Artifact created',    updated:'Artifact revised'}},
+  prompt:  {{created:'Prompt added',        updated:'Prompt updated'}},
+  doc:     {{created:'Doc added',           updated:'Doc updated'}},
+  claude:  {{created:'CLAUDE.md updated',   updated:'CLAUDE.md updated'}},
+  readme:  {{created:'README updated',      updated:'README updated'}},
+}};
+function feedAgo(ts){{
+  const d=(Date.now()/1000)-ts;
+  if(d<90) return 'just now';
+  if(d<3600) return Math.floor(d/60)+'m ago';
+  if(d<86400) return Math.floor(d/3600)+'h ago';
+  return Math.floor(d/86400)+'d ago';
+}}
+function renderFeed(){{
+  const el=document.getElementById('hub-feed');
+  if(!ACTIVITY_DATA.length){{el.innerHTML='<div class="feed-empty">No recent activity yet.</div>';return;}}
+  let h='<div class="feed-label">// hub feed</div>';
+  ACTIVITY_DATA.forEach(ev=>{{
+    const name=ev.p.split('/').pop().replace(/\.[^.]+$/,'');
+    const actions=FEED_ACTIONS[ev.k]||{{created:'File added',updated:'File modified'}};
+    const actionText=actions[ev.ev]||'Changed';
+    const subject=ev.sl||name;
+    const detail=(ev.k==='artifact'||ev.k==='run')&&name!==subject?actionText+' · '+name:actionText;
+    h+=`<div class="feed-item">
+      <div class="feed-ago">${{feedAgo(ev.ts)}}</div>
+      <div class="feed-subject"><a href="${{fileHref(ev.a)}}" target="_blank" rel="noopener">${{esc(subject.replace(/-/g,' ').replace(/^./,c=>c.toUpperCase()))}}</a></div>
+      <div class="feed-action">${{esc(detail)}}</div>
+      ${{ev.rp?`<div class="feed-ctx">${{esc(ev.rp)}}</div>`:''}}
+    </div>`;
+  }});
+  el.innerHTML=h;
+}}
+
 // ── Preview ───────────────────────────────────────────────────────────────
 function getVisible(){{return rows.filter(r=>!r.classList.contains('hidden'));}}
 
@@ -275,6 +325,9 @@ function selectRow(idx){{
 }}
 
 function openPreview(row){{
+  document.getElementById('hub-feed').style.display='none';
+  pvOpen.style.display=''; pvClose.style.display='';
+  document.getElementById('pv-hint').style.display='';
   pvTitle.textContent=row.querySelector('.path').textContent;
   pvOpen.href=row.href;
   const abs=row.dataset.abs||'';
@@ -283,15 +336,17 @@ function openPreview(row){{
   else pvLineage.classList.remove('show');
   pvBody.classList.add('iframe-mode');
   pvBody.innerHTML=`<iframe class="pv-iframe" src="${{row.href}}"></iframe>`;
-  preview.classList.add('open');
 }}
 
 function closePreview(){{
-  preview.classList.remove('open');
-  pvBody.classList.remove('iframe-mode');
-  pvBody.innerHTML='';
+  pvBody.classList.remove('iframe-mode'); pvBody.innerHTML='';
+  pvLineage.classList.remove('show');
   if(selRows[selIdx]) selRows[selIdx].classList.remove('selected');
   selIdx=-1;
+  document.getElementById('hub-feed').style.display='';
+  pvOpen.style.display='none'; pvClose.style.display='none';
+  document.getElementById('pv-hint').style.display='none';
+  pvTitle.textContent='// hub feed';
 }}
 
 rows.forEach(r=>r.addEventListener('click',e=>{{
@@ -345,6 +400,7 @@ const SIDECAR={sidecar_json};
 const HUBPY={hubpy_json};
 const SERVER_ORIGIN={server_origin_json};
 function fileHref(abs){{return SERVER_ORIGIN?SERVER_ORIGIN+encodeURI(abs):'file://'+encodeURI(abs);}}
+renderFeed();
 const REBUILD_CMD=`/usr/bin/python3 ${{HUBPY}}`;
 const toast=document.getElementById('toast');
 function flash(msg){{toast.textContent=msg;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),2400);}}

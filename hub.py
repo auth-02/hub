@@ -178,7 +178,7 @@ def _ago(mtime: float) -> str:
     return "just now"
 
 
-def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}") -> str:
+def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]") -> str:
     total     = sum(len(v) for v in groups.values())
     md_total  = sum(1 for v in groups.values() for f in v if f["ext"] == "md")
     html_total = total - md_total
@@ -243,6 +243,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         fts_json=fts_json,
         lineage_json=lineage_json,
         task_status_json=task_status_json,
+        activity_json=activity_json,
         server_origin_json=json.dumps(_SERVER_ORIGIN),
     )
 
@@ -262,12 +263,15 @@ def main() -> None:
                 db.upsert(conn, {**f, "repo": repo}, title, body)
     db.prune(conn, live_paths)
     db.build_lineage(conn)
+    db.backfill_activity(conn)
+    db.prune_activity(conn)
     fts_json, lineage_json = db.export_html_data(conn)
     task_status_json = db.get_statuses_json(conn)
+    activity_json = db.get_activity_json(conn)
     conn.close()
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(render(groups, fts_json, lineage_json, task_status_json), encoding="utf-8")
+    OUTPUT.write_text(render(groups, fts_json, lineage_json, task_status_json, activity_json), encoding="utf-8")
     total = sum(len(v) for v in groups.values())
     log(f"[hub] scanned {ROOT} -> {OUTPUT} ({total} files, {len(groups)} groups)")
 
