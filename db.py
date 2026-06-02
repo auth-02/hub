@@ -88,14 +88,17 @@ def is_current(conn: sqlite3.Connection, abs_path: str, mtime: float) -> bool:
 
 
 def _log_activity(conn: sqlite3.Connection, meta: dict, event: str) -> None:
-    if conn.execute("SELECT id FROM activity_log WHERE abs=? AND ts>?",
-                    (meta["abs"], time.time() - 30)).fetchone():
+    # Use file mtime as the event timestamp — dedup by (abs, mtime) so
+    # re-scanning the same unchanged file never creates a duplicate entry.
+    mtime = meta.get("mtime") or time.time()
+    if conn.execute("SELECT id FROM activity_log WHERE abs=? AND ts=?",
+                    (meta["abs"], mtime)).fetchone():
         return
     conn.execute(
         """INSERT INTO activity_log(abs,kind,task_slug,task_repo,rel,event,ts)
            VALUES(?,?,?,?,?,?,?)""",
         (meta["abs"], meta.get("kind"), meta.get("task_slug"),
-         meta.get("task_repo"), meta["rel"], event, time.time()),
+         meta.get("task_repo"), meta["rel"], event, mtime),
     )
 
 
