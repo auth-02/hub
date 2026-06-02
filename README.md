@@ -12,8 +12,6 @@ Hub scans a directory tree, indexes every document into SQLite with full-text se
 
 ---
 
-## Screenshots
-
 ### Index — grouped by repo, filtered by kind, sorted by recency
 Status badges on every task manifest. Click to cycle `ongoing → completed → paused`, saved instantly.
 
