@@ -25,7 +25,7 @@ Every file opens in a clean reading view with a `// trace` bar below the heading
 ![Markdown document page](assets/screenshots/doc.png)
 
 ### HTML document page
-HTML artifacts are served as-is with the `// trace` bar injected automatically.
+HTML artifacts are served with the hub's own CSS injected and the `// trace` bar linking back to the parent task — no extra configuration needed.
 
 ![HTML artifact page with trace bar](assets/screenshots/doc-html.png)
 
