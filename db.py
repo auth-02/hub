@@ -24,6 +24,17 @@ CREATE TABLE IF NOT EXISTS files (
     updated   REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS activity_log (
+    id        INTEGER PRIMARY KEY,
+    abs       TEXT NOT NULL,
+    kind      TEXT,
+    task_slug TEXT,
+    task_repo TEXT,
+    rel       TEXT NOT NULL,
+    event     TEXT NOT NULL,
+    ts        REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS task_status (
     task_slug TEXT NOT NULL,
     task_repo TEXT NOT NULL,
@@ -76,7 +87,23 @@ def is_current(conn: sqlite3.Connection, abs_path: str, mtime: float) -> bool:
     return row is not None and abs(row[0] - mtime) < 0.01
 
 
+def _log_activity(conn: sqlite3.Connection, meta: dict, event: str) -> None:
+    # Use file mtime as the event timestamp — dedup by (abs, mtime) so
+    # re-scanning the same unchanged file never creates a duplicate entry.
+    mtime = meta.get("mtime") or time.time()
+    if conn.execute("SELECT id FROM activity_log WHERE abs=? AND ts=?",
+                    (meta["abs"], mtime)).fetchone():
+        return
+    conn.execute(
+        """INSERT INTO activity_log(abs,kind,task_slug,task_repo,rel,event,ts)
+           VALUES(?,?,?,?,?,?,?)""",
+        (meta["abs"], meta.get("kind"), meta.get("task_slug"),
+         meta.get("task_repo"), meta["rel"], event, mtime),
+    )
+
+
 def upsert(conn: sqlite3.Connection, meta: dict, title: str, body: str) -> None:
+    existing = conn.execute("SELECT id FROM files WHERE abs=?", (meta["abs"],)).fetchone()
     conn.execute(
         """INSERT INTO files(abs,repo,rel,ext,kind,mtime,title,body,task_slug,task_repo,updated)
            VALUES(:abs,:repo,:rel,:ext,:kind,:mtime,:title,:body,:task_slug,:task_repo,:updated)
@@ -86,6 +113,7 @@ def upsert(conn: sqlite3.Connection, meta: dict, title: str, body: str) -> None:
              task_slug=excluded.task_slug,task_repo=excluded.task_repo,updated=excluded.updated""",
         {**meta, "title": title, "body": body, "updated": time.time()},
     )
+    _log_activity(conn, meta, "created" if existing is None else "updated")
 
 
 def prune(conn: sqlite3.Connection, live_paths: set) -> None:
@@ -147,6 +175,41 @@ def get_statuses_json(conn: sqlite3.Connection) -> str:
     return json.dumps(
         {f"{r[1]}:{r[0]}": r[2] for r in rows},
         separators=(",", ":"),
+    )
+
+
+def backfill_activity(conn: sqlite3.Connection) -> None:
+    if conn.execute("SELECT id FROM activity_log LIMIT 1").fetchone():
+        return
+    rows = conn.execute(
+        "SELECT abs,kind,task_slug,task_repo,rel,mtime FROM files ORDER BY mtime DESC LIMIT 100"
+    ).fetchall()
+    conn.executemany(
+        "INSERT OR IGNORE INTO activity_log(abs,kind,task_slug,task_repo,rel,event,ts) VALUES(?,?,?,?,?,'updated',?)",
+        [(r[0],r[1],r[2],r[3],r[4],r[5]) for r in rows],
+    )
+    conn.commit()
+
+
+def prune_activity(conn: sqlite3.Connection) -> None:
+    conn.execute("DELETE FROM activity_log WHERE ts<?", (time.time() - 30*86400,))
+    conn.execute("DELETE FROM activity_log WHERE id NOT IN (SELECT id FROM activity_log ORDER BY ts DESC LIMIT 200)")
+    conn.commit()
+
+
+def get_activity_json(conn: sqlite3.Connection, scan_root: str = "") -> str:
+    if scan_root:
+        rows = conn.execute(
+            "SELECT abs,kind,task_slug,task_repo,rel,event,ts FROM activity_log WHERE abs LIKE ? ORDER BY ts DESC LIMIT 50",
+            (scan_root.rstrip("/") + "/%",),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT abs,kind,task_slug,task_repo,rel,event,ts FROM activity_log ORDER BY ts DESC LIMIT 50"
+        ).fetchall()
+    return json.dumps(
+        [{"a":r[0],"k":r[1] or "","sl":r[2] or "","rp":r[3] or "","p":r[4],"ev":r[5],"ts":r[6]} for r in rows],
+        separators=(",",":"),
     )
 
 

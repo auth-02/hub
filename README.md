@@ -1,33 +1,41 @@
-# Hub
-
 ![Hub — Every .md & .html, one page](assets/screenshots/banner.png)
 
+<div align="center">
+
+# Hub
+
 **Every `.md` and `.html` in your projects — one searchable, previewable page.**
+
+</div>
 
 Hub scans a directory tree, indexes every document into SQLite with full-text search and task lineage, and serves a fast local browser at `http://localhost:8787`. No npm. No framework. Pure stdlib Python.
 
 ---
 
-## Screenshots
-
 ### Index — grouped by repo, filtered by kind, sorted by recency
+Status badges on every task manifest. Click to cycle `ongoing → completed → paused`, saved instantly.
 
-![Hub index with status badges and kind filters](assets/screenshots/index.png)
+![Hub index](assets/screenshots/index.png)
 
 ### Split-pane preview with task trace
 Click any row to open a live preview. The `// trace` panel links to related runs, artifacts, and the parent task.
 
 ![Split-pane preview](assets/screenshots/preview.png)
 
+### Hub Feed — floating activity drawer
+Press `Ctrl+F` or click the `// feed` tab on the right edge. Shows the last 50 file events across the scan root — what changed, which task, when.
+
+![Hub feed drawer](assets/screenshots/feed-drawer.png)
+
 ### Markdown document page
-Every file opens in a clean reading view with a `// trace` bar below the heading.
+Every file opened in its own tab gets a clean reading view with a `// trace` bar below the heading.
 
 ![Markdown document page](assets/screenshots/doc.png)
 
 ### HTML document page
-HTML artifacts are served with the hub's own CSS injected and the `// trace` bar linking back to the parent task — no extra configuration needed.
+HTML artifacts are served with the hub's own CSS injected and the `// trace` bar linking back to the parent task.
 
-![HTML artifact page with trace bar](assets/screenshots/doc-html.png)
+![HTML artifact page](assets/screenshots/doc-html.png)
 
 ---
 
@@ -36,8 +44,9 @@ HTML artifacts are served with the hub's own CSS injected and the `// trace` bar
 - **Full-text search** — filter by repo, path, title, and body simultaneously. Implicit AND, `repo:name` prefix supported.
 - **Kind chips** — one-click filters for TASK, RUN, ARTIFACT, CLAUDE, README, DOC, PROMPT. Stack with repo chips and search.
 - **Task status badges** — every task manifest shows a clickable status pill. Cycles `ongoing → completed → paused`, persisted to SQLite without a rebuild.
-- **Split-pane preview** — click any row for a live rendered preview with lineage trace. No page navigation.
-- **Backlinked doc pages** — open any file in its own tab and the `// trace` bar appears below the heading, linking to all related files in both directions. Works for `.md` and `.html`.
+- **Split-pane preview** — click any row for a live rendered preview with lineage trace. No page navigation needed.
+- **Hub Feed** — floating drawer (`Ctrl+F`) showing recent file activity: what changed, which task, how long ago. Persisted across rebuilds, backfilled on first run.
+- **Backlinked doc pages** — open any file in its own tab and the `// trace` bar appears below the heading, linking to all related files. Works for `.md` and `.html`.
 - **Auto-rebuild** — file watcher triggers a rebuild within ~3s of any change in the scan root.
 - **Keyboard-first** — navigate the full list without a mouse.
 
@@ -101,10 +110,11 @@ Hub understands this layout and builds a lineage graph automatically:
 | Key | Action |
 |-----|--------|
 | `/` | Focus search |
+| `Ctrl+F` | Toggle hub feed drawer |
 | `j` / `↓` | Next file |
 | `k` / `↑` | Previous file |
 | `Enter` | Open in new tab |
-| `Esc` | Close preview |
+| `Esc` | Close preview / feed |
 
 ---
 
@@ -134,7 +144,7 @@ Priority: `HUB_SCAN_ROOT` env var → `.scan_root` sidecar → `~/tifin` default
 hub/
 ├── hub.py              scan, index, render
 ├── server.py           HTTP server · markdown renderer · file watcher
-├── db.py               SQLite — files, lineage, FTS5, task_status
+├── db.py               SQLite — files, lineage, FTS5, task_status, activity_log
 ├── metadata.py         title + body extraction
 ├── templates/
 │   └── template.html   single-file HTML/CSS/JS template
