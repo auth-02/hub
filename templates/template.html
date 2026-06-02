@@ -318,7 +318,7 @@ function renderFeed(){{
     const detail=(ev.k==='artifact'||ev.k==='run')&&name!==subject?actionText+' · '+name:actionText;
     h+=`<div class="feed-item">
       <div class="feed-ago">${{feedAgo(ev.ts)}}</div>
-      <div class="feed-subject"><a href="${{fileHref(ev.a)}}" target="_blank" rel="noopener">${{esc(subject.replace(/-/g,' ').replace(/^./,c=>c.toUpperCase()))}}</a></div>
+      <div class="feed-subject"><a href="${{fileHref(ev.a)}}" target="_blank" rel="noopener">${{esc(subject.replace(/[-_]/g,' ').replace(/^./,c=>c.toUpperCase()))}}</a></div>
       <div class="feed-action">${{esc(detail)}}</div>
       ${{ev.rp?`<div class="feed-ctx">${{esc(ev.rp)}}</div>`:''}}
     </div>`;
