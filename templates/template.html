@@ -420,7 +420,10 @@ renderFeed();
   function closeFeed(){{drawer.classList.remove('open');tab.classList.remove('open');tab.textContent='// feed';}}
   tab.addEventListener('click',()=>drawer.classList.contains('open')?closeFeed():openFeed());
   document.getElementById('feed-close').addEventListener('click',closeFeed);
-  document.addEventListener('keydown',e=>{{if(e.key==='Escape'&&drawer.classList.contains('open'))closeFeed();}});
+  document.addEventListener('keydown',e=>{{
+    if((e.ctrlKey||e.metaKey)&&e.key==='f'){{e.preventDefault();drawer.classList.contains('open')?closeFeed():openFeed();}}
+    else if(e.key==='Escape'&&drawer.classList.contains('open'))closeFeed();
+  }});
 }})();
 const REBUILD_CMD=`/usr/bin/python3 ${{HUBPY}}`;
 const toast=document.getElementById('toast');
