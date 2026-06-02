@@ -142,6 +142,7 @@ Update `metadata.extract_body()` if the format needs special stripping.
 ## Git / PR workflow
 
 - Personal repo on GitHub under `auth-02` (NOT work account). Identity: `name=Atharva`, `email=shindeathrv@gmail.com`.
+- **Never push directly to `main`** — branch protection enforces PRs. Always branch → PR → merge.
 - Feature work → new branch from `main` → PR into `main`.
 - Bug fixes → `fix/<slug>` branch → PR with proof screenshot.
 - Always use `GH_TOKEN` from `.git/credentials` when running `gh` CLI.
