@@ -309,7 +309,7 @@ function feedAgo(ts){{
 function renderFeed(){{
   const el=document.getElementById('hub-feed');
   if(!ACTIVITY_DATA.length){{el.innerHTML='<div class="feed-empty">No recent activity yet.</div>';return;}}
-  let h='<div class="feed-label">// hub feed</div>';
+  let h='';
   ACTIVITY_DATA.forEach(ev=>{{
     const name=ev.p.split('/').pop().replace(/\.[^.]+$/,'');
     const actions=FEED_ACTIONS[ev.k]||{{created:'File added',updated:'File modified'}};
