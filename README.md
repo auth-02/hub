@@ -1,14 +1,47 @@
 # Hub
 
-One browsable page linking every `.md` / `.html` file under a scan root
-(default `~/tifin`) — grouped by repo, sorted by most-recently-modified, with
-split-pane preview, full-text search, and task lineage tracing.
+![Hub — Every .md & .html, one page](assets/screenshots/banner.png)
 
-## Open
+**Every `.md` and `.html` in your projects — one searchable, previewable page.**
 
-```
-http://localhost:8787/
-```
+Hub scans a directory tree, indexes every document into SQLite with full-text search and task lineage, and serves a fast local browser at `http://localhost:8787`. No npm. No framework. Pure stdlib Python.
+
+---
+
+## Screenshots
+
+### Index — grouped by repo, filtered by kind, sorted by recency
+
+![Hub index with status badges and kind filters](assets/screenshots/index.png)
+
+### Split-pane preview with task trace
+Click any row to open a live preview. The `// trace` panel links to related runs, artifacts, and the parent task.
+
+![Split-pane preview](assets/screenshots/preview.png)
+
+### Markdown document page
+Every file opens in a clean reading view with a `// trace` bar below the heading.
+
+![Markdown document page](assets/screenshots/doc.png)
+
+### HTML document page
+HTML artifacts are served as-is with the `// trace` bar injected automatically.
+
+![HTML artifact page with trace bar](assets/screenshots/doc-html.png)
+
+---
+
+## Features
+
+- **Full-text search** — filter by repo, path, title, and body simultaneously. Implicit AND, `repo:name` prefix supported.
+- **Kind chips** — one-click filters for TASK, RUN, ARTIFACT, CLAUDE, README, DOC, PROMPT. Stack with repo chips and search.
+- **Task status badges** — every task manifest shows a clickable status pill. Cycles `ongoing → completed → paused`, persisted to SQLite without a rebuild.
+- **Split-pane preview** — click any row for a live rendered preview with lineage trace. No page navigation.
+- **Backlinked doc pages** — open any file in its own tab and the `// trace` bar appears below the heading, linking to all related files in both directions. Works for `.md` and `.html`.
+- **Auto-rebuild** — file watcher triggers a rebuild within ~3s of any change in the scan root.
+- **Keyboard-first** — navigate the full list without a mouse.
+
+---
 
 ## Quick start
 
@@ -16,123 +49,99 @@ http://localhost:8787/
 # Start the server (auto-starts at login via launchd)
 python3 ~/agents/hub/server.py
 
-# Manual rebuild
-python3 ~/agents/hub/hub.py
+# Rebuild the index
+HUB_SERVER_PORT=8787 python3 ~/agents/hub/hub.py
 
-# Rebuild with debug logging
-HUB_DEBUG=1 python3 ~/agents/hub/hub.py
+# Open
+open http://localhost:8787/
 ```
 
-The server watches the scan root and rebuilds automatically on file changes (~3s).
-Click **↻ rebuild hub** in the header for an immediate rebuild.
+Two launchd agents keep everything running at login:
 
-## File structure
+| Agent | Behaviour |
+|-------|-----------|
+| `com.user.hub-server` | HTTP server + file watcher. KeepAlive. |
+| `com.user.hub` | Rebuilds index every 120s. |
 
-```
-hub/
-├── hub.py              entry point — scan, DB update, render
-├── server.py           HTTP server — renders .md, file watcher, rebuild endpoints
-├── db.py               SQLite layer — schema, upsert, lineage, FTS export
-├── metadata.py         metadata extraction — title and body from markdown/html
-├── assets/
-│   └── favicon.svg     tab icon
-├── templates/
-│   └── template.html   HTML/CSS/JS template filled by render()
-├── data/               generated — do not edit directly
-│   ├── hub.db          SQLite database
-│   └── docs-index.html generated hub page
-├── README.md
-└── CLAUDE.md
+```bash
+# Reload after code changes
+launchctl kickstart -k gui/$(id -u)/com.user.hub-server
+launchctl kickstart -k gui/$(id -u)/com.user.hub
 ```
 
-Hidden files:
-- `.scan_root` — active scan root path (written by the "Save & Rebuild" modal)
-- `.hub.log` — debug log (only written when `HUB_DEBUG=1`)
+---
 
-## Features
+## Task structure
 
-### Split-pane preview
-Click any row to open a full-height preview pane (40% width). Every file is
-rendered via the server — full markdown, HTML, or plain text — with the hub's
-theme. The pane scrolls independently.
-
-Press `Enter` or click **Open** to open the file in a new tab. Press `Esc` to close.
-
-### Search
-Implicit AND across repo name, path, title, and body text.
-
-| Query | Finds |
-|-------|-------|
-| `entity extraction` | files containing both words |
-| `fix artifact` | artifacts from fix-* tasks |
-| `repo:ai task` | tasks in ai-chatbot |
-| `repo:co prompts` | prompts in cortex |
-
-### Kind & repo chips
-Sticky filter chips at the top. Multi-select repos. All filters stack as AND.
-
-### Task lineage trace
-Files under `tasks/<slug>/` show a **// trace** panel:
-- **TASK** manifest → lists all runs, artifacts, prompts, docs.
-- **RUN / ARTIFACT / PROMPT** → `↑ task` back-link + siblings.
+Hub understands this layout and builds a lineage graph automatically:
 
 ```
 {repo}/tasks/{slug}/
-    ├── manifest.md        ← TASK
-    ├── runs/YYYY-MM-DD/   ← RUN
+    ├── manifest.md        ← TASK  (links to all below)
+    ├── runs/YYYY-MM-DD/   ← RUN   (↑ back-link to manifest)
     ├── artifacts/         ← ARTIFACT
     └── prompts/           ← PROMPT
 ```
 
-### Keyboard shortcuts
+---
+
+## Search
+
+| Query | Finds |
+|-------|-------|
+| `session tokens` | files whose title or body contains both words |
+| `repo:tasks manifest` | manifests in the tasks repo |
+| `auth artifact` | artifacts from auth-* tasks |
+| `repo:docs architecture` | docs matching "architecture" |
+
+---
+
+## Keyboard shortcuts
 
 | Key | Action |
 |-----|--------|
+| `/` | Focus search |
 | `j` / `↓` | Next file |
 | `k` / `↑` | Previous file |
-| `Enter` | Open file in new tab |
+| `Enter` | Open in new tab |
 | `Esc` | Close preview |
-| `/` | Focus search |
+
+---
 
 ## Changing the scan root
 
-Click the scan-root path in the header → edit the directory → **Save & Rebuild**.
-The server writes `.scan_root`, rebuilds, and reloads the page automatically.
+Click the scan-root path in the header → edit → **Save & Rebuild**. The server writes `.scan_root`, rebuilds, and reloads automatically.
 
 Priority: `HUB_SCAN_ROOT` env var → `.scan_root` sidecar → `~/tifin` default.
+
+---
 
 ## Configuration
 
 | Var | Default | Purpose |
 |-----|---------|---------|
-| `HUB_SCAN_ROOT` | `~/tifin` | Root directory to scan |
-| `HUB_SERVER_PORT` | `8787` | Port for `server.py` |
+| `HUB_SCAN_ROOT` | `~/tifin` | Directory to scan |
+| `HUB_SERVER_PORT` | `8787` | Server port |
 | `HUB_OUTPUT` | `data/docs-index.html` | Output HTML path |
-| `HUB_DB` | `data/hub.db` | SQLite database path |
-| `HUB_FAVICON` | `assets/favicon.svg` | Tab icon |
+| `HUB_DB` | `data/hub.db` | SQLite database |
 | `HUB_DEBUG` | off | `1` enables logging to `.hub.log` |
 
-## launchd agents
+---
 
-Two agents start at login:
+## File structure
 
-| Label | Script | Behaviour |
-|-------|--------|-----------|
-| `com.user.hub` | `hub.py` | Rebuilds index every 120 s |
-| `com.user.hub-server` | `server.py` | HTTP server, KeepAlive |
-
-```bash
-# Reload after plist or script changes
-launchctl kickstart -k gui/$(id -u)/com.user.hub
-launchctl kickstart -k gui/$(id -u)/com.user.hub-server
 ```
-
-## Server endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | Serve `data/docs-index.html` |
-| `/<abs-path>` | GET | Render file (markdown → HTML, others static) |
-| `/<rel-path>` | GET | Same, resolved relative to active scan root |
-| `/_rebuild` | GET | Trigger immediate rebuild |
-| `/_set-root` | POST | Body = new path. Write `.scan_root`, rebuild |
+hub/
+├── hub.py              scan, index, render
+├── server.py           HTTP server · markdown renderer · file watcher
+├── db.py               SQLite — files, lineage, FTS5, task_status
+├── metadata.py         title + body extraction
+├── templates/
+│   └── template.html   single-file HTML/CSS/JS template
+├── assets/
+│   ├── favicon.svg
+│   └── screenshots/
+└── data/               generated — do not edit
+    ├── hub.db
+    └── docs-index.html
+```
