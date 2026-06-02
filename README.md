@@ -1,8 +1,12 @@
-# Hub
-
 ![Hub — Every .md & .html, one page](assets/screenshots/banner.png)
 
+<div align="center">
+
+# Hub
+
 **Every `.md` and `.html` in your projects — one searchable, previewable page.**
+
+</div>
 
 Hub scans a directory tree, indexes every document into SQLite with full-text search and task lineage, and serves a fast local browser at `http://localhost:8787`. No npm. No framework. Pure stdlib Python.
 
