@@ -4,3 +4,5 @@ __pycache__/
 .scan_root
 .hub.log
 .venv/
+*.DS_Store
+
