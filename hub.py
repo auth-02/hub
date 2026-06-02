@@ -178,7 +178,7 @@ def _ago(mtime: float) -> str:
     return "just now"
 
 
-def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}") -> str:
+def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}") -> str:
     total     = sum(len(v) for v in groups.values())
     md_total  = sum(1 for v in groups.values() for f in v if f["ext"] == "md")
     html_total = total - md_total
@@ -196,12 +196,18 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         for f in files:
             badge     = (f["kind"] or f["ext"]).upper()
             badge_cls = f["kind"] or f["ext"]
+            task_attrs = ""
+            if f.get("task_slug"):
+                task_attrs = (
+                    f' data-task-slug="{html.escape(f["task_slug"])}"'
+                    f' data-task-repo="{html.escape(f["task_repo"])}"'
+                )
             items.append(
                 f'<a class="row" href="{html.escape(_href(f["abs"]))}" '
                 f'target="_blank" rel="noopener" '
                 f'data-kind="{badge_cls}" '
                 f'data-search="{html.escape((repo + " " + f["rel"]).lower())}" '
-                f'data-abs="{html.escape(f["abs"])}">'
+                f'data-abs="{html.escape(f["abs"])}"{task_attrs}>'
                 f'<span class="badge {badge_cls}">{badge}</span>'
                 f'<span class="path">{html.escape(f["rel"])}</span>'
                 f'<span class="ago">{_ago(f["mtime"])}</span>'
@@ -236,6 +242,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         repo_chips=repo_chips,
         fts_json=fts_json,
         lineage_json=lineage_json,
+        task_status_json=task_status_json,
         server_origin_json=json.dumps(_SERVER_ORIGIN),
     )
 
@@ -256,10 +263,11 @@ def main() -> None:
     db.prune(conn, live_paths)
     db.build_lineage(conn)
     fts_json, lineage_json = db.export_html_data(conn)
+    task_status_json = db.get_statuses_json(conn)
     conn.close()
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(render(groups, fts_json, lineage_json), encoding="utf-8")
+    OUTPUT.write_text(render(groups, fts_json, lineage_json, task_status_json), encoding="utf-8")
     total = sum(len(v) for v in groups.values())
     log(f"[hub] scanned {ROOT} -> {OUTPUT} ({total} files, {len(groups)} groups)")
 

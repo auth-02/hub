@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import http.server
+import json
 import mimetypes
 import os
 import re
@@ -509,6 +510,29 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
             new_root = self.rfile.read(length).decode("utf-8").strip()
             self._set_root(new_root)
+        elif url_path == "/_task-status":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+                task_slug = body["task_slug"]
+                task_repo = body["task_repo"]
+                status = body["status"]
+                if status not in ("ongoing", "completed", "paused"):
+                    self._send(400, "text/plain", b"invalid status")
+                    return
+                conn = sqlite3.connect(str(_DB_PATH))
+                conn.execute(
+                    """INSERT INTO task_status(task_slug,task_repo,status,updated)
+                       VALUES(?,?,?,?)
+                       ON CONFLICT(task_slug,task_repo) DO UPDATE SET
+                         status=excluded.status,updated=excluded.updated""",
+                    (task_slug, task_repo, status, time.time()),
+                )
+                conn.commit()
+                conn.close()
+                self._send(200, "text/plain", b"ok")
+            except Exception as e:
+                self._send(400, "text/plain", str(e).encode())
         else:
             self._send(404, "text/plain", b"Not found")
 

@@ -114,6 +114,11 @@ footer{{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-f
 .pv-body th{{background:var(--deep);}}
 .pv-body hr{{border:none;border-top:1px solid var(--line);margin:12px 0;}}
 .pv-hint{{font-family:var(--mono);font-size:9px;color:var(--mute);padding:8px 14px;border-top:1px solid var(--line);letter-spacing:.06em;}}
+.status-badge{{font-family:var(--mono);font-size:9px;letter-spacing:.06em;padding:2px 7px;border:1px solid;flex-shrink:0;cursor:pointer;user-select:none;}}
+.status-badge:hover{{opacity:.75;}}
+.s-ongoing{{color:#2F6B4F;border-color:#2F6B4F;background:rgba(47,107,79,.08);}}
+.s-completed{{color:var(--mute);border-color:var(--line);background:var(--alt);}}
+.s-paused{{color:#7A5A14;border-color:#C99A20;background:rgba(201,154,32,.1);}}
 </style></head><body><div class="wrap">
 <header>
   <div class="kicker"><span>// HUB DIRECTORY · <a href="#" id="setroot" title="click to change scan root">{scan_root}</a></span><a href="#" id="rebuild" title="rebuild hub index">↻ rebuild hub</a></div>
@@ -167,7 +172,9 @@ footer{{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-f
 // ── Data ──────────────────────────────────────────────────────────────────
 const FTS_DATA={fts_json};
 const LINEAGE_DATA={lineage_json};
+const TASK_STATUS_DATA={task_status_json};
 const ftsMap=new Map(FTS_DATA.map(d=>[d.a,d]));
+const STATUS_CYCLE=['ongoing','completed','paused'];
 
 // ── DOM refs ──────────────────────────────────────────────────────────────
 const q=document.getElementById('q');
@@ -186,6 +193,29 @@ let selIdx=-1,selRows=[];
 rows.forEach(r=>{{
   const fts=ftsMap.get(r.dataset.abs);
   if(fts) r._fts=fts;
+}});
+
+// ── Task status badges ────────────────────────────────────────────────────
+rows.forEach(r=>{{
+  if(r.dataset.kind!=='task'||!r.dataset.taskSlug) return;
+  const key=r.dataset.taskRepo+':'+r.dataset.taskSlug;
+  const status=TASK_STATUS_DATA[key]||'ongoing';
+  const badge=document.createElement('span');
+  badge.className='status-badge s-'+status;
+  badge.textContent=status;
+  badge.dataset.s=status;
+  r.querySelector('.ago').insertAdjacentElement('beforebegin',badge);
+  badge.addEventListener('click',function(e){{
+    e.preventDefault();e.stopPropagation();
+    const next=STATUS_CYCLE[(STATUS_CYCLE.indexOf(this.dataset.s)+1)%STATUS_CYCLE.length];
+    this.dataset.s=next;
+    this.className='status-badge s-'+next;
+    this.textContent=next;
+    TASK_STATUS_DATA[key]=next;
+    fetch('/_task-status',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+      body:JSON.stringify({{task_slug:r.dataset.taskSlug,task_repo:r.dataset.taskRepo,status:next}})
+    }}).catch(()=>flash('status update failed'));
+  }});
 }});
 
 // ── Filter ────────────────────────────────────────────────────────────────

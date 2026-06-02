@@ -24,6 +24,14 @@ CREATE TABLE IF NOT EXISTS files (
     updated   REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS task_status (
+    task_slug TEXT NOT NULL,
+    task_repo TEXT NOT NULL,
+    status    TEXT NOT NULL DEFAULT 'ongoing',
+    updated   REAL NOT NULL,
+    PRIMARY KEY (task_slug, task_repo)
+);
+
 CREATE TABLE IF NOT EXISTS lineage (
     id       INTEGER PRIMARY KEY,
     src_id   INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
@@ -119,6 +127,27 @@ def build_lineage(conn: sqlite3.Connection) -> None:
         "INSERT OR IGNORE INTO lineage(src_id,dst_id,rel_type) VALUES(?,?,?)", edges
     )
     conn.commit()
+
+
+def set_status(conn: sqlite3.Connection, task_slug: str, task_repo: str, status: str) -> None:
+    conn.execute(
+        """INSERT INTO task_status(task_slug,task_repo,status,updated)
+           VALUES(?,?,?,?)
+           ON CONFLICT(task_slug,task_repo) DO UPDATE SET
+             status=excluded.status,updated=excluded.updated""",
+        (task_slug, task_repo, status, time.time()),
+    )
+    conn.commit()
+
+
+def get_statuses_json(conn: sqlite3.Connection) -> str:
+    rows = conn.execute(
+        "SELECT task_slug, task_repo, status FROM task_status"
+    ).fetchall()
+    return json.dumps(
+        {f"{r[1]}:{r[0]}": r[2] for r in rows},
+        separators=(",", ":"),
+    )
 
 
 def export_html_data(conn: sqlite3.Connection) -> tuple:
