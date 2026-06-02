@@ -197,10 +197,16 @@ def prune_activity(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
-def get_activity_json(conn: sqlite3.Connection) -> str:
-    rows = conn.execute(
-        "SELECT abs,kind,task_slug,task_repo,rel,event,ts FROM activity_log ORDER BY ts DESC LIMIT 50"
-    ).fetchall()
+def get_activity_json(conn: sqlite3.Connection, scan_root: str = "") -> str:
+    if scan_root:
+        rows = conn.execute(
+            "SELECT abs,kind,task_slug,task_repo,rel,event,ts FROM activity_log WHERE abs LIKE ? ORDER BY ts DESC LIMIT 50",
+            (scan_root.rstrip("/") + "/%",),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT abs,kind,task_slug,task_repo,rel,event,ts FROM activity_log ORDER BY ts DESC LIMIT 50"
+        ).fetchall()
     return json.dumps(
         [{"a":r[0],"k":r[1] or "","sl":r[2] or "","rp":r[3] or "","p":r[4],"ev":r[5],"ts":r[6]} for r in rows],
         separators=(",",":"),

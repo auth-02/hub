@@ -267,7 +267,7 @@ def main() -> None:
     db.prune_activity(conn)
     fts_json, lineage_json = db.export_html_data(conn)
     task_status_json = db.get_statuses_json(conn)
-    activity_json = db.get_activity_json(conn)
+    activity_json = db.get_activity_json(conn, str(ROOT))
     conn.close()
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
