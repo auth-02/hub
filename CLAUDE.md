@@ -103,73 +103,20 @@ After any template change: `HUB_SERVER_PORT=8787 python3 hub.py` to catch format
 
 ## launchd agents
 
-Two plists in `~/Library/LaunchAgents/` keep hub running at login.
+Two agents keep hub running at login. Set them up with the provided script:
 
-**`com.user.hub.plist`** — rebuilds index every 120 s:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>com.user.hub</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/Users/user/.local/bin/uv</string>
-        <string>run</string>
-        <string>--project</string>
-        <string>/Users/user/agents/hub</string>
-        <string>hub.py</string>
-    </array>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>HUB_SCAN_ROOT</key><string>/Users/user/tifin</string>
-        <key>HUB_OUTPUT</key><string>/Users/user/agents/hub/build/docs-index.html</string>
-        <key>HUB_SERVER_PORT</key><string>8787</string>
-    </dict>
-    <key>WorkingDirectory</key><string>/Users/user/agents/hub</string>
-    <key>RunAtLoad</key><true/>
-    <key>StartInterval</key><integer>120</integer>
-</dict>
-</plist>
-```
-
-**`com.user.hub-server.plist`** — HTTP server, KeepAlive:
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>com.user.hub-server</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/Users/user/.local/bin/uv</string>
-        <string>run</string>
-        <string>--project</string>
-        <string>/Users/user/agents/hub</string>
-        <string>server.py</string>
-        <string>--port</string>
-        <string>8787</string>
-    </array>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>HUB_SCAN_ROOT</key><string>/Users/user/tifin</string>
-    </dict>
-    <key>WorkingDirectory</key><string>/Users/user/agents/hub</string>
-    <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><true/>
-</dict>
-</plist>
-```
-
-Load for the first time:
 ```bash
-launchctl load ~/Library/LaunchAgents/com.user.hub.plist
-launchctl load ~/Library/LaunchAgents/com.user.hub-server.plist
+bash scripts/setup-launchd.sh
+
+# Custom scan root:
+HUB_SCAN_ROOT=~/work bash scripts/setup-launchd.sh
 ```
 
-Reload after plist or code changes:
+The script writes both plists to `~/Library/LaunchAgents/` and loads them. Re-run it any time you change `HUB_SCAN_ROOT` or move the hub directory.
+
+Reload after code changes (no plist edit needed):
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.user.hub.plist && launchctl load ~/Library/LaunchAgents/com.user.hub.plist
+launchctl kickstart -k gui/$(id -u)/com.user.hub
 launchctl kickstart -k gui/$(id -u)/com.user.hub-server
 ```
 
