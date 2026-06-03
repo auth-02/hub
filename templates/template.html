@@ -505,8 +505,9 @@ renderFeed();
 (function(){{
   const drawer=document.getElementById('feed-drawer');
   const tab=document.getElementById('feed-tab');
-  function openFeed(){{window.closeTl&&window.closeTl();drawer.classList.add('open');tab.classList.add('open');tab.textContent='‹';}}
-  function closeFeed(){{drawer.classList.remove('open');tab.classList.remove('open');tab.textContent='// feed';}}
+  const otherTab=()=>document.getElementById('tl-tab');
+  function openFeed(){{window.closeTl&&window.closeTl();drawer.classList.add('open');tab.classList.add('open');tab.textContent='‹';otherTab().style.display='none';}}
+  function closeFeed(){{drawer.classList.remove('open');tab.classList.remove('open');tab.textContent='// feed';otherTab().style.display='';}}
   tab.addEventListener('click',()=>drawer.classList.contains('open')?closeFeed():openFeed());
   document.getElementById('feed-close').addEventListener('click',closeFeed);
   document.addEventListener('keydown',e=>{{
@@ -520,8 +521,9 @@ renderFeed();
 (function(){{
   const drawer=document.getElementById('tl-drawer');
   const tab=document.getElementById('tl-tab');
-  function openTl(){{window._closeFeed&&window._closeFeed();drawer.classList.add('open');tab.classList.add('open');tab.textContent='‹';}}
-  function closeTl(){{drawer.classList.remove('open');tab.classList.remove('open');tab.textContent='// timeline';}}
+  const otherTab=()=>document.getElementById('feed-tab');
+  function openTl(){{window._closeFeed&&window._closeFeed();drawer.classList.add('open');tab.classList.add('open');tab.textContent='‹';otherTab().style.display='none';}}
+  function closeTl(){{drawer.classList.remove('open');tab.classList.remove('open');tab.textContent='// timeline';otherTab().style.display='';}}
   window.closeTl=closeTl;
   tab.addEventListener('click',()=>drawer.classList.contains('open')?closeTl():openTl());
   document.getElementById('tl-close').addEventListener('click',closeTl);
