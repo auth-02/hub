@@ -26,9 +26,11 @@ hub/
 │   └── favicon.svg     tab icon
 ├── templates/
 │   └── template.html   HTML/CSS/JS template (str.format()-based)
-├── data/               generated — never edit directly
-│   ├── hub.db          SQLite: files, lineage, fts tables
+├── build/               generated — never edit directly
 │   └── docs-index.html generated hub page, served at /
+~/.hub-state/           persistent state — never delete
+│   ├── hub.db          SQLite: files, lineage, fts, activity_log, task_status
+│   └── task-status.json sidecar backup of task statuses
 ├── .scan_root          active scan root (written by /_set-root)
 └── .hub.log            debug log (only when HUB_DEBUG=1)
 ```
@@ -39,7 +41,7 @@ hub/
 server.py
   _HubServer (ThreadingMixIn + TCPServer, dual-stack IPv4+IPv6)
   _watcher() thread        polls scan root every 3 s, triggers hub.py on change
-  HubHandler.do_GET()      / → data/docs-index.html
+  HubHandler.do_GET()      / → build/docs-index.html
                            /<abs-path> → render file
                            /<rel-path> → resolve vs active scan root, render
                            /_rebuild   → run hub.py subprocess
@@ -53,20 +55,20 @@ hub.py:main()
   render(groups, fts_json, lineage_json)
     reads templates/template.html
     str.format() with all placeholders
-    writes data/docs-index.html
+    writes build/docs-index.html
 ```
 
 ## Server endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | Serve `data/docs-index.html` |
+| `/` | GET | Serve `build/docs-index.html` |
 | `/<abs-path>` | GET | Render file (markdown → HTML, others static) |
 | `/<rel-path>` | GET | Same, resolved relative to active scan root |
 | `/_rebuild` | GET | Rebuild index, return `ok` |
 | `/_set-root` | POST | Body = new path. Write `.scan_root`, rebuild, return `ok` |
 
-## SQLite schema (`data/hub.db`)
+## SQLite schema (`build/hub.db`)
 
 ```sql
 files     -- abs, repo, rel, ext, kind, mtime, title, body (2000-char), task_slug, task_repo
@@ -94,19 +96,25 @@ After any template change: `HUB_SERVER_PORT=8787 python3 hub.py` to catch format
 |-----|---------|---------|
 | `HUB_SCAN_ROOT` | `~/tifin` | Root directory to scan |
 | `HUB_SERVER_PORT` | *(unset)* | When set, links use `http://localhost:PORT/` |
-| `HUB_OUTPUT` | `data/docs-index.html` | Output HTML path |
-| `HUB_DB` | `data/hub.db` | SQLite database path |
+| `HUB_OUTPUT` | `build/docs-index.html` | Output HTML path |
+| `HUB_DB` | `build/hub.db` | SQLite database path |
 | `HUB_FAVICON` | `assets/favicon.svg` | Tab icon |
 | `HUB_DEBUG` | off | `1` enables logging to `.hub.log` |
 
 ## launchd agents
 
-| Plist | Script | Behaviour |
-|-------|--------|-----------|
-| `com.user.hub.plist` | `hub.py` | Rebuilds every 120 s |
-| `com.user.hub-server.plist` | `server.py` | HTTP server, KeepAlive |
+Two agents keep hub running at login. Set them up with the provided script:
 
-Both in `~/Library/LaunchAgents/`. Reload:
+```bash
+bash scripts/setup-launchd.sh
+
+# Custom scan root:
+HUB_SCAN_ROOT=~/work bash scripts/setup-launchd.sh
+```
+
+The script writes both plists to `~/Library/LaunchAgents/` and loads them. Re-run it any time you change `HUB_SCAN_ROOT` or move the hub directory.
+
+Reload after code changes (no plist edit needed):
 ```bash
 launchctl kickstart -k gui/$(id -u)/com.user.hub
 launchctl kickstart -k gui/$(id -u)/com.user.hub-server
@@ -124,7 +132,7 @@ Priority: `HUB_SCAN_ROOT` env > `.scan_root` sidecar > `~/tifin` default.
 
 **Re-index from scratch:**
 ```bash
-rm data/hub.db && HUB_SERVER_PORT=8787 python3 hub.py
+rm build/hub.db && HUB_SERVER_PORT=8787 python3 hub.py
 ```
 
 **Add a new badge/kind:**
@@ -166,10 +174,10 @@ git checkout main   # switch back when done
 ```bash
 mkdir -p data && HUB_SERVER_PORT=8787 python3 hub.py
 ```
-The orphan branch wipes the working tree; `data/` is gitignored and gets deleted.
+The orphan branch wipes the working tree; `build/` is gitignored and gets deleted.
 
 ## What not to do
 
-- Don't edit files in `data/` — regenerated on every rebuild.
+- Don't edit files in `build/` — regenerated on every rebuild.
 - Don't add runtime dependencies — intentionally stdlib-only.
 - Don't store secrets in the scan root — everything is indexed and embedded.

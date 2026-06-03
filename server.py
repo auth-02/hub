@@ -30,7 +30,7 @@ from urllib.parse import quote, unquote
 # ── Scan root resolution (mirrors hub.py) ──────────────────────────────────
 _HERE = Path(__file__).resolve().parent
 _SIDECAR = Path.home() / "agents" / "hub" / ".scan_root"
-_DB_PATH = _HERE / "data" / "hub.db"
+_DB_PATH = Path.home() / ".hub-state" / "hub.db"
 
 
 def _get_lineage(abs_path: str) -> list:
@@ -462,7 +462,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
 
         # Root → hub index
         if url_path in ("/", ""):
-            docs = _HERE / "data" / "docs-index.html"
+            docs = _HERE / "build" / "docs-index.html"
             if docs.exists():
                 self._send(200, "text/html; charset=utf-8", docs.read_bytes())
             else:
@@ -526,15 +526,11 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 if status not in ("ongoing", "completed", "paused"):
                     self._send(400, "text/plain", b"invalid status")
                     return
+                import sys as _sys
+                _sys.path.insert(0, str(_HERE))
+                import db as _db
                 conn = sqlite3.connect(str(_DB_PATH))
-                conn.execute(
-                    """INSERT INTO task_status(task_slug,task_repo,status,updated)
-                       VALUES(?,?,?,?)
-                       ON CONFLICT(task_slug,task_repo) DO UPDATE SET
-                         status=excluded.status,updated=excluded.updated""",
-                    (task_slug, task_repo, status, time.time()),
-                )
-                conn.commit()
+                _db.set_status(conn, task_slug, task_repo, status)
                 conn.close()
                 self._send(200, "text/plain", b"ok")
             except Exception as e:

@@ -5,7 +5,7 @@ Stdlib-only. Re-run any time; a launchd agent does this every 120 s.
 
 Configuration (all optional, via environment variables):
     HUB_SCAN_ROOT   directory to scan          (default: ~/tifin)
-    HUB_OUTPUT      output html file           (default: data/docs-index.html)
+    HUB_OUTPUT      output html file           (default: build/docs-index.html)
     HUB_SERVER_PORT local server port          (default: unset — uses file:// links)
     HUB_DEBUG       "1"/"true" enables logging  (default: off)
     HUB_LOG         log file path (debug only)  (default: .hub.log)
@@ -53,11 +53,11 @@ def _resolve_scan_root() -> Path:
 
 # ── Configurable paths ──────────────────────────────────────────────────────
 ROOT   = _resolve_scan_root()
-OUTPUT = _env_path("HUB_OUTPUT", _HERE / "data" / "docs-index.html")
+OUTPUT = _env_path("HUB_OUTPUT", _HERE / "build" / "docs-index.html")
 DEBUG  = os.environ.get("HUB_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
 LOG    = _env_path("HUB_LOG",    _HERE / ".hub.log")
 FAVICON = _env_path("HUB_FAVICON", _HERE / "assets" / "favicon.svg")
-DB     = _env_path("HUB_DB",    _HERE / "data" / "hub.db")
+DB     = _env_path("HUB_DB",    Path.home() / ".hub-state" / "hub.db")
 
 _SERVER_PORT   = os.environ.get("HUB_SERVER_PORT", "").strip()
 _SERVER_ORIGIN = f"http://localhost:{_SERVER_PORT}" if _SERVER_PORT else ""

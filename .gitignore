@@ -1,8 +1,7 @@
-data/
+build/
 __pycache__/
 *.pyc
 .scan_root
 .hub.log
 .venv/
 *.DS_Store
-
