@@ -15,6 +15,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import subprocess
 import sys
 import time
 from datetime import datetime
@@ -178,7 +179,39 @@ def _ago(mtime: float) -> str:
     return "just now"
 
 
-def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]") -> str:
+def _collect_git(scan_root: Path, since_days: int = 7) -> list[dict]:
+    """Return git commits from all repos under scan_root authored in the last N days."""
+    commits: list[dict] = []
+    try:
+        repos = [p for p in scan_root.iterdir() if p.is_dir() and (p / ".git").exists()]
+    except OSError:
+        return commits
+    for repo in repos:
+        try:
+            author = subprocess.run(
+                ["git", "-C", str(repo), "config", "user.name"],
+                capture_output=True, text=True, timeout=5,
+            ).stdout.strip()
+            if not author:
+                continue
+            out = subprocess.run(
+                ["git", "-C", str(repo), "log", "--all",
+                 f"--since={since_days} days ago",
+                 f"--author={author}",
+                 "--format=%at\t%s"],
+                capture_output=True, text=True, timeout=10,
+            ).stdout.strip()
+            for line in out.splitlines():
+                if "\t" not in line:
+                    continue
+                ts_str, subject = line.split("\t", 1)
+                commits.append({"rp": repo.name, "msg": subject.strip(), "ts": int(ts_str)})
+        except Exception:
+            continue
+    return commits
+
+
+def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]", timeline_json: str = "{}") -> str:
     total     = sum(len(v) for v in groups.values())
     md_total  = sum(1 for v in groups.values() for f in v if f["ext"] == "md")
     html_total = total - md_total
@@ -244,6 +277,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         lineage_json=lineage_json,
         task_status_json=task_status_json,
         activity_json=activity_json,
+        timeline_json=timeline_json,
         server_origin_json=json.dumps(_SERVER_ORIGIN),
     )
 
@@ -268,10 +302,17 @@ def main() -> None:
     fts_json, lineage_json = db.export_html_data(conn)
     task_status_json = db.get_statuses_json(conn)
     activity_json = db.get_activity_json(conn, str(ROOT))
+    timeline_tasks = db.get_timeline_data(conn, str(ROOT))
     conn.close()
 
+    git_commits = _collect_git(ROOT)
+    timeline_json = json.dumps(
+        {"tasks": timeline_tasks, "commits": git_commits},
+        separators=(",", ":"),
+    )
+
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(render(groups, fts_json, lineage_json, task_status_json, activity_json), encoding="utf-8")
+    OUTPUT.write_text(render(groups, fts_json, lineage_json, task_status_json, activity_json, timeline_json), encoding="utf-8")
     total = sum(len(v) for v in groups.values())
     log(f"[hub] scanned {ROOT} -> {OUTPUT} ({total} files, {len(groups)} groups)")
 

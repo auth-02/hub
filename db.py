@@ -213,6 +213,48 @@ def get_activity_json(conn: sqlite3.Connection, scan_root: str = "") -> str:
     )
 
 
+def get_timeline_data(conn: sqlite3.Connection, scan_root: str = "", days: int = 7) -> list:
+    """Return per-task activity summaries for the last N days, with task status."""
+    cutoff = time.time() - days * 86400
+    params: list = [cutoff]
+    root_filter = ""
+    if scan_root:
+        root_filter = "AND al.abs LIKE ?"
+        params.append(scan_root.rstrip("/") + "/%")
+
+    rows = conn.execute(
+        f"""SELECT al.task_slug, al.task_repo, al.kind, al.ts,
+                   COALESCE(ts.status, 'ongoing') AS status
+            FROM activity_log al
+            LEFT JOIN task_status ts
+              ON ts.task_slug = al.task_slug AND ts.task_repo = al.task_repo
+            WHERE al.ts >= ? {root_filter}
+              AND al.task_slug IS NOT NULL
+            ORDER BY al.ts DESC""",
+        params,
+    ).fetchall()
+
+    tasks: dict = {}
+    for task_slug, task_repo, kind, ts, status in rows:
+        key = f"{task_repo}:{task_slug}"
+        if key not in tasks:
+            tasks[key] = {
+                "sl": task_slug, "rp": task_repo, "status": status,
+                "manifest": 0, "runs": 0, "artifacts": 0, "prompts": 0, "docs": 0,
+                "ts": ts,
+            }
+        t = tasks[key]
+        if ts > t["ts"]:
+            t["ts"] = ts
+        if kind == "task":      t["manifest"] += 1
+        elif kind == "run":     t["runs"] += 1
+        elif kind == "artifact":t["artifacts"] += 1
+        elif kind == "prompt":  t["prompts"] += 1
+        elif kind == "doc":     t["docs"] += 1
+
+    return sorted(tasks.values(), key=lambda x: x["ts"], reverse=True)
+
+
 def export_html_data(conn: sqlite3.Connection) -> tuple:
     """Return (fts_json, lineage_json) strings to embed in the hub HTML."""
     files = conn.execute(
