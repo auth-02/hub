@@ -144,6 +144,18 @@ def _task_slug(path: Path) -> str | None:
     return None
 
 
+def _task_repo(path: Path, repo_root: Path) -> str:
+    """Return the directory that owns the tasks/ folder, regardless of scan root depth.
+
+    ~/tifin/cortex/tasks/slug/...  →  cortex   (scan root ~/tifin OR ~/tifin/cortex)
+    """
+    parts = path.parts
+    for i, part in enumerate(parts):
+        if part == "tasks" and i > 0:
+            return parts[i - 1]
+    return repo_root.name
+
+
 def _meta(path: Path, repo_root: Path) -> dict:
     try:
         mtime = path.stat().st_mtime
@@ -157,7 +169,7 @@ def _meta(path: Path, repo_root: Path) -> dict:
         "ext":       path.suffix.lower().lstrip("."),
         "kind":      _classify(path, rel),
         "task_slug": _task_slug(path),
-        "task_repo": repo_root.name,
+        "task_repo": _task_repo(path, repo_root),
     }
 
 
