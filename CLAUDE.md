@@ -146,8 +146,11 @@ Update `metadata.extract_body()` if the format needs special stripping.
 - Bug fixes → `fix/<slug>` branch → PR with proof screenshot.
 - Always use `GH_TOKEN` from `.git/credentials` when running `gh` CLI.
 
-**Proof screenshots for PRs — never commit to code branches.**
-Use the orphan `screenshots` branch instead:
+**Screenshot convention:**
+- `assets/screenshots/` — feature screenshots used in README (committed to code branch)
+- `screenshots` orphan branch — PR proof images only, never merged to main
+
+**Proof screenshots for PRs — use the `screenshots` branch, not `assets/screenshots/`.**
 ```bash
 git checkout screenshots
 cp /tmp/proof.png .
