@@ -455,7 +455,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
 
         # Root → hub index
         if url_path in ("/", ""):
-            docs = _HERE / "data" / "docs-index.html"
+            docs = _HERE / "build" / "docs-index.html"
             if docs.exists():
                 self._send(200, "text/html; charset=utf-8", docs.read_bytes())
             else:

@@ -132,7 +132,7 @@ Priority: `HUB_SCAN_ROOT` env var → `.scan_root` sidecar → `~/tifin` default
 |-----|---------|---------|
 | `HUB_SCAN_ROOT` | `~/tifin` | Directory to scan |
 | `HUB_SERVER_PORT` | `8787` | Server port |
-| `HUB_OUTPUT` | `data/docs-index.html` | Output HTML path |
+| `HUB_OUTPUT` | `build/docs-index.html` | Output HTML path |
 | `HUB_DB` | `~/.hub-state/hub.db` | SQLite database |
 | `HUB_DEBUG` | off | `1` enables logging to `.hub.log` |
 
@@ -151,7 +151,7 @@ hub/
 ├── assets/
 │   ├── favicon.svg
 │   └── screenshots/
-└── data/               generated — safe to wipe
+└── build/              generated — safe to wipe
     └── docs-index.html
 
 ~/.hub-state/           persistent state — do not delete
