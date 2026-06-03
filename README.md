@@ -30,7 +30,7 @@ Press `Ctrl+F` or click the `// feed` tab on the right edge. Shows the last 50 f
 ### Hub Timeline — daily work summary
 Press `Ctrl+T` or click the `// timeline` tab. Answers *What have I been working on? / What did I work on yesterday? / What did I work on this week?* — grouped by task, with git commits, runs logged, artifacts generated, and task status inline.
 
-![Hub timeline drawer](https://raw.githubusercontent.com/auth-02/hub/screenshots/proof-timeline.png)
+![Hub timeline drawer](assets/screenshots/timeline.png)
 
 ### Markdown document page
 Every file opened in its own tab gets a clean reading view with a `// trace` bar below the heading.
