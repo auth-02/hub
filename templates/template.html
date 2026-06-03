@@ -100,6 +100,23 @@ footer{{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-f
 .feed-action{{font-family:var(--mono);font-size:10px;color:var(--mute);margin-bottom:1px;}}
 .feed-ctx{{font-family:var(--mono);font-size:9px;color:var(--mute);opacity:.7;}}
 .feed-empty{{font-family:var(--mono);font-size:11px;color:var(--mute);padding:8px 0;}}
+#hub-timeline{{flex:1;overflow-y:auto;min-height:0;}}
+.tl-label{{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);padding:12px 14px 8px;}}
+.tl-period{{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);padding:8px 14px 4px;}}
+.tl-task{{padding:8px 14px;border-bottom:1px solid var(--line);}}
+.tl-task:last-child{{border-bottom:none;}}
+.tl-head{{display:flex;align-items:baseline;gap:6px;margin-bottom:4px;flex-wrap:wrap;}}
+.tl-name{{font-family:var(--disp);font-style:italic;font-size:14px;color:var(--ink);}}
+.tl-repo{{font-family:var(--mono);font-size:9px;color:var(--mute);}}
+.tl-status{{font-family:var(--mono);font-size:9px;margin-left:auto;flex-shrink:0;}}
+.tl-status.ongoing{{color:#2F6B4F;}}
+.tl-status.completed{{color:var(--mute);}}
+.tl-status.paused{{color:#7A5A14;}}
+.tl-bullets{{list-style:none;padding:0;margin:0 0 3px;}}
+.tl-bullet{{font-family:var(--mono);font-size:10px;color:var(--mute);padding:1px 0;}}
+.tl-bullet::before{{content:"·  ";color:var(--accent2);}}
+.tl-commit{{font-family:var(--mono);font-size:9px;color:var(--mute);padding:1px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}}
+.tl-commit::before{{content:"↑  ";color:var(--accent);}}
 .pv-header{{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-bottom:1px solid var(--line);gap:8px;}}
 .pv-title{{font-family:var(--mono);font-size:10px;color:var(--mute);flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}}
 .pv-actions{{display:flex;gap:6px;flex-shrink:0;}}
@@ -181,6 +198,14 @@ footer{{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-f
   </div>
   <div id="hub-feed"></div>
 </div>
+<button class="feed-tab" id="tl-tab" style="top:270px">// timeline</button>
+<div class="feed-drawer" id="tl-drawer">
+  <div class="feed-drawer-header">
+    <span class="feed-drawer-title">// hub timeline</span>
+    <button class="feed-drawer-close" id="tl-close">✕</button>
+  </div>
+  <div id="hub-timeline"></div>
+</div>
 <div id="toast" class="toast"></div>
 <div id="modal" class="modal" role="dialog" aria-modal="true">
   <div class="modal-card">
@@ -201,6 +226,7 @@ const FTS_DATA={fts_json};
 const LINEAGE_DATA={lineage_json};
 const TASK_STATUS_DATA={task_status_json};
 const ACTIVITY_DATA={activity_json};
+const TIMELINE_DATA={timeline_json};
 const ftsMap=new Map(FTS_DATA.map(d=>[d.a,d]));
 const STATUS_CYCLE=['ongoing','completed','paused'];
 
@@ -412,17 +438,96 @@ const SERVER_ORIGIN={server_origin_json};
 function fileHref(abs){{return SERVER_ORIGIN?SERVER_ORIGIN+encodeURI(abs):'file://'+encodeURI(abs);}}
 renderFeed();
 
+// ── Workspace Timeline ────────────────────────────────────────────────────
+(function(){{
+  const el=document.getElementById('hub-timeline');
+  const tasks=TIMELINE_DATA.tasks||[];
+  const commits=TIMELINE_DATA.commits||[];
+  if(!tasks.length&&!commits.length){{el.innerHTML='';return;}}
+
+  const now=Date.now()/1000;
+  const todayStart=(()=>{{const d=new Date();d.setHours(0,0,0,0);return d.getTime()/1000;}})();
+  const yesterdayStart=todayStart-86400;
+  const weekStart=todayStart-6*86400;
+
+  function bucket(ts){{
+    if(ts>=todayStart) return 'today';
+    if(ts>=yesterdayStart) return 'yesterday';
+    if(ts>=weekStart) return 'week';
+    return null;
+  }}
+
+  // group tasks by bucket
+  const grouped={{today:[],yesterday:[],week:[]}};
+  tasks.forEach(t=>{{const b=bucket(t.ts);if(b)grouped[b].push(t);}});
+
+  // index commits by bucket+repo
+  const cIdx={{}};
+  commits.forEach(c=>{{
+    const b=bucket(c.ts);if(!b)return;
+    const k=b+':'+c.rp;
+    if(!cIdx[k])cIdx[k]=[];
+    if(cIdx[k].length<3)cIdx[k].push(c.msg);
+  }});
+
+  function renderTask(t,b){{
+    const name=t.sl.replace(/[-_]/g,' ').replace(/^./,c=>c.toUpperCase());
+    const bullets=[];
+    if(t.manifest)bullets.push(t.manifest>1?`manifest revised ×${{t.manifest}}`:'manifest revised');
+    if(t.runs)bullets.push(t.runs===1?'1 run logged':`${{t.runs}} runs logged`);
+    if(t.artifacts)bullets.push(t.artifacts===1?'1 artifact generated':`${{t.artifacts}} artifacts generated`);
+    if(t.prompts)bullets.push(t.prompts===1?'prompt updated':`${{t.prompts}} prompts updated`);
+    if(t.docs)bullets.push('doc updated');
+    const repoCommits=cIdx[b+':'+t.rp]||[];
+    const statusCls=t.status==='ongoing'?'ongoing':t.status==='completed'?'completed':'paused';
+    return `<div class="tl-task">
+      <div class="tl-head">
+        <span class="tl-name">${{esc(name)}}</span>
+        <span class="tl-repo">${{esc(t.rp)}}</span>
+        <span class="tl-status ${{statusCls}}">${{esc(t.status)}}</span>
+      </div>
+      ${{bullets.length?`<ul class="tl-bullets">${{bullets.map(b=>`<li class="tl-bullet">${{esc(b)}}</li>`).join('')}}</ul>`:''}}
+      ${{repoCommits.map(m=>`<div class="tl-commit">${{esc(m)}}</div>`).join('')}}
+    </div>`;
+  }}
+
+  const LABELS={{today:'What have I been working on?',yesterday:'What did I work on yesterday?',week:'What did I work on this week?'}};
+  let h='';
+  ['today','yesterday','week'].forEach(b=>{{
+    if(!grouped[b].length)return;
+    h+=`<div class="tl-period">${{LABELS[b]}}</div>`;
+    h+=grouped[b].map(t=>renderTask(t,b)).join('');
+  }});
+  el.innerHTML=h;
+}})();
+
 // ── Feed drawer ───────────────────────────────────────────────────────────
 (function(){{
   const drawer=document.getElementById('feed-drawer');
   const tab=document.getElementById('feed-tab');
-  function openFeed(){{drawer.classList.add('open');tab.classList.add('open');tab.textContent='‹';}}
+  function openFeed(){{window.closeTl&&window.closeTl();drawer.classList.add('open');tab.classList.add('open');tab.textContent='‹';}}
   function closeFeed(){{drawer.classList.remove('open');tab.classList.remove('open');tab.textContent='// feed';}}
   tab.addEventListener('click',()=>drawer.classList.contains('open')?closeFeed():openFeed());
   document.getElementById('feed-close').addEventListener('click',closeFeed);
   document.addEventListener('keydown',e=>{{
     if((e.ctrlKey||e.metaKey)&&e.key==='f'){{e.preventDefault();drawer.classList.contains('open')?closeFeed():openFeed();}}
     else if(e.key==='Escape'&&drawer.classList.contains('open'))closeFeed();
+  }});
+  window._closeFeed=closeFeed;
+}})();
+
+// ── Timeline drawer ───────────────────────────────────────────────────────
+(function(){{
+  const drawer=document.getElementById('tl-drawer');
+  const tab=document.getElementById('tl-tab');
+  function openTl(){{window._closeFeed&&window._closeFeed();drawer.classList.add('open');tab.classList.add('open');tab.textContent='‹';}}
+  function closeTl(){{drawer.classList.remove('open');tab.classList.remove('open');tab.textContent='// timeline';}}
+  window.closeTl=closeTl;
+  tab.addEventListener('click',()=>drawer.classList.contains('open')?closeTl():openTl());
+  document.getElementById('tl-close').addEventListener('click',closeTl);
+  document.addEventListener('keydown',e=>{{
+    if((e.ctrlKey||e.metaKey)&&e.key==='t'){{e.preventDefault();drawer.classList.contains('open')?closeTl():openTl();}}
+    else if(e.key==='Escape'&&drawer.classList.contains('open'))closeTl();
   }});
 }})();
 const REBUILD_CMD=`/usr/bin/python3 ${{HUBPY}}`;

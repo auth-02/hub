@@ -27,6 +27,11 @@ Press `Ctrl+F` or click the `// feed` tab on the right edge. Shows the last 50 f
 
 ![Hub feed drawer](assets/screenshots/feed-drawer.png)
 
+### Hub Timeline — daily work summary
+Press `Ctrl+T` or click the `// timeline` tab. Answers *What have I been working on? / What did I work on yesterday? / What did I work on this week?* — grouped by task, with git commits, runs logged, artifacts generated, and task status inline.
+
+![Hub timeline drawer](assets/screenshots/timeline.png)
+
 ### Markdown document page
 Every file opened in its own tab gets a clean reading view with a `// trace` bar below the heading.
 
@@ -46,6 +51,7 @@ HTML artifacts are served with the hub's own CSS injected and the `// trace` bar
 - **Task status badges** — every task manifest shows a clickable status pill. Cycles `ongoing → completed → paused`, persisted to SQLite without a rebuild.
 - **Split-pane preview** — click any row for a live rendered preview with lineage trace. No page navigation needed.
 - **Hub Feed** — floating drawer (`Ctrl+F`) showing recent file activity: what changed, which task, how long ago. Persisted across rebuilds, backfilled on first run.
+- **Hub Timeline** — separate drawer (`Ctrl+T`) with a synthesised daily summary grouped by *today / yesterday / this week*. Per task: manifest changes, runs, artifacts, git commits, and status. Pulls from `activity_log` + `git log --all` across all repos.
 - **Backlinked doc pages** — open any file in its own tab and the `// trace` bar appears below the heading, linking to all related files. Works for `.md` and `.html`.
 - **Auto-rebuild** — file watcher triggers a rebuild within ~3s of any change in the scan root.
 - **Keyboard-first** — navigate the full list without a mouse.
@@ -111,10 +117,11 @@ Hub understands this layout and builds a lineage graph automatically:
 |-----|--------|
 | `/` | Focus search |
 | `Ctrl+F` | Toggle hub feed drawer |
+| `Ctrl+T` | Toggle hub timeline drawer |
 | `j` / `↓` | Next file |
 | `k` / `↑` | Previous file |
 | `Enter` | Open in new tab |
-| `Esc` | Close preview / feed |
+| `Esc` | Close preview / feed / timeline |
 
 ---
 
