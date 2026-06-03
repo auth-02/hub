@@ -100,7 +100,6 @@ footer{{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-f
 .feed-action{{font-family:var(--mono);font-size:10px;color:var(--mute);margin-bottom:1px;}}
 .feed-ctx{{font-family:var(--mono);font-size:9px;color:var(--mute);opacity:.7;}}
 .feed-empty{{font-family:var(--mono);font-size:11px;color:var(--mute);padding:8px 0;}}
-.tl-divider{{border-top:2px solid var(--line);margin:4px 0;flex-shrink:0;}}
 #hub-timeline{{flex:1;overflow-y:auto;min-height:0;}}
 .tl-label{{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);padding:12px 14px 8px;}}
 .tl-period{{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);padding:8px 14px 4px;}}
@@ -198,7 +197,13 @@ footer{{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-f
     <button class="feed-drawer-close" id="feed-close">✕</button>
   </div>
   <div id="hub-feed"></div>
-  <div class="tl-divider"></div>
+</div>
+<button class="feed-tab" id="tl-tab" style="top:210px">// timeline</button>
+<div class="feed-drawer" id="tl-drawer">
+  <div class="feed-drawer-header">
+    <span class="feed-drawer-title">// workspace timeline</span>
+    <button class="feed-drawer-close" id="tl-close">✕</button>
+  </div>
   <div id="hub-timeline"></div>
 </div>
 <div id="toast" class="toast"></div>
@@ -487,7 +492,7 @@ renderFeed();
   }}
 
   const LABELS={{today:'Today',yesterday:'Yesterday',week:'This Week'}};
-  let h='<div class="tl-label">// workspace timeline</div>';
+  let h='';
   ['today','yesterday','week'].forEach(b=>{{
     if(!grouped[b].length)return;
     h+=`<div class="tl-period">${{LABELS[b]}}</div>`;
@@ -500,13 +505,29 @@ renderFeed();
 (function(){{
   const drawer=document.getElementById('feed-drawer');
   const tab=document.getElementById('feed-tab');
-  function openFeed(){{drawer.classList.add('open');tab.classList.add('open');tab.textContent='‹';}}
+  function openFeed(){{window.closeTl&&window.closeTl();drawer.classList.add('open');tab.classList.add('open');tab.textContent='‹';}}
   function closeFeed(){{drawer.classList.remove('open');tab.classList.remove('open');tab.textContent='// feed';}}
   tab.addEventListener('click',()=>drawer.classList.contains('open')?closeFeed():openFeed());
   document.getElementById('feed-close').addEventListener('click',closeFeed);
   document.addEventListener('keydown',e=>{{
     if((e.ctrlKey||e.metaKey)&&e.key==='f'){{e.preventDefault();drawer.classList.contains('open')?closeFeed():openFeed();}}
     else if(e.key==='Escape'&&drawer.classList.contains('open'))closeFeed();
+  }});
+  window._closeFeed=closeFeed;
+}})();
+
+// ── Timeline drawer ───────────────────────────────────────────────────────
+(function(){{
+  const drawer=document.getElementById('tl-drawer');
+  const tab=document.getElementById('tl-tab');
+  function openTl(){{window._closeFeed&&window._closeFeed();drawer.classList.add('open');tab.classList.add('open');tab.textContent='‹';}}
+  function closeTl(){{drawer.classList.remove('open');tab.classList.remove('open');tab.textContent='// timeline';}}
+  window.closeTl=closeTl;
+  tab.addEventListener('click',()=>drawer.classList.contains('open')?closeTl():openTl());
+  document.getElementById('tl-close').addEventListener('click',closeTl);
+  document.addEventListener('keydown',e=>{{
+    if((e.ctrlKey||e.metaKey)&&e.key==='t'){{e.preventDefault();drawer.classList.contains('open')?closeTl():openTl();}}
+    else if(e.key==='Escape'&&drawer.classList.contains('open'))closeTl();
   }});
 }})();
 const REBUILD_CMD=`/usr/bin/python3 ${{HUBPY}}`;
