@@ -81,10 +81,16 @@ _BACKLINKS_CSS = (
 )
 
 
-def _inject_into_html(src: str, lineage_html: str) -> str:
+def _favicon_href(port: int) -> str:
+    return f"http://localhost:{port}" + quote(str(_HERE / "assets" / "favicon.svg"), safe="/:@")
+
+
+def _inject_into_html(src: str, lineage_html: str, favicon: str = "") -> str:
     """Inject backlinks CSS + HTML into an existing HTML document."""
-    style_tag = f"<style>{_BACKLINKS_CSS}</style>"
-    src = re.sub(r"</head>", style_tag + "</head>", src, count=1, flags=re.IGNORECASE)
+    head_inject = f"<style>{_BACKLINKS_CSS}</style>"
+    if favicon:
+        head_inject = f'<link rel="icon" type="image/svg+xml" href="{favicon}">' + head_inject
+    src = re.sub(r"</head>", head_inject + "</head>", src, count=1, flags=re.IGNORECASE)
     m = re.search(r"</h1>", src, re.IGNORECASE)
     if m:
         return src[: m.end()] + lineage_html + src[m.end() :]
@@ -227,6 +233,7 @@ _PAGE = """\
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{title}</title>
+<link rel="icon" type="image/svg+xml" href="{favicon}">
 <style>{css}</style>
 </head>
 <body><div class="page">
@@ -492,9 +499,8 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         elif fs_path.suffix.lower() in (".html", ".htm"):
             src = fs_path.read_text(encoding="utf-8", errors="replace")
             links = _get_lineage(str(fs_path.resolve()))
-            if links:
-                lineage_html = _render_lineage_html(links, self.__class__.server_port)
-                src = _inject_into_html(src, lineage_html)
+            lineage_html = _render_lineage_html(links, self.__class__.server_port) if links else ""
+            src = _inject_into_html(src, lineage_html, _favicon_href(self.__class__.server_port))
             self._send(200, "text/html; charset=utf-8", src.encode("utf-8"))
         elif fs_path.suffix.lower() == ".txt":
             src = fs_path.read_text(encoding="utf-8", errors="replace")
@@ -622,6 +628,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             css=_CSS,
             nav=nav_html,
             body=body,
+            favicon=_favicon_href(self.__class__.server_port),
         ).encode("utf-8")
         self._send(200, "text/html; charset=utf-8", html)
 
