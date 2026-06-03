@@ -520,15 +520,11 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 if status not in ("ongoing", "completed", "paused"):
                     self._send(400, "text/plain", b"invalid status")
                     return
+                import sys as _sys
+                _sys.path.insert(0, str(_HERE))
+                import db as _db
                 conn = sqlite3.connect(str(_DB_PATH))
-                conn.execute(
-                    """INSERT INTO task_status(task_slug,task_repo,status,updated)
-                       VALUES(?,?,?,?)
-                       ON CONFLICT(task_slug,task_repo) DO UPDATE SET
-                         status=excluded.status,updated=excluded.updated""",
-                    (task_slug, task_repo, status, time.time()),
-                )
-                conn.commit()
+                _db.set_status(conn, task_slug, task_repo, status)
                 conn.close()
                 self._send(200, "text/plain", b"ok")
             except Exception as e:

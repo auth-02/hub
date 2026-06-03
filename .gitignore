@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .scan_root
 .hub.log
+.task-status.json
 .venv/
 *.DS_Store
 

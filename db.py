@@ -5,6 +5,9 @@ import sqlite3
 import time
 from pathlib import Path
 
+_HERE = Path(__file__).resolve().parent
+_STATUS_SIDECAR = _HERE / ".task-status.json"  # survives hub.db deletion
+
 _DDL = """
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
@@ -75,10 +78,43 @@ END;
 """
 
 
+def _write_status_sidecar(conn: sqlite3.Connection) -> None:
+    rows = conn.execute("SELECT task_slug, task_repo, status FROM task_status").fetchall()
+    data = {f"{r[1]}:{r[0]}": r[2] for r in rows}
+    try:
+        _STATUS_SIDECAR.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _restore_from_sidecar(conn: sqlite3.Connection) -> None:
+    """Import statuses from sidecar if task_status table is empty (i.e. fresh DB)."""
+    if conn.execute("SELECT task_slug FROM task_status LIMIT 1").fetchone():
+        return
+    if not _STATUS_SIDECAR.exists():
+        return
+    try:
+        data = json.loads(_STATUS_SIDECAR.read_text(encoding="utf-8"))
+        for key, status in data.items():
+            if ":" not in key:
+                continue
+            task_repo, task_slug = key.split(":", 1)
+            conn.execute(
+                """INSERT OR IGNORE INTO task_status(task_slug,task_repo,status,updated)
+                   VALUES(?,?,?,?)""",
+                (task_slug, task_repo, status, time.time()),
+            )
+        conn.commit()
+    except Exception:
+        pass
+
+
 def open_db(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path))
     conn.executescript(_DDL)
     conn.commit()
+    _restore_from_sidecar(conn)
+    _write_status_sidecar(conn)  # keep sidecar in sync on every open
     return conn
 
 
@@ -166,6 +202,7 @@ def set_status(conn: sqlite3.Connection, task_slug: str, task_repo: str, status:
         (task_slug, task_repo, status, time.time()),
     )
     conn.commit()
+    _write_status_sidecar(conn)
 
 
 def get_statuses_json(conn: sqlite3.Connection) -> str:
