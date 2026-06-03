@@ -30,7 +30,7 @@ from urllib.parse import quote, unquote
 # ── Scan root resolution (mirrors hub.py) ──────────────────────────────────
 _HERE = Path(__file__).resolve().parent
 _SIDECAR = Path.home() / "agents" / "hub" / ".scan_root"
-_DB_PATH = _HERE / "data" / "hub.db"
+_DB_PATH = Path.home() / ".hub-state" / "hub.db"
 
 
 def _get_lineage(abs_path: str) -> list:

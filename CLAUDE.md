@@ -27,8 +27,10 @@ hub/
 ├── templates/
 │   └── template.html   HTML/CSS/JS template (str.format()-based)
 ├── data/               generated — never edit directly
-│   ├── hub.db          SQLite: files, lineage, fts tables
 │   └── docs-index.html generated hub page, served at /
+~/.hub-state/           persistent state — never delete
+│   ├── hub.db          SQLite: files, lineage, fts, activity_log, task_status
+│   └── task-status.json sidecar backup of task statuses
 ├── .scan_root          active scan root (written by /_set-root)
 └── .hub.log            debug log (only when HUB_DEBUG=1)
 ```

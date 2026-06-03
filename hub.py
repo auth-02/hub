@@ -56,7 +56,7 @@ OUTPUT = _env_path("HUB_OUTPUT", _HERE / "data" / "docs-index.html")
 DEBUG  = os.environ.get("HUB_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
 LOG    = _env_path("HUB_LOG",    _HERE / ".hub.log")
 FAVICON = _env_path("HUB_FAVICON", _HERE / "assets" / "favicon.svg")
-DB     = _env_path("HUB_DB",    _HERE / "data" / "hub.db")
+DB     = _env_path("HUB_DB",    Path.home() / ".hub-state" / "hub.db")
 
 _SERVER_PORT   = os.environ.get("HUB_SERVER_PORT", "").strip()
 _SERVER_ORIGIN = f"http://localhost:{_SERVER_PORT}" if _SERVER_PORT else ""
