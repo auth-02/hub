@@ -139,6 +139,32 @@ Add to `EXCLUDE_DIRS` in `hub.py` and `_WATCH_EXCLUDE` in `server.py`.
 Add to `EXTS` (always) or `PROMPT_EXTS` (prompts/ only) in `hub.py`.
 Update `metadata.extract_body()` if the format needs special stripping.
 
+## Git / PR workflow
+
+- Personal repo on GitHub under `auth-02` (NOT work account). Identity: `name=Atharva`, `email=shindeathrv@gmail.com`.
+- **Never push directly to `main`** — branch protection enforces PRs. Always branch → PR → merge.
+- Feature work → new branch from `main` → PR into `main`.
+- Bug fixes → `fix/<slug>` branch → PR with proof screenshot.
+- Always use `GH_TOKEN` from `.git/credentials` when running `gh` CLI.
+
+**Proof screenshots for PRs — never commit to code branches.**
+Use the orphan `screenshots` branch instead:
+```bash
+git checkout screenshots
+cp /tmp/proof.png .
+git add proof.png && git commit -m "Add proof for PR #N"
+git push origin screenshots
+# Reference in PR body:
+# ![desc](https://raw.githubusercontent.com/auth-02/hub/screenshots/proof.png)
+git checkout main   # switch back when done
+```
+
+**After switching to the orphan branch and back, rebuild the index:**
+```bash
+mkdir -p data && HUB_SERVER_PORT=8787 python3 hub.py
+```
+The orphan branch wipes the working tree; `data/` is gitignored and gets deleted.
+
 ## What not to do
 
 - Don't edit files in `data/` — regenerated on every rebuild.
