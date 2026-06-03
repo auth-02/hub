@@ -158,3 +158,14 @@ hub/
 ├── hub.db              SQLite database (all tables)
 └── task-status.json    sidecar backup of task statuses
 ```
+
+**Upgrading from a previous version** — clean up the old stale files from `data/`:
+
+```bash
+rm ~/agents/hub/data/hub.db \
+   ~/agents/hub/data/hub.db-shm \
+   ~/agents/hub/data/hub.db-wal \
+   ~/agents/hub/data/task-status.json
+```
+
+`docs-index.html` stays — it is regenerated on every `hub.py` run.
