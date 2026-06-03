@@ -72,10 +72,17 @@ Two launchd agents keep everything running at login:
 | `com.user.hub-server` | HTTP server + file watcher. KeepAlive. |
 | `com.user.hub` | Rebuilds index every 120s. |
 
+Create the plists in `~/Library/LaunchAgents/` (full content in `CLAUDE.md`), then load them once:
+
 ```bash
-# Reload after code changes
+launchctl load ~/Library/LaunchAgents/com.user.hub.plist
+launchctl load ~/Library/LaunchAgents/com.user.hub-server.plist
+```
+
+Reload after code or plist changes:
+```bash
+launchctl unload ~/Library/LaunchAgents/com.user.hub.plist && launchctl load ~/Library/LaunchAgents/com.user.hub.plist
 launchctl kickstart -k gui/$(id -u)/com.user.hub-server
-launchctl kickstart -k gui/$(id -u)/com.user.hub
 ```
 
 ---

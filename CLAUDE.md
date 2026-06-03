@@ -103,14 +103,73 @@ After any template change: `HUB_SERVER_PORT=8787 python3 hub.py` to catch format
 
 ## launchd agents
 
-| Plist | Script | Behaviour |
-|-------|--------|-----------|
-| `com.user.hub.plist` | `hub.py` | Rebuilds every 120 s |
-| `com.user.hub-server.plist` | `server.py` | HTTP server, KeepAlive |
+Two plists in `~/Library/LaunchAgents/` keep hub running at login.
 
-Both in `~/Library/LaunchAgents/`. Reload:
+**`com.user.hub.plist`** — rebuilds index every 120 s:
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.user.hub</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/user/.local/bin/uv</string>
+        <string>run</string>
+        <string>--project</string>
+        <string>/Users/user/agents/hub</string>
+        <string>hub.py</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HUB_SCAN_ROOT</key><string>/Users/user/tifin</string>
+        <key>HUB_OUTPUT</key><string>/Users/user/agents/hub/build/docs-index.html</string>
+        <key>HUB_SERVER_PORT</key><string>8787</string>
+    </dict>
+    <key>WorkingDirectory</key><string>/Users/user/agents/hub</string>
+    <key>RunAtLoad</key><true/>
+    <key>StartInterval</key><integer>120</integer>
+</dict>
+</plist>
+```
+
+**`com.user.hub-server.plist`** — HTTP server, KeepAlive:
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key><string>com.user.hub-server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/user/.local/bin/uv</string>
+        <string>run</string>
+        <string>--project</string>
+        <string>/Users/user/agents/hub</string>
+        <string>server.py</string>
+        <string>--port</string>
+        <string>8787</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HUB_SCAN_ROOT</key><string>/Users/user/tifin</string>
+    </dict>
+    <key>WorkingDirectory</key><string>/Users/user/agents/hub</string>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+</dict>
+</plist>
+```
+
+Load for the first time:
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.user.hub
+launchctl load ~/Library/LaunchAgents/com.user.hub.plist
+launchctl load ~/Library/LaunchAgents/com.user.hub-server.plist
+```
+
+Reload after plist or code changes:
+```bash
+launchctl unload ~/Library/LaunchAgents/com.user.hub.plist && launchctl load ~/Library/LaunchAgents/com.user.hub.plist
 launchctl kickstart -k gui/$(id -u)/com.user.hub-server
 ```
 
