@@ -43,7 +43,7 @@ HTML artifacts are served with the hub's own CSS injected and the `// trace` bar
 
 - **Full-text search** — filter by repo, path, title, and body simultaneously. Implicit AND, `repo:name` prefix supported.
 - **Kind chips** — one-click filters for TASK, RUN, ARTIFACT, CLAUDE, README, DOC, PROMPT. Stack with repo chips and search.
-- **Task status badges** — every task manifest shows a clickable status pill. Cycles `ongoing → completed → paused`, persisted to SQLite without a rebuild.
+- **Task status badges** — every task manifest shows a clickable status pill. Cycles `ongoing → completed → paused`. Persisted to `~/.hub-state/` — survives DB resets, scan root changes, and git branch switches.
 - **Split-pane preview** — click any row for a live rendered preview with lineage trace. No page navigation needed.
 - **Hub Feed** — floating drawer (`Ctrl+F`) showing recent file activity: what changed, which task, how long ago. Persisted across rebuilds, backfilled on first run.
 - **Backlinked doc pages** — open any file in its own tab and the `// trace` bar appears below the heading, linking to all related files. Works for `.md` and `.html`.
@@ -133,7 +133,7 @@ Priority: `HUB_SCAN_ROOT` env var → `.scan_root` sidecar → `~/tifin` default
 | `HUB_SCAN_ROOT` | `~/tifin` | Directory to scan |
 | `HUB_SERVER_PORT` | `8787` | Server port |
 | `HUB_OUTPUT` | `data/docs-index.html` | Output HTML path |
-| `HUB_DB` | `data/hub.db` | SQLite database |
+| `HUB_DB` | `~/.hub-state/hub.db` | SQLite database |
 | `HUB_DEBUG` | off | `1` enables logging to `.hub.log` |
 
 ---
@@ -151,7 +151,10 @@ hub/
 ├── assets/
 │   ├── favicon.svg
 │   └── screenshots/
-└── data/               generated — do not edit
-    ├── hub.db
+└── data/               generated — safe to wipe
     └── docs-index.html
+
+~/.hub-state/           persistent state — do not delete
+├── hub.db              SQLite database (all tables)
+└── task-status.json    sidecar backup of task statuses
 ```
