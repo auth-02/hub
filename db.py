@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
-_STATUS_SIDECAR = _HERE / ".task-status.json"  # survives hub.db deletion
+_STATUS_SIDECAR = _HERE / "data" / "task-status.json"
 
 _DDL = """
 PRAGMA journal_mode=WAL;
