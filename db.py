@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
-_STATUS_SIDECAR = _HERE / "data" / "task-status.json"
+_STATUS_SIDECAR = Path.home() / ".hub-state" / "task-status.json"
 
 _DDL = """
 PRAGMA journal_mode=WAL;
@@ -82,6 +82,7 @@ def _write_status_sidecar(conn: sqlite3.Connection) -> None:
     rows = conn.execute("SELECT task_slug, task_repo, status FROM task_status").fetchall()
     data = {f"{r[1]}:{r[0]}": r[2] for r in rows}
     try:
+        _STATUS_SIDECAR.parent.mkdir(parents=True, exist_ok=True)
         _STATUS_SIDECAR.write_text(json.dumps(data, indent=2), encoding="utf-8")
     except OSError:
         pass
