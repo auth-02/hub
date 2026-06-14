@@ -78,6 +78,20 @@ _BACKLINKS_CSS = (
     "border:1px solid var(--line);color:var(--mute);background:var(--alt);"
     "white-space:nowrap;text-decoration:none;display:inline-block;}"
     ".backlinks-item:hover{border-color:var(--accent2);color:var(--accent2);}"
+    "html{scroll-behavior:smooth;}"
+    "h1,h2,h3{scroll-margin-top:90px;}"
+    ".outline{position:fixed;top:80px;left:max(16px,calc(50% - 600px));width:180px;"
+    "max-height:calc(100vh - 120px);overflow-y:auto;font-family:var(--mono);"
+    "font-size:11px;line-height:1.5;z-index:50;}"
+    ".outline-label{font-size:9px;letter-spacing:.18em;text-transform:uppercase;"
+    "color:var(--accent);margin-bottom:8px;}"
+    ".outline a{display:block;color:var(--mute);text-decoration:none;padding:2px 0;"
+    "border-left:1px solid var(--line);padding-left:10px;}"
+    ".outline a:hover{color:var(--accent2);border-left-color:var(--accent2);}"
+    ".outline a.lvl2{padding-left:22px;}"
+    ".outline a.lvl3{padding-left:34px;}"
+    "@media (max-width:1200px){.outline{display:none;}}"
+    "@media print{.outline{display:none;}}"
 )
 
 # Shared doc chrome: the "⤓ PDF" print button + print stylesheet. Reused by both
@@ -108,12 +122,15 @@ def _favicon_href(port: int) -> str:
 
 def _inject_into_html(src: str, lineage_html: str, favicon: str = "") -> str:
     """Inject backlinks CSS + HTML into an existing HTML document."""
+    src, outline_html = _add_outline(src)
     head_inject = f"<style>{_BACKLINKS_CSS}{_DOC_CHROME_CSS}</style>"
     if favicon:
         head_inject = f'<link rel="icon" type="image/svg+xml" href="{favicon}">' + head_inject
     src = re.sub(r"</head>", head_inject + "</head>", src, count=1, flags=re.IGNORECASE)
     # Print button goes right after <body> so it floats over the doc.
     src = re.sub(r"<body[^>]*>", lambda mo: mo.group(0) + _DOC_PRINT_BTN, src, count=1, flags=re.IGNORECASE)
+    if outline_html:
+        src = re.sub(r"<body[^>]*>", lambda mo: mo.group(0) + outline_html, src, count=1, flags=re.IGNORECASE)
     m = re.search(r"</h1>", src, re.IGNORECASE)
     if m:
         return src[: m.end()] + lineage_html + src[m.end() :]
@@ -235,6 +252,22 @@ img{max-width:100%;border-radius:4px;display:block;margin:1rem 0;}
 .backlinks-type{font-family:var(--mono);font-size:9px;color:var(--mute);}
 .backlinks-item{font-family:var(--mono);font-size:10px;padding:3px 8px;border:1px solid var(--line);color:var(--mute);background:var(--alt);white-space:nowrap;text-decoration:none;display:inline-block;}
 .backlinks-item:hover{border-color:var(--accent2);color:var(--accent2);}
+
+/* Document outline / TOC */
+html{scroll-behavior:smooth;}
+h1,h2,h3{scroll-margin-top:90px;}
+.outline{position:fixed;top:80px;left:max(16px,calc(50% - 600px));width:180px;
+  max-height:calc(100vh - 120px);overflow-y:auto;font-family:var(--mono);
+  font-size:11px;line-height:1.5;z-index:50;}
+.outline-label{font-size:9px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--accent);margin-bottom:8px;}
+.outline a{display:block;color:var(--mute);text-decoration:none;padding:2px 0;
+  border-left:1px solid var(--line);padding-left:10px;}
+.outline a:hover{color:var(--accent2);border-left-color:var(--accent2);}
+.outline a.lvl2{padding-left:22px;}
+.outline a.lvl3{padding-left:34px;}
+@media (max-width:1200px){.outline{display:none;}}
+@media print{.outline{display:none;}}
 
 /* Directory listing */
 .dir-list{list-style:none;margin:0;padding:0;}
@@ -462,6 +495,54 @@ def _render_md(src: str) -> str:
     return result
 
 
+# ── Document outline / TOC ───────────────────────────────────────────────────
+
+def _slugify(text: str) -> str:
+    """Lowercase, strip HTML tags, collapse non-alphanumeric runs to '-', trim."""
+    text = re.sub(r"<[^>]+>", "", text)
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return text.strip("-")
+
+
+def _add_outline(body_html: str) -> tuple[str, str]:
+    """Inject ids into h1-h3 tags and build a floating outline nav.
+
+    Returns (body_html_with_ids, outline_html). If fewer than 2 headings are
+    found, returns (body_html, "") unchanged.
+    """
+    headings: list[tuple[int, str, str]] = []
+    seen: dict[str, int] = {}
+
+    def _inject(m: re.Match) -> str:
+        level = int(m.group(1))
+        inner = m.group(2)
+        plain = re.sub(r"<[^>]+>", "", inner).strip()
+        slug = _slugify(plain) or "section"
+        if slug in seen:
+            seen[slug] += 1
+            slug = f"{slug}-{seen[slug]}"
+        else:
+            seen[slug] = 1
+        headings.append((level, plain, slug))
+        return f'<h{level} id="{slug}">{inner}</h{level}>'
+
+    body_html = re.sub(r"<h([1-3])>(.*?)</h\1>", _inject, body_html, flags=re.DOTALL)
+
+    if len(headings) < 2:
+        return body_html, ""
+
+    def _esc(s: str) -> str:
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    parts = ['<nav class="outline"><div class="outline-label">// outline</div>']
+    for level, plain, slug in headings:
+        cls = f" lvl{level}" if level > 1 else ""
+        parts.append(f'<a class="outline-link{cls}" href="#{slug}">{_esc(plain)}</a>')
+    parts.append("</nav>")
+    return body_html, "".join(parts)
+
+
 # ── Request handler ─────────────────────────────────────────────────────────
 
 def _is_within(child: Path, parent: Path) -> bool:
@@ -631,6 +712,10 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             nav_html = f'<nav>{" / ".join(parts)}</nav>'
         except ValueError:
             nav_html = ""
+
+        body, outline = _add_outline(body)
+        if outline:
+            body = outline + body
 
         links = _get_lineage(str(path.resolve()))
         lineage_html = _render_lineage_html(links, self.__class__.server_port)
