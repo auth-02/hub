@@ -155,6 +155,13 @@ footer{{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-f
 .s-ongoing{{color:#2F6B4F;border-color:#2F6B4F;background:rgba(47,107,79,.08);}}
 .s-completed{{color:var(--mute);border-color:var(--line);background:var(--alt);}}
 .s-paused{{color:#7A5A14;border-color:#C99A20;background:rgba(201,154,32,.1);}}
+.float-win{{position:fixed;border:1px solid var(--line);border-top:3px solid var(--accent2);background:var(--bg);box-shadow:0 18px 40px rgba(0,0,0,.22);display:flex;flex-direction:column;min-width:280px;min-height:180px;resize:both;overflow:hidden;}}
+.float-head{{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--alt);cursor:move;flex-shrink:0;font-family:var(--mono);font-size:10px;letter-spacing:.06em;color:var(--mute);}}
+.float-head .float-title{{flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}}
+.float-head .float-ctl{{font-family:var(--mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;padding:3px 7px;border:1px solid var(--line);background:var(--bg);color:var(--mute);cursor:pointer;text-decoration:none;flex-shrink:0;}}
+.float-head .float-ctl:hover{{border-color:var(--ink);color:var(--ink);}}
+.float-body{{flex:1;position:relative;}}
+.float-body iframe{{position:absolute;inset:0;width:100%;height:100%;border:none;}}
 </style></head><body><div class="wrap">
 <header>
   <div class="kicker"><span>// HUB DIRECTORY · <a href="#" id="setroot" title="click to change scan root">{scan_root}</a></span><a href="#" id="rebuild" title="rebuild hub index">↻ rebuild hub</a></div>
@@ -182,6 +189,7 @@ footer{{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-f
       <span class="pv-title" id="pv-title"></span>
       <div class="pv-actions">
         <a class="pv-btn primary" id="pv-open" href="#" target="_blank" rel="noopener">Open</a>
+        <button class="pv-btn" id="pv-float" title="open as floating window">⧉</button>
         <button class="pv-btn" id="pv-close">✕</button>
       </div>
     </div>
@@ -398,6 +406,70 @@ rows.forEach(r=>r.addEventListener('click',e=>{{
 }}));
 
 document.getElementById('pv-close').addEventListener('click',closePreview);
+
+// ── Floating windows ──────────────────────────────────────────────────────
+const FLOAT_WINS=new Map();
+let floatZ=60,floatN=0;
+function clamp(v,min,max){{return Math.max(min,Math.min(max,v));}}
+function openFloat(abs,title,href){{
+  if(!abs) return;
+  const existing=FLOAT_WINS.get(abs);
+  if(existing){{existing.style.zIndex=++floatZ;return;}}
+  const w=document.createElement('div');
+  w.className='float-win';
+  const n=floatN++;
+  const left=clamp(80+28*n,0,Math.max(0,window.innerWidth-540));
+  const top=clamp(80+28*n,0,Math.max(0,window.innerHeight-460));
+  w.style.left=left+'px';w.style.top=top+'px';
+  w.style.width='520px';w.style.height='440px';
+  w.style.zIndex=++floatZ;
+  const head=document.createElement('div');
+  head.className='float-head';
+  const ttl=document.createElement('span');
+  ttl.className='float-title';ttl.textContent=title||abs;ttl.title=abs;
+  const open=document.createElement('a');
+  open.className='float-ctl';open.href=href;open.target='_blank';open.rel='noopener';open.textContent='⤤ open';
+  const close=document.createElement('button');
+  close.className='float-ctl';close.type='button';close.textContent='✕';
+  head.appendChild(ttl);head.appendChild(open);head.appendChild(close);
+  const body=document.createElement('div');
+  body.className='float-body';
+  const ifr=document.createElement('iframe');
+  ifr.src=href;
+  body.appendChild(ifr);
+  w.appendChild(head);w.appendChild(body);
+  document.body.appendChild(w);
+  FLOAT_WINS.set(abs,w);
+  w.addEventListener('mousedown',()=>{{w.style.zIndex=++floatZ;}});
+  close.addEventListener('click',e=>{{e.stopPropagation();FLOAT_WINS.delete(abs);w.remove();}});
+  // dragging via pointer events on the header only
+  let drag=null;
+  head.addEventListener('pointerdown',e=>{{
+    if(e.target.classList.contains('float-ctl')) return;
+    drag={{dx:e.clientX-w.offsetLeft,dy:e.clientY-w.offsetTop}};
+    head.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }});
+  head.addEventListener('pointermove',e=>{{
+    if(!drag) return;
+    const nx=clamp(e.clientX-drag.dx,0,Math.max(0,window.innerWidth-w.offsetWidth));
+    const ny=clamp(e.clientY-drag.dy,0,Math.max(0,window.innerHeight-head.offsetHeight));
+    w.style.left=nx+'px';w.style.top=ny+'px';
+  }});
+  function endDrag(e){{if(drag){{drag=null;try{{head.releasePointerCapture(e.pointerId);}}catch(_){{}}}}}}
+  head.addEventListener('pointerup',endDrag);
+  head.addEventListener('pointercancel',endDrag);
+}}
+document.getElementById('pv-float').addEventListener('click',()=>{{
+  if(selIdx<0||!selRows[selIdx]) return;
+  const r=selRows[selIdx];
+  openFloat(r.dataset.abs,r.querySelector('.path').textContent,r.href);
+  closePreview();
+}});
+rows.forEach(r=>r.addEventListener('dblclick',e=>{{
+  e.preventDefault();
+  openFloat(r.dataset.abs,r.querySelector('.path').textContent,r.href);
+}}));
 
 // ── Keyboard nav ──────────────────────────────────────────────────────────
 document.addEventListener('keydown',e=>{{
