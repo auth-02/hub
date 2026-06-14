@@ -13,7 +13,9 @@ Rebuild after starting so links use localhost:
 from __future__ import annotations
 
 import argparse
+import csv
 import http.server
+import io
 import json
 import mimetypes
 import os
@@ -24,6 +26,7 @@ import subprocess
 import sys
 import threading
 import time
+import zipfile
 from pathlib import Path
 from urllib.parse import quote, unquote
 
@@ -54,12 +57,14 @@ def _get_lineage(abs_path: str) -> list:
 
 
 _LINEAGE_ORDER = [
-    "belongs_to_task", "task_has_run", "task_has_artifact", "task_has_prompt", "task_has_doc",
+    "belongs_to_task", "task_has_run", "task_has_artifact", "task_has_data",
+    "task_has_prompt", "task_has_doc",
 ]
 _LINEAGE_LABELS = {
     "belongs_to_task": "↑ task",
     "task_has_run": "runs",
     "task_has_artifact": "artifacts",
+    "task_has_data": "data",
     "task_has_prompt": "prompts",
     "task_has_doc": "docs",
 }
@@ -553,6 +558,101 @@ def _is_within(child: Path, parent: Path) -> bool:
         return False
 
 
+# ── Data file renderers (csv / tsv / xlsx → HTML table) ─────────────────────
+
+def _esc_cell(s: str) -> str:
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _rows_to_table(rows: list) -> str:
+    """Build an HTML table from a list of row lists; first row → header."""
+    if not rows:
+        return "<p>Empty file.</p>"
+    head = rows[0]
+    body_rows = rows[1:]
+    ths = "".join(f"<th>{_esc_cell(c)}</th>" for c in head)
+    trs = "".join(
+        "<tr>" + "".join(f"<td>{_esc_cell(c)}</td>" for c in row) + "</tr>"
+        for row in body_rows
+    )
+    return f"<table><thead><tr>{ths}</tr></thead><tbody>{trs}</tbody></table>"
+
+
+def _render_csv(path: Path) -> str:
+    """Render a .csv/.tsv file as an HTML table (stdlib csv)."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if path.suffix.lower() == ".tsv":
+            delim = "\t"
+        else:
+            try:
+                delim = csv.Sniffer().sniff(text[:4096], delimiters=",;\t|").delimiter
+            except Exception:
+                delim = ","
+        rows = list(csv.reader(io.StringIO(text), delimiter=delim))
+        return _rows_to_table(rows)
+    except Exception as e:
+        return f'<p class="empty">Could not parse {_esc_cell(path.name)}: {_esc_cell(str(e))}</p>'
+
+
+def _strip_ns(tag: str) -> str:
+    return tag.split("}")[-1]
+
+
+def _render_xlsx(path: Path) -> str:
+    """Render the first worksheet of an .xlsx file as an HTML table (stdlib zipfile + xml)."""
+    import xml.etree.ElementTree as ET
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = zf.namelist()
+            shared: list[str] = []
+            if "xl/sharedStrings.xml" in names:
+                ss_root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
+                for si in ss_root:
+                    parts = [t.text or "" for t in si.iter()
+                             if _strip_ns(t.tag) == "t"]
+                    shared.append("".join(parts))
+
+            sheet_name = "xl/worksheets/sheet1.xml"
+            if sheet_name not in names:
+                sheets = sorted(n for n in names
+                                if n.startswith("xl/worksheets/sheet") and n.endswith(".xml"))
+                if not sheets:
+                    return '<p class="empty">No worksheet found.</p>'
+                sheet_name = sheets[0]
+            sheet_root = ET.fromstring(zf.read(sheet_name))
+
+        rows: list = []
+        for el in sheet_root.iter():
+            if _strip_ns(el.tag) != "row":
+                continue
+            cells: list[str] = []
+            for c in el:
+                if _strip_ns(c.tag) != "c":
+                    continue
+                ctype = c.get("t")
+                val = ""
+                for child in c:
+                    if _strip_ns(child.tag) == "v":
+                        val = child.text or ""
+                        break
+                    if _strip_ns(child.tag) == "is":
+                        val = "".join(t.text or "" for t in child.iter()
+                                      if _strip_ns(t.tag) == "t")
+                        break
+                if ctype == "s":
+                    try:
+                        val = shared[int(val)]
+                    except (ValueError, IndexError):
+                        val = ""
+                cells.append(val)
+            rows.append(cells)
+        return _rows_to_table(rows)
+    except Exception as e:
+        return f'<p class="empty">Could not parse {_esc_cell(path.name)}: {_esc_cell(str(e))}</p>'
+
+
 class HubHandler(http.server.BaseHTTPRequestHandler):
     server_port: int = 8787
 
@@ -610,6 +710,18 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             src = fs_path.read_text(encoding="utf-8", errors="replace")
             escaped = src.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             self._serve_page(fs_path.name, fs_path, f"<pre><code>{escaped}</code></pre>")
+        elif fs_path.suffix.lower() in (".csv", ".tsv"):
+            self._serve_page(fs_path.name, fs_path, _render_csv(fs_path))
+        elif fs_path.suffix.lower() == ".xlsx":
+            self._serve_page(fs_path.name, fs_path, _render_xlsx(fs_path))
+        elif fs_path.suffix.lower() == ".pdf":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Disposition", "inline")
+            body = fs_path.read_bytes()
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         else:
             ct, _ = mimetypes.guess_type(str(fs_path))
             self._send(200, ct or "application/octet-stream", fs_path.read_bytes())

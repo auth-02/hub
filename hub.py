@@ -73,10 +73,12 @@ EXCLUDE_DIRS = {
 }
 EXTS = {".md", ".html", ".htm"}
 PROMPT_EXTS = {".txt"}
+DATA_EXTS = {".pdf", ".xlsx", ".xls", ".csv", ".tsv"}
 
 KIND_DIRS = (
     ("artifacts", "artifact"),
     ("runs",      "run"),
+    ("data",      "data"),
     ("tasks",     "task"),
     ("docs",      "doc"),
     ("prompts",   "prompt"),
@@ -88,6 +90,8 @@ def _included(path: Path) -> bool:
     if ext in EXTS:
         return True
     if ext in PROMPT_EXTS and "/prompts/" in path.as_posix():
+        return True
+    if ext in DATA_EXTS and "/data/" in path.as_posix():
         return True
     return False
 
