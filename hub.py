@@ -223,7 +223,7 @@ def _collect_git(scan_root: Path, since_days: int = 7) -> list[dict]:
     return commits
 
 
-def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]", timeline_json: str = "{}") -> str:
+def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]", timeline_json: str = "{}", tasks_json: str = "[]") -> str:
     total     = sum(len(v) for v in groups.values())
     md_total  = sum(1 for v in groups.values() for f in v if f["ext"] == "md")
     html_total = total - md_total
@@ -290,6 +290,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         task_status_json=task_status_json,
         activity_json=activity_json,
         timeline_json=timeline_json,
+        tasks_json=tasks_json,
         server_origin_json=json.dumps(_SERVER_ORIGIN),
     )
 
@@ -315,7 +316,10 @@ def main() -> None:
     task_status_json = db.get_statuses_json(conn)
     activity_json = db.get_activity_json(conn, str(ROOT))
     timeline_tasks = db.get_timeline_data(conn, str(ROOT))
+    all_tasks = db.get_all_tasks(conn, str(ROOT))
     conn.close()
+
+    tasks_json = json.dumps(all_tasks, separators=(",", ":"))
 
     git_commits = _collect_git(ROOT)
     timeline_json = json.dumps(
@@ -324,9 +328,9 @@ def main() -> None:
     )
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(render(groups, fts_json, lineage_json, task_status_json, activity_json, timeline_json), encoding="utf-8")
+    OUTPUT.write_text(render(groups, fts_json, lineage_json, task_status_json, activity_json, timeline_json, tasks_json), encoding="utf-8")
     total = sum(len(v) for v in groups.values())
-    log(f"[hub] scanned {ROOT} -> {OUTPUT} ({total} files, {len(groups)} groups)")
+    log(f"[hub] scanned {ROOT} -> {OUTPUT} ({total} files, {len(groups)} groups, {len(all_tasks)} tasks)")
 
 
 if __name__ == "__main__":
