@@ -170,7 +170,7 @@ def build_lineage(conn: sqlite3.Connection) -> None:
     by_task: dict = {}
     for fid, abs_, kind, slug, trepo in rows:
         key = (slug, trepo)
-        g = by_task.setdefault(key, {k: [] for k in ("task", "run", "artifact", "prompt", "doc")})
+        g = by_task.setdefault(key, {k: [] for k in ("task", "run", "artifact", "prompt", "doc", "data")})
         bucket = kind if kind in g else "doc"
         g[bucket].append(fid)
 
@@ -179,6 +179,7 @@ def build_lineage(conn: sqlite3.Connection) -> None:
         "artifact": "task_has_artifact",
         "prompt": "task_has_prompt",
         "doc": "task_has_doc",
+        "data": "task_has_data",
     }
     edges: list = []
     for buckets in by_task.values():

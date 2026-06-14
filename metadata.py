@@ -1,6 +1,7 @@
 """Metadata extraction for hub: title and body text from markdown/html files."""
 from __future__ import annotations
 import re
+import zipfile
 from pathlib import Path
 
 
@@ -29,6 +30,12 @@ def extract_body(path: str, text: str, max_chars: int = 2000) -> str:
     ext = Path(path).suffix.lower()
     if ext in (".html", ".htm"):
         return _extract_html_body(text, max_chars)
+    if ext in (".pdf", ".xls"):
+        return ""
+    if ext == ".xlsx":
+        return _extract_xlsx_body(path, max_chars)
+    if ext in (".csv", ".tsv"):
+        return re.sub(r"\s+", " ", text).strip()[:max_chars]
     # markdown / txt
     text = re.sub(r"^---\s*\n.*?\n---\s*\n?", "", text, flags=re.DOTALL)
     text = re.sub(r"```[\s\S]*?```", " ", text)
@@ -38,6 +45,24 @@ def extract_body(path: str, text: str, max_chars: int = 2000) -> str:
     text = re.sub(r"<[^>]{1,200}>", " ", text)
     text = re.sub(r"[#*_~>|\\]", " ", text)
     return re.sub(r"\s+", " ", text).strip()[:max_chars]
+
+
+def _extract_xlsx_body(path: str, max_chars: int) -> str:
+    """Concatenate shared-string text from an .xlsx workbook for searching."""
+    try:
+        with zipfile.ZipFile(path) as zf:
+            try:
+                raw = zf.read("xl/sharedStrings.xml").decode("utf-8", "replace")
+            except KeyError:
+                return ""
+        texts = re.findall(r"<t[^>]*>(.*?)</t>", raw, re.DOTALL)
+        joined = " ".join(
+            t.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+            for t in texts
+        )
+        return re.sub(r"\s+", " ", joined).strip()[:max_chars]
+    except Exception:
+        return ""
 
 
 def _extract_html_body(text: str, max_chars: int) -> str:
