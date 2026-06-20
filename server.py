@@ -108,6 +108,27 @@ _BACKLINKS_CSS = (
     "@media print{.outline{display:none;}}"
 )
 
+# Shared doc chrome: the "⤓ PDF" print button + print stylesheet. Reused by both
+# the markdown page wrapper (_CSS/_PAGE) and injected HTML docs (_inject_into_html).
+_DOC_CHROME_CSS = (
+    ".doc-print{position:fixed;top:18px;right:18px;z-index:40;font-family:var(--mono);"
+    "font-size:10px;letter-spacing:.12em;text-transform:uppercase;padding:7px 12px;"
+    "border:1px solid var(--line);background:var(--alt);color:var(--accent);cursor:pointer;}"
+    ".doc-print:hover{border-color:var(--accent);background:var(--accent);color:#fff;}"
+    "@media print{"
+    ".doc-print,nav,.backlinks,.outline{display:none!important;}"
+    "body{padding:0!important;background:#fff!important;background-image:none!important;"
+    "-webkit-print-color-adjust:exact;print-color-adjust:exact;}"
+    ".page{max-width:100%!important;margin:0!important;}"
+    "pre,code,th,blockquote,td{-webkit-print-color-adjust:exact;print-color-adjust:exact;}"
+    "a{color:var(--ink)!important;text-decoration:none!important;}"
+    "}"
+)
+_DOC_PRINT_BTN = (
+    '<button class="doc-print" onclick="window.print()" '
+    'title="Save as PDF (Cmd/Ctrl+P)">⤓ PDF</button>'
+)
+
 
 def _favicon_href(port: int) -> str:
     return f"http://localhost:{port}" + quote(str(_HERE / "assets" / "favicon.svg"), safe="/:@")
@@ -116,10 +137,12 @@ def _favicon_href(port: int) -> str:
 def _inject_into_html(src: str, lineage_html: str, favicon: str = "") -> str:
     """Inject backlinks CSS + HTML into an existing HTML document."""
     src, outline_html = _add_outline(src)
-    head_inject = f"<style>{_BACKLINKS_CSS}</style>"
+    head_inject = f"<style>{_BACKLINKS_CSS}{_DOC_CHROME_CSS}</style>"
     if favicon:
         head_inject = f'<link rel="icon" type="image/svg+xml" href="{favicon}">' + head_inject
     src = re.sub(r"</head>", head_inject + "</head>", src, count=1, flags=re.IGNORECASE)
+    # Print button goes right after <body> so it floats over the doc.
+    src = re.sub(r"<body[^>]*>", lambda mo: mo.group(0) + _DOC_PRINT_BTN, src, count=1, flags=re.IGNORECASE)
     if outline_html:
         src = re.sub(r"<body[^>]*>", lambda mo: mo.group(0) + outline_html, src, count=1, flags=re.IGNORECASE)
     m = re.search(r"</h1>", src, re.IGNORECASE)
@@ -288,7 +311,7 @@ _PAGE = """\
 <link rel="icon" type="image/svg+xml" href="{favicon}">
 <style>{css}</style>
 </head>
-<body><div class="page">
+<body><button class="doc-print" onclick="window.print()" title="Save as PDF (Cmd/Ctrl+P)">⤓ PDF</button><div class="page">
 {nav}
 {body}
 </div></body>
@@ -851,7 +874,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
 
         html = _PAGE.format(
             title=title,
-            css=_CSS,
+            css=_CSS + _DOC_CHROME_CSS,
             nav=nav_html,
             body=body,
             favicon=_favicon_href(self.__class__.server_port),
