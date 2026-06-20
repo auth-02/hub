@@ -135,8 +135,14 @@ def open_db(db_path: Path) -> sqlite3.Connection:
 
 
 def is_current(conn: sqlite3.Connection, abs_path: str, mtime: float) -> bool:
-    row = conn.execute("SELECT mtime FROM files WHERE abs=?", (abs_path,)).fetchone()
-    return row is not None and abs(row[0] - mtime) < 0.01
+    row = conn.execute("SELECT mtime, skill_slug FROM files WHERE abs=?", (abs_path,)).fetchone()
+    if row is None:
+        return False
+    if abs(row[0] - mtime) >= 0.01:
+        return False
+    if "/skills/" in abs_path and row[1] is None:
+        return False
+    return True
 
 
 def _log_activity(conn: sqlite3.Connection, meta: dict, event: str) -> None:
