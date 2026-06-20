@@ -110,6 +110,16 @@ def _restore_from_sidecar(conn: sqlite3.Connection) -> None:
         pass
 
 
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Add columns that were introduced after the initial schema."""
+    for col, default in (("skill_slug", "NULL"), ("skill_repo", "NULL")):
+        try:
+            conn.execute(f"ALTER TABLE files ADD COLUMN {col} TEXT DEFAULT {default}")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass  # column already exists
+
+
 def open_db(db_path: Path) -> sqlite3.Connection:
     # timeout + busy_timeout let a writer wait for a concurrent one (e.g. the
     # file-watcher and a /_set-root rebuild) instead of failing with
@@ -118,14 +128,25 @@ def open_db(db_path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA busy_timeout=30000")
     conn.executescript(_DDL)
     conn.commit()
+    _migrate(conn)
     _restore_from_sidecar(conn)
     _write_status_sidecar(conn)  # keep sidecar in sync on every open
     return conn
 
 
 def is_current(conn: sqlite3.Connection, abs_path: str, mtime: float) -> bool:
-    row = conn.execute("SELECT mtime FROM files WHERE abs=?", (abs_path,)).fetchone()
-    return row is not None and abs(row[0] - mtime) < 0.01
+    row = conn.execute("SELECT mtime, skill_slug, kind FROM files WHERE abs=?", (abs_path,)).fetchone()
+    if row is None:
+        return False
+    if abs(row[0] - mtime) >= 0.01:
+        return False
+    if "/skills/" in abs_path:
+        # Force reindex if slug missing OR if a reference file still has kind=skill
+        # (kind should only be 'skill' for the SKILL.md root, not for references)
+        is_skill_root = abs_path.split("/")[-1].lower().startswith("skill.")
+        if row[1] is None or (not is_skill_root and row[2] == "skill"):
+            return False
+    return True
 
 
 def _log_activity(conn: sqlite3.Connection, meta: dict, event: str) -> None:
@@ -146,12 +167,13 @@ def _log_activity(conn: sqlite3.Connection, meta: dict, event: str) -> None:
 def upsert(conn: sqlite3.Connection, meta: dict, title: str, body: str) -> None:
     existing = conn.execute("SELECT id FROM files WHERE abs=?", (meta["abs"],)).fetchone()
     conn.execute(
-        """INSERT INTO files(abs,repo,rel,ext,kind,mtime,title,body,task_slug,task_repo,updated)
-           VALUES(:abs,:repo,:rel,:ext,:kind,:mtime,:title,:body,:task_slug,:task_repo,:updated)
+        """INSERT INTO files(abs,repo,rel,ext,kind,mtime,title,body,task_slug,task_repo,skill_slug,skill_repo,updated)
+           VALUES(:abs,:repo,:rel,:ext,:kind,:mtime,:title,:body,:task_slug,:task_repo,:skill_slug,:skill_repo,:updated)
            ON CONFLICT(abs) DO UPDATE SET
              repo=excluded.repo,rel=excluded.rel,ext=excluded.ext,kind=excluded.kind,
              mtime=excluded.mtime,title=excluded.title,body=excluded.body,
-             task_slug=excluded.task_slug,task_repo=excluded.task_repo,updated=excluded.updated""",
+             task_slug=excluded.task_slug,task_repo=excluded.task_repo,
+             skill_slug=excluded.skill_slug,skill_repo=excluded.skill_repo,updated=excluded.updated""",
         {**meta, "title": title, "body": body, "updated": time.time()},
     )
     _log_activity(conn, meta, "created" if existing is None else "updated")
@@ -165,8 +187,11 @@ def prune(conn: sqlite3.Connection, live_paths: set) -> None:
 
 
 def build_lineage(conn: sqlite3.Connection) -> None:
-    """Link Task→Run/Artifact/Prompt/Doc edges via task_slug grouping."""
+    """Link Task→Run/Artifact/Prompt/Doc and Skill→Ref edges."""
     conn.execute("DELETE FROM lineage")
+    edges: list = []
+
+    # ── Task lineage ──────────────────────────────────────────────────────────
     rows = conn.execute(
         "SELECT id, abs, kind, task_slug, task_repo FROM files WHERE task_slug IS NOT NULL"
     ).fetchall()
@@ -178,20 +203,40 @@ def build_lineage(conn: sqlite3.Connection) -> None:
         bucket = kind if kind in g else "doc"
         g[bucket].append(fid)
 
-    KIND_REL = {
+    TASK_KIND_REL = {
         "run": "task_has_run",
         "artifact": "task_has_artifact",
         "prompt": "task_has_prompt",
         "doc": "task_has_doc",
         "data": "task_has_data",
     }
-    edges: list = []
     for buckets in by_task.values():
         for tid in buckets["task"]:
-            for rel_kind, rel_type in KIND_REL.items():
+            for rel_kind, rel_type in TASK_KIND_REL.items():
                 for cid in buckets[rel_kind]:
                     edges.append((tid, cid, rel_type))
                     edges.append((cid, tid, "belongs_to_task"))
+
+    # ── Skill lineage ─────────────────────────────────────────────────────────
+    # Root: the file named SKILL.md (or SKILL.*) directly inside skills/<slug>/
+    # Refs: every other file in that same skills/<slug>/ subtree
+    skill_rows = conn.execute(
+        "SELECT id, rel, skill_slug, skill_repo FROM files WHERE skill_slug IS NOT NULL"
+    ).fetchall()
+
+    by_skill: dict = {}
+    for fid, rel, slug, srepo in skill_rows:
+        key = (slug, srepo)
+        g = by_skill.setdefault(key, {"root": [], "ref": []})
+        filename = rel.rsplit("/", 1)[-1]
+        bucket = "root" if filename.upper().startswith("SKILL.") else "ref"
+        g[bucket].append(fid)
+
+    for buckets in by_skill.values():
+        for sid in buckets["root"]:
+            for rid in buckets["ref"]:
+                edges.append((sid, rid, "skill_has_ref"))
+                edges.append((rid, sid, "belongs_to_skill"))
 
     conn.executemany(
         "INSERT OR IGNORE INTO lineage(src_id,dst_id,rel_type) VALUES(?,?,?)", edges

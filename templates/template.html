@@ -54,6 +54,7 @@ h1 .hub{{color:#C15F3C;font-style:italic;}}
 .chip.active[data-kind="run"]{{background:#2F6B4F;border-color:#2F6B4F;}}
 .chip.active[data-kind="data"]{{background:#2E7D8A;border-color:#2E7D8A;}}
 .chip.active[data-kind="readme"]{{background:#3A3A3A;border-color:#3A3A3A;}}
+.chip.active[data-kind="skill"]{{background:#4A7FC1;border-color:#4A7FC1;}}
 .hub-layout{{display:flex;gap:20px;align-items:flex-start;}}
 .list-pane{{flex:1;min-width:0;}}
 .repo{{margin:18px 0;}}
@@ -76,6 +77,7 @@ h1 .hub{{color:#C15F3C;font-style:italic;}}
 .badge.artifact{{color:#fff;background:#5C4A7A;border-color:#5C4A7A;}}
 .badge.run{{color:#fff;background:#2F6B4F;border-color:#2F6B4F;}}
 .badge.data{{color:#fff;background:#2E7D8A;border-color:#2E7D8A;}}
+.badge.skill{{color:#fff;background:#4A7FC1;border-color:#3A6BAE;}}
 .path{{font-family:var(--mono);font-size:12.5px;flex:1;word-break:break-all;}}
 .ago{{font-family:var(--mono);font-size:10px;color:var(--mute);flex:0 0 auto;}}
 .empty{{color:var(--mute);font-style:italic;}}
@@ -240,6 +242,7 @@ footer{{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-f
   <button class="chip" data-kind="doc">DOC</button>
   <button class="chip" data-kind="prompt">PROMPT</button>
   <button class="chip" data-kind="data">DATA</button>
+  <button class="chip" data-kind="skill">SKILL</button>
 </div>
 <div class="repo-chips" id="repo-chips">{repo_chips}</div>
 </div>
@@ -332,6 +335,12 @@ const pvOpen=document.getElementById('pv-open');
 const pvBody=document.getElementById('pv-body');
 const pvLineage=document.getElementById('pv-lineage');
 let kind=sessionStorage.getItem('docs_hub_kind')||'all';
+const _currentRoot={scan_root_json};
+if(sessionStorage.getItem('docs_hub_root')!==_currentRoot){{
+  sessionStorage.setItem('docs_hub_root',_currentRoot);
+  sessionStorage.removeItem('docs_hub_repos');
+  sessionStorage.removeItem('docs_hub_q');
+}}
 let activeRepos=new Set((sessionStorage.getItem('docs_hub_repos')||'').split(',').filter(Boolean));
 let selIdx=-1,selRows=[];
 
@@ -571,8 +580,8 @@ document.addEventListener('keydown',e=>{{
 function buildLineage(links){{
   const groups={{}};
   links.forEach(l=>{{(groups[l.r]=groups[l.r]||[]).push(l);}});
-  const ORDER=['belongs_to_task','task_has_run','task_has_artifact','task_has_data','task_has_prompt','task_has_doc'];
-  const LABELS={{'belongs_to_task':'↑ task','task_has_run':'runs','task_has_artifact':'artifacts','task_has_data':'data','task_has_prompt':'prompts','task_has_doc':'docs'}};
+  const ORDER=['belongs_to_task','belongs_to_skill','task_has_run','task_has_artifact','task_has_data','task_has_prompt','task_has_doc','skill_has_ref'];
+  const LABELS={{'belongs_to_task':'↑ task','belongs_to_skill':'↑ skill','task_has_run':'runs','task_has_artifact':'artifacts','task_has_data':'data','task_has_prompt':'prompts','task_has_doc':'docs','skill_has_ref':'references'}};
   let h='<div class="ln-label">// trace</div>';
   ORDER.forEach(r=>{{
     if(!groups[r]) return;
