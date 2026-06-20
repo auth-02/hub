@@ -817,10 +817,15 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         env["HUB_SERVER_PORT"] = str(HubHandler.server_port)
         env["HUB_SCAN_ROOT"] = str(root)
         with _REBUILD_LOCK:
-            return subprocess.run(
-                [sys.executable, str(_HERE / "hub.py")],
-                env=env, capture_output=True, text=True,
-            )
+            try:
+                return subprocess.run(
+                    [sys.executable, str(_HERE / "hub.py")],
+                    env=env, capture_output=True, text=True,
+                    timeout=600,
+                )
+            except subprocess.TimeoutExpired as exc:
+                exc.kill()
+                return subprocess.CompletedProcess(exc.args, 1, "", "hub.py timed out after 600 s")
 
     def _serve_md(self, path: Path) -> None:
         src = path.read_text(encoding="utf-8", errors="replace")
