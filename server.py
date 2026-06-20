@@ -13,7 +13,9 @@ Rebuild after starting so links use localhost:
 from __future__ import annotations
 
 import argparse
+import csv
 import http.server
+import io
 import json
 import mimetypes
 import os
@@ -24,6 +26,7 @@ import subprocess
 import sys
 import threading
 import time
+import zipfile
 from pathlib import Path
 from urllib.parse import quote, unquote
 
@@ -31,6 +34,10 @@ from urllib.parse import quote, unquote
 _HERE = Path(__file__).resolve().parent
 _SIDECAR = Path.home() / "agents" / "hub" / ".scan_root"
 _DB_PATH = Path.home() / ".hub-state" / "hub.db"
+
+# Serialize hub.py rebuilds so the watcher and request-triggered rebuilds
+# (/_set-root, /_rebuild, /_task-status) never run two writers at once.
+_REBUILD_LOCK = threading.Lock()
 
 
 def _get_lineage(abs_path: str) -> list:
@@ -54,12 +61,14 @@ def _get_lineage(abs_path: str) -> list:
 
 
 _LINEAGE_ORDER = [
-    "belongs_to_task", "task_has_run", "task_has_artifact", "task_has_prompt", "task_has_doc",
+    "belongs_to_task", "task_has_run", "task_has_artifact", "task_has_data",
+    "task_has_prompt", "task_has_doc",
 ]
 _LINEAGE_LABELS = {
     "belongs_to_task": "↑ task",
     "task_has_run": "runs",
     "task_has_artifact": "artifacts",
+    "task_has_data": "data",
     "task_has_prompt": "prompts",
     "task_has_doc": "docs",
 }
@@ -78,6 +87,25 @@ _BACKLINKS_CSS = (
     "border:1px solid var(--line);color:var(--mute);background:var(--alt);"
     "white-space:nowrap;text-decoration:none;display:inline-block;}"
     ".backlinks-item:hover{border-color:var(--accent2);color:var(--accent2);}"
+    "html{scroll-behavior:smooth;}"
+    "h1,h2,h3{scroll-margin-top:90px;}"
+    ".outline{position:fixed;top:80px;left:32px;width:200px;word-break:break-word;"
+    "max-height:calc(100vh - 120px);overflow-y:auto;font-family:var(--mono);"
+    "font-size:11px;line-height:1.5;z-index:50;}"
+    ".outline-label{font-size:9px;letter-spacing:.18em;text-transform:uppercase;"
+    "color:var(--accent);margin-bottom:8px;}"
+    ".outline a{display:block;color:var(--mute);text-decoration:none;padding:2px 0;"
+    "border-left:1px solid var(--line);padding-left:10px;}"
+    ".outline a:hover{color:var(--accent2);border-left-color:var(--accent2);}"
+    ".outline a.lvl2{padding-left:22px;}"
+    ".outline a.lvl3{padding-left:34px;}"
+    ".outline-label{cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;}"
+    ".outline-caret{font-size:8px;display:inline-block;transition:transform .15s;}"
+    ".outline.collapsed .outline-caret{transform:rotate(-90deg);}"
+    ".outline.collapsed .outline-links{display:none;}"
+    ".outline.collapsed{width:auto;}"
+    "@media (max-width:1340px){.outline{display:none;}}"
+    "@media print{.outline{display:none;}}"
 )
 
 # Shared doc chrome: the "⤓ PDF" print button + print stylesheet. Reused by both
@@ -108,12 +136,15 @@ def _favicon_href(port: int) -> str:
 
 def _inject_into_html(src: str, lineage_html: str, favicon: str = "") -> str:
     """Inject backlinks CSS + HTML into an existing HTML document."""
+    src, outline_html = _add_outline(src)
     head_inject = f"<style>{_BACKLINKS_CSS}{_DOC_CHROME_CSS}</style>"
     if favicon:
         head_inject = f'<link rel="icon" type="image/svg+xml" href="{favicon}">' + head_inject
     src = re.sub(r"</head>", head_inject + "</head>", src, count=1, flags=re.IGNORECASE)
     # Print button goes right after <body> so it floats over the doc.
     src = re.sub(r"<body[^>]*>", lambda mo: mo.group(0) + _DOC_PRINT_BTN, src, count=1, flags=re.IGNORECASE)
+    if outline_html:
+        src = re.sub(r"<body[^>]*>", lambda mo: mo.group(0) + outline_html, src, count=1, flags=re.IGNORECASE)
     m = re.search(r"</h1>", src, re.IGNORECASE)
     if m:
         return src[: m.end()] + lineage_html + src[m.end() :]
@@ -235,6 +266,27 @@ img{max-width:100%;border-radius:4px;display:block;margin:1rem 0;}
 .backlinks-type{font-family:var(--mono);font-size:9px;color:var(--mute);}
 .backlinks-item{font-family:var(--mono);font-size:10px;padding:3px 8px;border:1px solid var(--line);color:var(--mute);background:var(--alt);white-space:nowrap;text-decoration:none;display:inline-block;}
 .backlinks-item:hover{border-color:var(--accent2);color:var(--accent2);}
+
+/* Document outline / TOC */
+html{scroll-behavior:smooth;}
+h1,h2,h3{scroll-margin-top:90px;}
+.outline{position:fixed;top:80px;left:32px;width:200px;word-break:break-word;
+  max-height:calc(100vh - 120px);overflow-y:auto;font-family:var(--mono);
+  font-size:11px;line-height:1.5;z-index:50;}
+.outline-label{font-size:9px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--accent);margin-bottom:8px;}
+.outline a{display:block;color:var(--mute);text-decoration:none;padding:2px 0;
+  border-left:1px solid var(--line);padding-left:10px;}
+.outline a:hover{color:var(--accent2);border-left-color:var(--accent2);}
+.outline a.lvl2{padding-left:22px;}
+.outline a.lvl3{padding-left:34px;}
+.outline-label{cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;}
+.outline-caret{font-size:8px;display:inline-block;transition:transform .15s;}
+.outline.collapsed .outline-caret{transform:rotate(-90deg);}
+.outline.collapsed .outline-links{display:none;}
+.outline.collapsed{width:auto;}
+@media (max-width:1340px){.outline{display:none;}}
+@media print{.outline{display:none;}}
 
 /* Directory listing */
 .dir-list{list-style:none;margin:0;padding:0;}
@@ -462,6 +514,69 @@ def _render_md(src: str) -> str:
     return result
 
 
+# ── Document outline / TOC ───────────────────────────────────────────────────
+
+def _slugify(text: str) -> str:
+    """Lowercase, strip HTML tags, collapse non-alphanumeric runs to '-', trim."""
+    text = re.sub(r"<[^>]+>", "", text)
+    text = text.lower()
+    text = re.sub(r"[^a-z0-9]+", "-", text)
+    return text.strip("-")
+
+
+def _add_outline(body_html: str) -> tuple[str, str]:
+    """Inject ids into h1-h3 tags and build a floating outline nav.
+
+    Returns (body_html_with_ids, outline_html). If fewer than 2 headings are
+    found, returns (body_html, "") unchanged.
+    """
+    headings: list[tuple[int, str, str]] = []
+    seen: dict[str, int] = {}
+
+    def _inject(m: re.Match) -> str:
+        level = int(m.group(1))
+        inner = m.group(2)
+        plain = re.sub(r"<[^>]+>", "", inner).strip()
+        slug = _slugify(plain) or "section"
+        if slug in seen:
+            seen[slug] += 1
+            slug = f"{slug}-{seen[slug]}"
+        else:
+            seen[slug] = 1
+        headings.append((level, plain, slug))
+        return f'<h{level} id="{slug}">{inner}</h{level}>'
+
+    body_html = re.sub(r"<h([1-3])>(.*?)</h\1>", _inject, body_html, flags=re.DOTALL)
+
+    if len(headings) < 2:
+        return body_html, ""
+
+    def _esc(s: str) -> str:
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    toggle = (
+        "var n=this.closest('.outline');n.classList.toggle('collapsed');"
+        "try{localStorage.setItem('hub_outline_collapsed',"
+        "n.classList.contains('collapsed')?'1':'0')}catch(e){}"
+    )
+    parts = [
+        '<nav class="outline" id="doc-outline">',
+        f'<div class="outline-label" onclick="{toggle}">'
+        '// outline <span class="outline-caret">▾</span></div>',
+        '<div class="outline-links">',
+    ]
+    for level, plain, slug in headings:
+        cls = f" lvl{level}" if level > 1 else ""
+        parts.append(f'<a class="outline-link{cls}" href="#{slug}">{_esc(plain)}</a>')
+    parts.append("</div></nav>")
+    parts.append(
+        '<script>(function(){var n=document.getElementById("doc-outline");'
+        'if(n){try{if(localStorage.getItem("hub_outline_collapsed")==="1")'
+        'n.classList.add("collapsed");}catch(e){}}})();</script>'
+    )
+    return body_html, "".join(parts)
+
+
 # ── Request handler ─────────────────────────────────────────────────────────
 
 def _is_within(child: Path, parent: Path) -> bool:
@@ -470,6 +585,101 @@ def _is_within(child: Path, parent: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+# ── Data file renderers (csv / tsv / xlsx → HTML table) ─────────────────────
+
+def _esc_cell(s: str) -> str:
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _rows_to_table(rows: list) -> str:
+    """Build an HTML table from a list of row lists; first row → header."""
+    if not rows:
+        return "<p>Empty file.</p>"
+    head = rows[0]
+    body_rows = rows[1:]
+    ths = "".join(f"<th>{_esc_cell(c)}</th>" for c in head)
+    trs = "".join(
+        "<tr>" + "".join(f"<td>{_esc_cell(c)}</td>" for c in row) + "</tr>"
+        for row in body_rows
+    )
+    return f"<table><thead><tr>{ths}</tr></thead><tbody>{trs}</tbody></table>"
+
+
+def _render_csv(path: Path) -> str:
+    """Render a .csv/.tsv file as an HTML table (stdlib csv)."""
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if path.suffix.lower() == ".tsv":
+            delim = "\t"
+        else:
+            try:
+                delim = csv.Sniffer().sniff(text[:4096], delimiters=",;\t|").delimiter
+            except Exception:
+                delim = ","
+        rows = list(csv.reader(io.StringIO(text), delimiter=delim))
+        return _rows_to_table(rows)
+    except Exception as e:
+        return f'<p class="empty">Could not parse {_esc_cell(path.name)}: {_esc_cell(str(e))}</p>'
+
+
+def _strip_ns(tag: str) -> str:
+    return tag.split("}")[-1]
+
+
+def _render_xlsx(path: Path) -> str:
+    """Render the first worksheet of an .xlsx file as an HTML table (stdlib zipfile + xml)."""
+    import xml.etree.ElementTree as ET
+    try:
+        with zipfile.ZipFile(path) as zf:
+            names = zf.namelist()
+            shared: list[str] = []
+            if "xl/sharedStrings.xml" in names:
+                ss_root = ET.fromstring(zf.read("xl/sharedStrings.xml"))
+                for si in ss_root:
+                    parts = [t.text or "" for t in si.iter()
+                             if _strip_ns(t.tag) == "t"]
+                    shared.append("".join(parts))
+
+            sheet_name = "xl/worksheets/sheet1.xml"
+            if sheet_name not in names:
+                sheets = sorted(n for n in names
+                                if n.startswith("xl/worksheets/sheet") and n.endswith(".xml"))
+                if not sheets:
+                    return '<p class="empty">No worksheet found.</p>'
+                sheet_name = sheets[0]
+            sheet_root = ET.fromstring(zf.read(sheet_name))
+
+        rows: list = []
+        for el in sheet_root.iter():
+            if _strip_ns(el.tag) != "row":
+                continue
+            cells: list[str] = []
+            for c in el:
+                if _strip_ns(c.tag) != "c":
+                    continue
+                ctype = c.get("t")
+                val = ""
+                for child in c:
+                    if _strip_ns(child.tag) == "v":
+                        val = child.text or ""
+                        break
+                    if _strip_ns(child.tag) == "is":
+                        val = "".join(t.text or "" for t in child.iter()
+                                      if _strip_ns(t.tag) == "t")
+                        break
+                if ctype == "s":
+                    try:
+                        val = shared[int(val)]
+                    except (ValueError, IndexError):
+                        val = ""
+                cells.append(val)
+            rows.append(cells)
+        return _rows_to_table(rows)
+    except Exception as e:
+        return f'<p class="empty">Could not parse {_esc_cell(path.name)}: {_esc_cell(str(e))}</p>'
 
 
 class HubHandler(http.server.BaseHTTPRequestHandler):
@@ -529,6 +739,18 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             src = fs_path.read_text(encoding="utf-8", errors="replace")
             escaped = src.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
             self._serve_page(fs_path.name, fs_path, f"<pre><code>{escaped}</code></pre>")
+        elif fs_path.suffix.lower() in (".csv", ".tsv"):
+            self._serve_page(fs_path.name, fs_path, _render_csv(fs_path))
+        elif fs_path.suffix.lower() == ".xlsx":
+            self._serve_page(fs_path.name, fs_path, _render_xlsx(fs_path))
+        elif fs_path.suffix.lower() == ".pdf":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/pdf")
+            self.send_header("Content-Disposition", "inline")
+            body = fs_path.read_bytes()
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
         else:
             ct, _ = mimetypes.guess_type(str(fs_path))
             self._send(200, ct or "application/octet-stream", fs_path.read_bytes())
@@ -552,9 +774,12 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 import sys as _sys
                 _sys.path.insert(0, str(_HERE))
                 import db as _db
-                conn = sqlite3.connect(str(_DB_PATH))
+                conn = sqlite3.connect(str(_DB_PATH), timeout=30)
                 _db.set_status(conn, task_slug, task_repo, status)
                 conn.close()
+                # Regenerate the index so the new status is baked into the
+                # embedded TASK_STATUS_DATA and survives a refresh.
+                self._rebuild(_active_root)
                 self._send(200, "text/plain", b"ok")
             except Exception as e:
                 self._send(400, "text/plain", str(e).encode())
@@ -591,10 +816,11 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         env = os.environ.copy()
         env["HUB_SERVER_PORT"] = str(HubHandler.server_port)
         env["HUB_SCAN_ROOT"] = str(root)
-        return subprocess.run(
-            [sys.executable, str(_HERE / "hub.py")],
-            env=env, capture_output=True, text=True,
-        )
+        with _REBUILD_LOCK:
+            return subprocess.run(
+                [sys.executable, str(_HERE / "hub.py")],
+                env=env, capture_output=True, text=True,
+            )
 
     def _serve_md(self, path: Path) -> None:
         src = path.read_text(encoding="utf-8", errors="replace")
@@ -631,6 +857,10 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             nav_html = f'<nav>{" / ".join(parts)}</nav>'
         except ValueError:
             nav_html = ""
+
+        body, outline = _add_outline(body)
+        if outline:
+            body = outline + body
 
         links = _get_lineage(str(path.resolve()))
         lineage_html = _render_lineage_html(links, self.__class__.server_port)

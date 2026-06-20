@@ -52,6 +52,7 @@ h1 .hub{{color:#C15F3C;font-style:italic;}}
 .chip.active[data-kind="prompt"]{{background:#E0B84A;border-color:#C99A20;color:#3A2E00;}}
 .chip.active[data-kind="artifact"]{{background:#5C4A7A;border-color:#5C4A7A;}}
 .chip.active[data-kind="run"]{{background:#2F6B4F;border-color:#2F6B4F;}}
+.chip.active[data-kind="data"]{{background:#2E7D8A;border-color:#2E7D8A;}}
 .chip.active[data-kind="readme"]{{background:#3A3A3A;border-color:#3A3A3A;}}
 .hub-layout{{display:flex;gap:20px;align-items:flex-start;}}
 .list-pane{{flex:1;min-width:0;}}
@@ -74,6 +75,7 @@ h1 .hub{{color:#C15F3C;font-style:italic;}}
 .badge.readme{{color:#fff;background:#3A3A3A;border-color:#3A3A3A;}}
 .badge.artifact{{color:#fff;background:#5C4A7A;border-color:#5C4A7A;}}
 .badge.run{{color:#fff;background:#2F6B4F;border-color:#2F6B4F;}}
+.badge.data{{color:#fff;background:#2E7D8A;border-color:#2E7D8A;}}
 .path{{font-family:var(--mono);font-size:12.5px;flex:1;word-break:break-all;}}
 .ago{{font-family:var(--mono);font-size:10px;color:var(--mute);flex:0 0 auto;}}
 .empty{{color:var(--mute);font-style:italic;}}
@@ -155,6 +157,52 @@ footer{{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-f
 .s-ongoing{{color:#2F6B4F;border-color:#2F6B4F;background:rgba(47,107,79,.08);}}
 .s-completed{{color:var(--mute);border-color:var(--line);background:var(--alt);}}
 .s-paused{{color:#7A5A14;border-color:#C99A20;background:rgba(201,154,32,.1);}}
+/* ── View pills + board/calendar ─────────────────────────────────────── */
+.view-pills{{display:inline-flex;gap:0;border:1px solid var(--line);background:var(--alt);}}
+.view-pill{{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:lowercase;padding:5px 12px;border:none;background:none;color:var(--mute);cursor:pointer;border-right:1px solid var(--line);}}
+.view-pill:last-child{{border-right:none;}}
+.view-pill:hover{{color:var(--ink);}}
+.view-pill.active{{background:var(--ink);color:#fff;}}
+#board{{display:none;gap:16px;margin-top:18px;align-items:flex-start;}}
+#board.show{{display:flex;}}
+.kanban-col{{flex:1;min-width:0;background:var(--alt);border:1px solid var(--line);border-top:3px solid var(--line);min-height:120px;}}
+.kanban-col.over{{border-top-color:var(--accent2);background:var(--deep);}}
+.kanban-col[data-status="ongoing"]{{border-top-color:#2F6B4F;}}
+.kanban-col[data-status="paused"]{{border-top-color:#C99A20;}}
+.kanban-col[data-status="completed"]{{border-top-color:var(--mute);}}
+.kanban-head{{display:flex;align-items:baseline;justify-content:space-between;padding:8px 12px;border-bottom:1px solid var(--line);font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;}}
+.kanban-head[data-status="ongoing"]{{color:#2F6B4F;}}
+.kanban-head[data-status="paused"]{{color:#7A5A14;}}
+.kanban-head[data-status="completed"]{{color:var(--mute);}}
+.kanban-count{{color:var(--mute);}}
+.kanban-body{{padding:8px;display:flex;flex-direction:column;gap:8px;min-height:60px;}}
+.kanban-card{{background:var(--bg);border:1px solid var(--line);padding:9px 10px;cursor:pointer;}}
+.kanban-card:hover{{border-color:var(--accent2);}}
+.kanban-card.dragging{{opacity:.4;}}
+.kc-name{{font-family:var(--disp);font-style:italic;font-size:15px;color:var(--ink);margin-bottom:2px;}}
+.kc-repo{{font-family:var(--mono);font-size:9px;color:var(--mute);margin-bottom:5px;}}
+.kc-chips{{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px;}}
+.kc-chip{{font-family:var(--mono);font-size:9px;padding:1px 5px;border:1px solid var(--line);color:var(--mute);background:var(--alt);}}
+.kc-ago{{font-family:var(--mono);font-size:9px;color:var(--mute);}}
+.kanban-empty{{font-family:var(--mono);font-size:10px;color:var(--mute);padding:6px 4px;font-style:italic;}}
+#calendar{{display:none;margin-top:18px;}}
+#calendar.show{{display:block;}}
+.cal-nav{{display:flex;align-items:center;gap:14px;margin-bottom:10px;}}
+.cal-title{{font-family:var(--disp);font-style:italic;font-size:20px;color:var(--accent);}}
+.cal-btn{{font-family:var(--mono);font-size:11px;padding:4px 10px;border:1px solid var(--line);background:var(--alt);color:var(--ink);cursor:pointer;}}
+.cal-btn:hover{{border-color:var(--ink);}}
+.cal-grid{{display:grid;grid-template-columns:repeat(7,1fr);border-left:1px solid var(--line);border-top:1px solid var(--line);}}
+.cal-dow{{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);padding:5px 6px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--alt);}}
+.cal-cell{{min-height:84px;padding:4px 5px;border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--bg);}}
+.cal-cell.blank{{background:var(--alt);}}
+.cal-today{{background:var(--deep);outline:2px solid var(--accent2);outline-offset:-2px;}}
+.cal-day{{font-family:var(--mono);font-size:10px;color:var(--mute);margin-bottom:3px;}}
+.cal-today .cal-day{{color:var(--accent2);font-weight:500;}}
+.cal-chip{{display:block;font-family:var(--mono);font-size:9px;padding:1px 4px;margin-bottom:2px;border-left:2px solid var(--accent2);background:var(--alt);color:var(--ink);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-decoration:none;}}
+.cal-chip.s-ongoing{{border-left-color:#2F6B4F;}}
+.cal-chip.s-paused{{border-left-color:#C99A20;}}
+.cal-chip.s-completed{{border-left-color:var(--mute);}}
+.cal-chip:hover{{background:var(--deep);}}
 </style></head><body><div class="wrap">
 <header>
   <div class="kicker"><span>// HUB DIRECTORY · <a href="#" id="setroot" title="click to change scan root">{scan_root}</a></span><a href="#" id="rebuild" title="rebuild hub index">↻ rebuild hub</a></div>
@@ -163,6 +211,11 @@ footer{{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-f
   <span><b>{html_total}</b> html</span><span><b>{repo_count}</b> repos</span><span>built {built}</span></div>
 </header>
 <div class="search"><input id="q" type="text" placeholder="filter by repo, path, or content…  (press / to focus)" autocomplete="off">
+<div class="view-pills" style="margin-top:10px">
+  <button class="view-pill" data-view="list">list</button>
+  <button class="view-pill" data-view="board">board</button>
+  <button class="view-pill" data-view="calendar">calendar</button>
+</div>
 <div class="chips">
   <button class="chip active" data-kind="all">ALL</button>
   <button class="chip" data-kind="claude">CLAUDE</button>
@@ -172,6 +225,7 @@ footer{{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-f
   <button class="chip" data-kind="run">RUN</button>
   <button class="chip" data-kind="doc">DOC</button>
   <button class="chip" data-kind="prompt">PROMPT</button>
+  <button class="chip" data-kind="data">DATA</button>
 </div>
 <div class="repo-chips" id="repo-chips">{repo_chips}</div>
 </div>
@@ -189,6 +243,28 @@ footer{{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-f
     <div class="pv-body" id="pv-body"></div>
     <div class="pv-hint">j/k navigate · Enter open · Esc close</div>
   </aside>
+</div>
+<div id="board">
+  <div class="kanban-col" data-status="ongoing">
+    <div class="kanban-head" data-status="ongoing"><span>ongoing</span><span class="kanban-count" data-count="ongoing">0</span></div>
+    <div class="kanban-body" data-status="ongoing"></div>
+  </div>
+  <div class="kanban-col" data-status="paused">
+    <div class="kanban-head" data-status="paused"><span>paused</span><span class="kanban-count" data-count="paused">0</span></div>
+    <div class="kanban-body" data-status="paused"></div>
+  </div>
+  <div class="kanban-col" data-status="completed">
+    <div class="kanban-head" data-status="completed"><span>completed</span><span class="kanban-count" data-count="completed">0</span></div>
+    <div class="kanban-body" data-status="completed"></div>
+  </div>
+</div>
+<div id="calendar">
+  <div class="cal-nav">
+    <button class="cal-btn" id="cal-prev">‹ prev</button>
+    <span class="cal-title" id="cal-title"></span>
+    <button class="cal-btn" id="cal-next">next ›</button>
+  </div>
+  <div class="cal-grid" id="cal-grid"></div>
 </div>
 <button class="feed-tab" id="feed-tab">// feed</button>
 <div class="feed-drawer" id="feed-drawer">
@@ -227,6 +303,7 @@ const LINEAGE_DATA={lineage_json};
 const TASK_STATUS_DATA={task_status_json};
 const ACTIVITY_DATA={activity_json};
 const TIMELINE_DATA={timeline_json};
+const TASKS_DATA={tasks_json};
 const ftsMap=new Map(FTS_DATA.map(d=>[d.a,d]));
 const STATUS_CYCLE=['ongoing','completed','paused'];
 
@@ -322,6 +399,7 @@ const FEED_ACTIONS={{
   artifact:{{created:'Artifact created',    updated:'Artifact revised'}},
   prompt:  {{created:'Prompt added',        updated:'Prompt updated'}},
   doc:     {{created:'Doc added',           updated:'Doc updated'}},
+  data:    {{created:'Data file added',     updated:'Data file updated'}},
   claude:  {{created:'CLAUDE.md updated',   updated:'CLAUDE.md updated'}},
   readme:  {{created:'README updated',      updated:'README updated'}},
 }};
@@ -414,8 +492,8 @@ document.addEventListener('keydown',e=>{{
 function buildLineage(links){{
   const groups={{}};
   links.forEach(l=>{{(groups[l.r]=groups[l.r]||[]).push(l);}});
-  const ORDER=['belongs_to_task','task_has_run','task_has_artifact','task_has_prompt','task_has_doc'];
-  const LABELS={{'belongs_to_task':'↑ task','task_has_run':'runs','task_has_artifact':'artifacts','task_has_prompt':'prompts','task_has_doc':'docs'}};
+  const ORDER=['belongs_to_task','task_has_run','task_has_artifact','task_has_data','task_has_prompt','task_has_doc'];
+  const LABELS={{'belongs_to_task':'↑ task','task_has_run':'runs','task_has_artifact':'artifacts','task_has_data':'data','task_has_prompt':'prompts','task_has_doc':'docs'}};
   let h='<div class="ln-label">// trace</div>';
   ORDER.forEach(r=>{{
     if(!groups[r]) return;
@@ -532,6 +610,124 @@ renderFeed();
     else if(e.key==='Escape'&&drawer.classList.contains('open'))closeTl();
   }});
 }})();
+// ── Task Board (kanban) ───────────────────────────────────────────────────
+function tagName(sl){{return String(sl).replace(/[-_]/g,' ').replace(/^./,c=>c.toUpperCase());}}
+function buildCard(t){{
+  const card=document.createElement('div');
+  card.className='kanban-card';
+  card.draggable=true;
+  card.dataset.sl=t.sl;card.dataset.rp=t.rp;card.dataset.abs=t.abs;
+  const chips=[];
+  if(t.runs)chips.push(t.runs+' run'+(t.runs>1?'s':''));
+  if(t.artifacts)chips.push(t.artifacts+' artifact'+(t.artifacts>1?'s':''));
+  if(t.prompts)chips.push(t.prompts+' prompt'+(t.prompts>1?'s':''));
+  if(t.docs)chips.push(t.docs+' doc'+(t.docs>1?'s':''));
+  if(t.data)chips.push(t.data+' data');
+  card.innerHTML=`<div class="kc-name">${{esc(tagName(t.sl))}}</div>`+
+    `<div class="kc-repo">${{esc(t.rp)}}</div>`+
+    (chips.length?`<div class="kc-chips">${{chips.map(c=>`<span class="kc-chip">${{esc(c)}}</span>`).join('')}}</div>`:'')+
+    `<div class="kc-ago">${{feedAgo(t.mtime)}}</div>`;
+  card.addEventListener('click',()=>{{if(t.abs)window.open(fileHref(t.abs),'_blank','noopener');}});
+  card.addEventListener('dragstart',e=>{{
+    card.classList.add('dragging');
+    e.dataTransfer.effectAllowed='move';
+    e.dataTransfer.setData('text/plain',t.rp+':'+t.sl);
+  }});
+  card.addEventListener('dragend',()=>card.classList.remove('dragging'));
+  return card;
+}}
+function renderBoard(){{
+  const counts={{ongoing:0,paused:0,completed:0}};
+  document.querySelectorAll('.kanban-body').forEach(b=>b.innerHTML='');
+  TASKS_DATA.forEach(t=>{{
+    const st=['ongoing','paused','completed'].includes(t.status)?t.status:'ongoing';
+    const body=document.querySelector('.kanban-body[data-status="'+st+'"]');
+    if(body){{body.appendChild(buildCard(t));counts[st]++;}}
+  }});
+  ['ongoing','paused','completed'].forEach(st=>{{
+    document.querySelector('.kanban-count[data-count="'+st+'"]').textContent=counts[st];
+    const body=document.querySelector('.kanban-body[data-status="'+st+'"]');
+    if(!counts[st])body.innerHTML='<div class="kanban-empty">— none —</div>';
+  }});
+}}
+document.querySelectorAll('.kanban-col').forEach(col=>{{
+  const status=col.dataset.status;
+  const body=col.querySelector('.kanban-body');
+  col.addEventListener('dragover',e=>{{e.preventDefault();e.dataTransfer.dropEffect='move';col.classList.add('over');}});
+  col.addEventListener('dragleave',()=>col.classList.remove('over'));
+  col.addEventListener('drop',e=>{{
+    e.preventDefault();col.classList.remove('over');
+    const card=document.querySelector('.kanban-card.dragging');
+    if(!card)return;
+    const empty=body.querySelector('.kanban-empty');if(empty)empty.remove();
+    body.appendChild(card);
+    const sl=card.dataset.sl,rp=card.dataset.rp;
+    const t=TASKS_DATA.find(x=>x.sl===sl&&x.rp===rp);
+    if(t)t.status=status;
+    fetch('/_task-status',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+      body:JSON.stringify({{task_slug:sl,task_repo:rp,status:status}})
+    }}).then(()=>flash('moved → '+status)).catch(()=>flash('status update failed'));
+    document.querySelectorAll('.kanban-body').forEach(b=>{{
+      const s=b.dataset.status,n=b.querySelectorAll('.kanban-card').length;
+      document.querySelector('.kanban-count[data-count="'+s+'"]').textContent=n;
+      if(!n&&!b.querySelector('.kanban-empty'))b.innerHTML='<div class="kanban-empty">— none —</div>';
+    }});
+  }});
+}});
+
+// ── Calendar ──────────────────────────────────────────────────────────────
+let calRef=new Date();calRef.setDate(1);
+const MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
+function renderCalendar(){{
+  const grid=document.getElementById('cal-grid');
+  const y=calRef.getFullYear(),mo=calRef.getMonth();
+  document.getElementById('cal-title').textContent=MONTHS[mo]+' '+y;
+  const byDay={{}};
+  TASKS_DATA.forEach(t=>{{
+    const d=new Date(t.mtime*1000);
+    if(d.getFullYear()===y&&d.getMonth()===mo){{(byDay[d.getDate()]=byDay[d.getDate()]||[]).push(t);}}
+  }});
+  const now=new Date();
+  const isThisMonth=now.getFullYear()===y&&now.getMonth()===mo;
+  const firstDow=new Date(y,mo,1).getDay();
+  const days=new Date(y,mo+1,0).getDate();
+  let h='';
+  ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d=>h+=`<div class="cal-dow">${{d}}</div>`);
+  for(let i=0;i<firstDow;i++)h+='<div class="cal-cell blank"></div>';
+  for(let day=1;day<=days;day++){{
+    const today=isThisMonth&&now.getDate()===day;
+    const tasks=byDay[day]||[];
+    const chips=tasks.map(t=>{{
+      const st=['ongoing','paused','completed'].includes(t.status)?t.status:'ongoing';
+      return `<a class="cal-chip s-${{st}}" href="${{fileHref(t.abs)}}" target="_blank" rel="noopener" title="${{esc(t.rp+' / '+t.sl)}}">${{esc(tagName(t.sl))}}</a>`;
+    }}).join('');
+    h+=`<div class="cal-cell${{today?' cal-today':''}}"><div class="cal-day">${{day}}</div>${{chips}}</div>`;
+  }}
+  grid.innerHTML=h;
+}}
+document.getElementById('cal-prev').addEventListener('click',()=>{{calRef.setMonth(calRef.getMonth()-1);renderCalendar();}});
+document.getElementById('cal-next').addEventListener('click',()=>{{calRef.setMonth(calRef.getMonth()+1);renderCalendar();}});
+
+// ── View toggle (list / board / calendar) ──────────────────────────────────
+(function(){{
+  const layout=document.querySelector('.hub-layout');
+  const board=document.getElementById('board');
+  const cal=document.getElementById('calendar');
+  const pills=[...document.querySelectorAll('.view-pill')];
+  let view=sessionStorage.getItem('docs_hub_view')||'list';
+  function setView(v){{
+    view=v;sessionStorage.setItem('docs_hub_view',v);
+    pills.forEach(p=>p.classList.toggle('active',p.dataset.view===v));
+    layout.classList.toggle('hidden',v!=='list');
+    board.classList.toggle('show',v==='board');
+    cal.classList.toggle('show',v==='calendar');
+    if(v==='board')renderBoard();
+    if(v==='calendar')renderCalendar();
+  }}
+  pills.forEach(p=>p.addEventListener('click',()=>setView(p.dataset.view)));
+  setView(view);
+}})();
+
 const REBUILD_CMD=`/usr/bin/python3 ${{HUBPY}}`;
 const toast=document.getElementById('toast');
 function flash(msg){{toast.textContent=msg;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),2400);}}
