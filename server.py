@@ -773,6 +773,9 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 conn = sqlite3.connect(str(_DB_PATH))
                 _db.set_status(conn, task_slug, task_repo, status)
                 conn.close()
+                # Regenerate the index so the new status is baked into the
+                # embedded TASKS_DATA / TASK_STATUS_DATA and survives a refresh.
+                self._rebuild(_active_root)
                 self._send(200, "text/plain", b"ok")
             except Exception as e:
                 self._send(400, "text/plain", str(e).encode())
