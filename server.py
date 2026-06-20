@@ -778,7 +778,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 _db.set_status(conn, task_slug, task_repo, status)
                 conn.close()
                 # Regenerate the index so the new status is baked into the
-                # embedded TASK_STATUS_DATA and survives a refresh.
+                # embedded TASKS_DATA / TASK_STATUS_DATA and survives a refresh.
                 self._rebuild(_active_root)
                 self._send(200, "text/plain", b"ok")
             except Exception as e:
@@ -817,10 +817,15 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         env["HUB_SERVER_PORT"] = str(HubHandler.server_port)
         env["HUB_SCAN_ROOT"] = str(root)
         with _REBUILD_LOCK:
-            return subprocess.run(
-                [sys.executable, str(_HERE / "hub.py")],
-                env=env, capture_output=True, text=True,
-            )
+            try:
+                return subprocess.run(
+                    [sys.executable, str(_HERE / "hub.py")],
+                    env=env, capture_output=True, text=True,
+                    timeout=600,
+                )
+            except subprocess.TimeoutExpired as exc:
+                exc.kill()
+                return subprocess.CompletedProcess(exc.args, 1, "", "hub.py timed out after 600 s")
 
     def _serve_md(self, path: Path) -> None:
         src = path.read_text(encoding="utf-8", errors="replace")
