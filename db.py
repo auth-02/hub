@@ -111,7 +111,11 @@ def _restore_from_sidecar(conn: sqlite3.Connection) -> None:
 
 
 def open_db(db_path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(db_path))
+    # timeout + busy_timeout let a writer wait for a concurrent one (e.g. the
+    # file-watcher and a /_set-root rebuild) instead of failing with
+    # "database is locked".
+    conn = sqlite3.connect(str(db_path), timeout=30)
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.executescript(_DDL)
     conn.commit()
     _restore_from_sidecar(conn)
@@ -170,7 +174,7 @@ def build_lineage(conn: sqlite3.Connection) -> None:
     by_task: dict = {}
     for fid, abs_, kind, slug, trepo in rows:
         key = (slug, trepo)
-        g = by_task.setdefault(key, {k: [] for k in ("task", "run", "artifact", "prompt", "doc")})
+        g = by_task.setdefault(key, {k: [] for k in ("task", "run", "artifact", "prompt", "doc", "data")})
         bucket = kind if kind in g else "doc"
         g[bucket].append(fid)
 
@@ -179,6 +183,7 @@ def build_lineage(conn: sqlite3.Connection) -> None:
         "artifact": "task_has_artifact",
         "prompt": "task_has_prompt",
         "doc": "task_has_doc",
+        "data": "task_has_data",
     }
     edges: list = []
     for buckets in by_task.values():
@@ -291,6 +296,55 @@ def get_timeline_data(conn: sqlite3.Connection, scan_root: str = "", days: int =
         elif kind == "doc":     t["docs"] += 1
 
     return sorted(tasks.values(), key=lambda x: x["ts"], reverse=True)
+
+
+def get_all_tasks(conn: sqlite3.Connection, scan_root: str = "") -> list:
+    """Return EVERY task (manifest rows, kind='task'), with status + child counts.
+
+    Each entry: {sl, rp, status, abs, mtime, runs, artifacts, prompts, docs, data}.
+    Counts come from grouping all `files` rows by (task_slug, task_repo) and kind.
+    """
+    # Child counts per (task_slug, task_repo, kind)
+    count_rows = conn.execute(
+        "SELECT task_slug, task_repo, kind, COUNT(*) "
+        "FROM files WHERE task_slug IS NOT NULL "
+        "GROUP BY task_slug, task_repo, kind"
+    ).fetchall()
+    counts: dict = {}
+    for slug, trepo, kind, n in count_rows:
+        counts.setdefault((slug, trepo), {})[kind or ""] = n
+
+    params: list = []
+    root_filter = ""
+    if scan_root:
+        root_filter = "AND abs LIKE ?"
+        params.append(scan_root.rstrip("/") + "/%")
+
+    rows = conn.execute(
+        f"""SELECT f.task_slug, f.task_repo, f.abs, f.mtime,
+                   COALESCE(ts.status, 'ongoing') AS status
+            FROM files f
+            LEFT JOIN task_status ts
+              ON ts.task_slug = f.task_slug AND ts.task_repo = f.task_repo
+            WHERE f.kind = 'task' AND f.task_slug IS NOT NULL {root_filter}""",
+        params,
+    ).fetchall()
+
+    tasks: dict = {}
+    for slug, trepo, abs_, mtime, status in rows:
+        key = (slug, trepo)
+        # one manifest per task; keep the most recent if duplicates
+        if key in tasks and mtime <= tasks[key]["mtime"]:
+            continue
+        c = counts.get(key, {})
+        tasks[key] = {
+            "sl": slug, "rp": trepo, "status": status,
+            "abs": abs_, "mtime": mtime,
+            "runs": c.get("run", 0), "artifacts": c.get("artifact", 0),
+            "prompts": c.get("prompt", 0), "docs": c.get("doc", 0),
+            "data": c.get("data", 0),
+        }
+    return sorted(tasks.values(), key=lambda x: x["mtime"], reverse=True)
 
 
 def export_html_data(conn: sqlite3.Connection) -> tuple:
