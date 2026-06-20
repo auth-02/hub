@@ -13,6 +13,13 @@ open http://localhost:8787/            # open hub
 
 Second `hub.py` run is ~300 ms — mtime-gated, skips unchanged files.
 
+## Run tests
+
+```bash
+python3 tests/run_tests.py       # all 128 tests
+python3 tests/run_tests.py -v    # verbose output
+```
+
 ## File map
 
 ```
@@ -22,6 +29,13 @@ hub/
 │                       /_rebuild and /_set-root endpoints
 ├── db.py               SQLite layer — schema, upsert, lineage, FTS export
 ├── metadata.py         metadata extraction — title + body from markdown/html
+├── tests/
+│   ├── run_tests.py    test runner entry point
+│   ├── test_metadata.py
+│   ├── test_db.py
+│   ├── test_hub_helpers.py
+│   ├── test_server_helpers.py
+│   └── test_server_http.py     integration — spins up real server
 ├── assets/
 │   └── favicon.svg     tab icon
 ├── templates/
@@ -31,6 +45,7 @@ hub/
 ~/.hub-state/           persistent state — never delete
 │   ├── hub.db          SQLite: files, lineage, fts, activity_log, task_status
 │   └── task-status.json sidecar backup of task statuses
+├── example/            local-only fixture repos for dev/screenshots (gitignored)
 ├── .scan_root          active scan root (written by /_set-root)
 └── .hub.log            debug log (only when HUB_DEBUG=1)
 ```

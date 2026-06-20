@@ -5,3 +5,6 @@ __pycache__/
 .hub.log
 .venv/
 *.DS_Store
+
+example/
+tasks/
