@@ -1,0 +1,5 @@
+id,name,email,provider,signups
+1,Ada Lovelace,ada@example.com,github,12
+2,Alan Turing,alan@example.com,google,34
+3,Grace Hopper,grace@example.com,github,7
+4,Katherine Johnson,kj@example.com,google,21
