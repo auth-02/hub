@@ -85,7 +85,7 @@ _BACKLINKS_CSS = (
     ".backlinks-item:hover{border-color:var(--accent2);color:var(--accent2);}"
     "html{scroll-behavior:smooth;}"
     "h1,h2,h3{scroll-margin-top:90px;}"
-    ".outline{position:fixed;top:80px;right:calc(50% + 446px);width:190px;word-break:break-word;"
+    ".outline{position:fixed;top:80px;left:32px;width:200px;word-break:break-word;"
     "max-height:calc(100vh - 120px);overflow-y:auto;font-family:var(--mono);"
     "font-size:11px;line-height:1.5;z-index:50;}"
     ".outline-label{font-size:9px;letter-spacing:.18em;text-transform:uppercase;"
@@ -95,7 +95,12 @@ _BACKLINKS_CSS = (
     ".outline a:hover{color:var(--accent2);border-left-color:var(--accent2);}"
     ".outline a.lvl2{padding-left:22px;}"
     ".outline a.lvl3{padding-left:34px;}"
-    "@media (max-width:1280px){.outline{display:none;}}"
+    ".outline-label{cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;}"
+    ".outline-caret{font-size:8px;display:inline-block;transition:transform .15s;}"
+    ".outline.collapsed .outline-caret{transform:rotate(-90deg);}"
+    ".outline.collapsed .outline-links{display:none;}"
+    ".outline.collapsed{width:auto;}"
+    "@media (max-width:1340px){.outline{display:none;}}"
     "@media print{.outline{display:none;}}"
 )
 
@@ -261,7 +266,7 @@ img{max-width:100%;border-radius:4px;display:block;margin:1rem 0;}
 /* Document outline / TOC */
 html{scroll-behavior:smooth;}
 h1,h2,h3{scroll-margin-top:90px;}
-.outline{position:fixed;top:80px;right:calc(50% + 446px);width:190px;word-break:break-word;
+.outline{position:fixed;top:80px;left:32px;width:200px;word-break:break-word;
   max-height:calc(100vh - 120px);overflow-y:auto;font-family:var(--mono);
   font-size:11px;line-height:1.5;z-index:50;}
 .outline-label{font-size:9px;letter-spacing:.18em;text-transform:uppercase;
@@ -271,7 +276,12 @@ h1,h2,h3{scroll-margin-top:90px;}
 .outline a:hover{color:var(--accent2);border-left-color:var(--accent2);}
 .outline a.lvl2{padding-left:22px;}
 .outline a.lvl3{padding-left:34px;}
-@media (max-width:1280px){.outline{display:none;}}
+.outline-label{cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;}
+.outline-caret{font-size:8px;display:inline-block;transition:transform .15s;}
+.outline.collapsed .outline-caret{transform:rotate(-90deg);}
+.outline.collapsed .outline-links{display:none;}
+.outline.collapsed{width:auto;}
+@media (max-width:1340px){.outline{display:none;}}
 @media print{.outline{display:none;}}
 
 /* Directory listing */
@@ -540,11 +550,26 @@ def _add_outline(body_html: str) -> tuple[str, str]:
     def _esc(s: str) -> str:
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-    parts = ['<nav class="outline"><div class="outline-label">// outline</div>']
+    toggle = (
+        "var n=this.closest('.outline');n.classList.toggle('collapsed');"
+        "try{localStorage.setItem('hub_outline_collapsed',"
+        "n.classList.contains('collapsed')?'1':'0')}catch(e){}"
+    )
+    parts = [
+        '<nav class="outline" id="doc-outline">',
+        f'<div class="outline-label" onclick="{toggle}">'
+        '// outline <span class="outline-caret">▾</span></div>',
+        '<div class="outline-links">',
+    ]
     for level, plain, slug in headings:
         cls = f" lvl{level}" if level > 1 else ""
         parts.append(f'<a class="outline-link{cls}" href="#{slug}">{_esc(plain)}</a>')
-    parts.append("</nav>")
+    parts.append("</div></nav>")
+    parts.append(
+        '<script>(function(){var n=document.getElementById("doc-outline");'
+        'if(n){try{if(localStorage.getItem("hub_outline_collapsed")==="1")'
+        'n.classList.add("collapsed");}catch(e){}}})();</script>'
+    )
     return body_html, "".join(parts)
 
 
