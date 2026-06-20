@@ -32,6 +32,10 @@ _HERE = Path(__file__).resolve().parent
 _SIDECAR = Path.home() / "agents" / "hub" / ".scan_root"
 _DB_PATH = Path.home() / ".hub-state" / "hub.db"
 
+# Serialize hub.py rebuilds so the watcher and request-triggered rebuilds
+# (/_set-root, /_rebuild, /_task-status) never run two writers at once.
+_REBUILD_LOCK = threading.Lock()
+
 
 def _get_lineage(abs_path: str) -> list:
     """Return lineage links for abs_path from hub.db (empty list if DB missing or file unknown)."""
@@ -529,7 +533,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 import sys as _sys
                 _sys.path.insert(0, str(_HERE))
                 import db as _db
-                conn = sqlite3.connect(str(_DB_PATH))
+                conn = sqlite3.connect(str(_DB_PATH), timeout=30)
                 _db.set_status(conn, task_slug, task_repo, status)
                 conn.close()
                 # Regenerate the index so the new status is baked into the
@@ -571,10 +575,11 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         env = os.environ.copy()
         env["HUB_SERVER_PORT"] = str(HubHandler.server_port)
         env["HUB_SCAN_ROOT"] = str(root)
-        return subprocess.run(
-            [sys.executable, str(_HERE / "hub.py")],
-            env=env, capture_output=True, text=True,
-        )
+        with _REBUILD_LOCK:
+            return subprocess.run(
+                [sys.executable, str(_HERE / "hub.py")],
+                env=env, capture_output=True, text=True,
+            )
 
     def _serve_md(self, path: Path) -> None:
         src = path.read_text(encoding="utf-8", errors="replace")
