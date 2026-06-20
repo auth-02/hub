@@ -45,7 +45,7 @@ hub/
 ~/.hub-state/           persistent state — never delete
 │   ├── hub.db          SQLite: files, lineage, fts, activity_log, task_status
 │   └── task-status.json sidecar backup of task statuses
-├── example/            local-only fixture repos for dev/screenshots (gitignored)
+├── example/            fixture repos for dev/screenshots
 ├── .scan_root          active scan root (written by /_set-root)
 └── .hub.log            debug log (only when HUB_DEBUG=1)
 ```
