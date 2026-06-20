@@ -137,6 +137,10 @@ def _classify(path: Path, rel: str) -> str | None:
     posix = path.as_posix()
     for dirname, kind in KIND_DIRS:
         if f"/{dirname}/" in posix or rel.startswith(f"{dirname}/"):
+            # For skills/, only the SKILL.md root file gets kind=skill;
+            # reference files keep their natural kind for filtering purposes.
+            if kind == "skill" and stem != "skill":
+                return None
             return kind
     return None
 

@@ -135,13 +135,17 @@ def open_db(db_path: Path) -> sqlite3.Connection:
 
 
 def is_current(conn: sqlite3.Connection, abs_path: str, mtime: float) -> bool:
-    row = conn.execute("SELECT mtime, skill_slug FROM files WHERE abs=?", (abs_path,)).fetchone()
+    row = conn.execute("SELECT mtime, skill_slug, kind FROM files WHERE abs=?", (abs_path,)).fetchone()
     if row is None:
         return False
     if abs(row[0] - mtime) >= 0.01:
         return False
-    if "/skills/" in abs_path and row[1] is None:
-        return False
+    if "/skills/" in abs_path:
+        # Force reindex if slug missing OR if a reference file still has kind=skill
+        # (kind should only be 'skill' for the SKILL.md root, not for references)
+        is_skill_root = abs_path.split("/")[-1].lower().startswith("skill.")
+        if row[1] is None or (not is_skill_root and row[2] == "skill"):
+            return False
     return True
 
 
