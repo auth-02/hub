@@ -82,6 +82,7 @@ KIND_DIRS = (
     ("tasks",     "task"),
     ("docs",      "doc"),
     ("prompts",   "prompt"),
+    ("skills",    "skill"),
 )
 
 
@@ -160,6 +161,22 @@ def _task_repo(path: Path, repo_root: Path) -> str:
     return repo_root.name
 
 
+def _skill_slug(path: Path) -> str | None:
+    parts = path.parts
+    for i, part in enumerate(parts):
+        if part == "skills" and i + 1 < len(parts):
+            return parts[i + 1]
+    return None
+
+
+def _skill_repo(path: Path, repo_root: Path) -> str:
+    parts = path.parts
+    for i, part in enumerate(parts):
+        if part == "skills" and i > 0:
+            return parts[i - 1]
+    return repo_root.name
+
+
 def _meta(path: Path, repo_root: Path) -> dict:
     try:
         mtime = path.stat().st_mtime
@@ -167,13 +184,15 @@ def _meta(path: Path, repo_root: Path) -> dict:
         mtime = 0.0
     rel = path.relative_to(repo_root).as_posix()
     return {
-        "abs":       str(path),
-        "rel":       rel,
-        "mtime":     mtime,
-        "ext":       path.suffix.lower().lstrip("."),
-        "kind":      _classify(path, rel),
-        "task_slug": _task_slug(path),
-        "task_repo": _task_repo(path, repo_root),
+        "abs":        str(path),
+        "rel":        rel,
+        "mtime":      mtime,
+        "ext":        path.suffix.lower().lstrip("."),
+        "kind":       _classify(path, rel),
+        "task_slug":  _task_slug(path),
+        "task_repo":  _task_repo(path, repo_root),
+        "skill_slug": _skill_slug(path),
+        "skill_repo": _skill_repo(path, repo_root),
     }
 
 
@@ -250,6 +269,11 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
                 task_attrs = (
                     f' data-task-slug="{html.escape(f["task_slug"])}"'
                     f' data-task-repo="{html.escape(f["task_repo"])}"'
+                )
+            if f.get("skill_slug"):
+                task_attrs += (
+                    f' data-skill-slug="{html.escape(f["skill_slug"])}"'
+                    f' data-skill-repo="{html.escape(f["skill_repo"])}"'
                 )
             items.append(
                 f'<a class="row" href="{html.escape(_href(f["abs"]))}" '
