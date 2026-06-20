@@ -111,7 +111,11 @@ def _restore_from_sidecar(conn: sqlite3.Connection) -> None:
 
 
 def open_db(db_path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(db_path))
+    # timeout + busy_timeout let a writer wait for a concurrent one (e.g. the
+    # file-watcher and a /_set-root rebuild) instead of failing with
+    # "database is locked".
+    conn = sqlite3.connect(str(db_path), timeout=30)
+    conn.execute("PRAGMA busy_timeout=30000")
     conn.executescript(_DDL)
     conn.commit()
     _restore_from_sidecar(conn)
