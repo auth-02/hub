@@ -335,6 +335,12 @@ const pvOpen=document.getElementById('pv-open');
 const pvBody=document.getElementById('pv-body');
 const pvLineage=document.getElementById('pv-lineage');
 let kind=sessionStorage.getItem('docs_hub_kind')||'all';
+const _currentRoot={scan_root_json};
+if(sessionStorage.getItem('docs_hub_root')!==_currentRoot){{
+  sessionStorage.setItem('docs_hub_root',_currentRoot);
+  sessionStorage.removeItem('docs_hub_repos');
+  sessionStorage.removeItem('docs_hub_q');
+}}
 let activeRepos=new Set((sessionStorage.getItem('docs_hub_repos')||'').split(',').filter(Boolean));
 let selIdx=-1,selRows=[];
 
