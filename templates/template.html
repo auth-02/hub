@@ -390,6 +390,7 @@ background-image:radial-gradient(circle,#C9BFA3 .7px,transparent .7px);backgroun
     <div class="trace-crumb" id="trace-crumb"></div>
     <div class="trace-title" id="trace-title"></div>
     <div class="trace-status" id="trace-status"></div>
+    <div class="trace-section-label">// plan</div>
     <ul class="trace-plan" id="trace-plan"></ul>
     <div class="trace-section-label" id="trace-decisions-label" style="display:none">// decisions</div>
     <ul class="trace-decisions" id="trace-decisions"></ul>
@@ -533,7 +534,16 @@ q.value=sessionStorage.getItem('docs_hub_q')||'';
 activeRepos=new Set((sessionStorage.getItem('docs_hub_repos')||'').split(',').filter(Boolean));
 
 window.scrollTo(0,parseInt(sessionStorage.getItem('docs_hub_y')||'0'));
-setInterval(()=>{{sessionStorage.setItem('docs_hub_y',window.scrollY);location.reload();}},120000);
+// Reload by swapping content — existing page stays visible until new HTML is ready,
+// so there is no blank-page flash during rebuild.
+function softReload(){{
+  sessionStorage.setItem('docs_hub_y',window.scrollY);
+  fetch('/?_v='+Date.now())
+    .then(r=>r.text())
+    .then(html=>{{document.open();document.write(html);document.close();}})
+    .catch(()=>location.reload());
+}}
+setInterval(()=>softReload(),120000);
 
 // ── Hub Feed ──────────────────────────────────────────────────────────────
 const FEED_ACTIONS={{
@@ -901,18 +911,9 @@ function renderCalendar(){{
   const y=calRef.getFullYear(),mo=calRef.getMonth();
   document.getElementById('cal-title').textContent=MONTHS[mo]+' '+y;
   const byDay={{}};
-  const taskAbsInCal=new Set(TASKS_DATA.map(t=>t.abs).filter(Boolean));
   TASKS_DATA.forEach(t=>{{
     const d=new Date(t.mtime*1000);
     if(d.getFullYear()===y&&d.getMonth()===mo){{(byDay[d.getDate()]=byDay[d.getDate()]||[]).push({{_t:t,type:'task'}});}}
-  }});
-  rows.forEach(r=>{{
-    const mt=parseInt(r.dataset.mtime||'0',10);
-    if(!mt||taskAbsInCal.has(r.dataset.abs)) return;
-    const d=new Date(mt*1000);
-    if(d.getFullYear()===y&&d.getMonth()===mo){{
-      (byDay[d.getDate()]=byDay[d.getDate()]||[]).push({{_r:r,type:'file'}});
-    }}
   }});
   const now=new Date();
   const isThisMonth=now.getFullYear()===y&&now.getMonth()===mo;
@@ -925,15 +926,9 @@ function renderCalendar(){{
     const today=isThisMonth&&now.getDate()===day;
     const entries=byDay[day]||[];
     const chips=entries.map(e=>{{
-      if(e.type==='task'){{
-        const t=e._t;
-        const st=['ongoing','paused','completed'].includes(t.status)?t.status:'ongoing';
-        return `<a class="cal-chip s-${{st}}" href="${{fileHref(t.abs)}}" target="_blank" rel="noopener" title="${{esc(t.rp+' / '+t.sl)}}">${{esc(tagName(t.sl))}}</a>`;
-      }}
-      const r=e._r;
-      const kd=r.dataset.kind||'md';
-      const lbl=(r.querySelector('.path')?.textContent||'').split('/').pop().replace(/\.[^.]+$/,'');
-      return `<a class="cal-chip k-${{kd}}" href="${{r.href}}" target="_blank" rel="noopener" title="${{r.dataset.abs}}">${{esc(lbl)}}</a>`;
+      const t=e._t;
+      const st=['ongoing','paused','completed'].includes(t.status)?t.status:'ongoing';
+      return `<a class="cal-chip s-${{st}}" href="${{fileHref(t.abs)}}" target="_blank" rel="noopener" title="${{esc(t.rp+' / '+t.sl)}}">${{esc(tagName(t.sl))}}</a>`;
     }}).join('');
     h+=`<div class="cal-cell${{today?' cal-today':''}}"><div class="cal-day">${{day}}</div>${{chips}}</div>`;
   }}
@@ -1199,6 +1194,8 @@ apply();
 const REBUILD_CMD=`/usr/bin/python3 ${{HUBPY}}`;
 const toast=document.getElementById('toast');
 function flash(msg){{toast.textContent=msg;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),2400);}}
+// Persistent toast — stays visible until the page swaps (used during rebuild)
+function flashSticky(msg){{toast.textContent=msg;toast.classList.add('show');}}
 async function copy(text,msg){{
   try{{await navigator.clipboard.writeText(text);flash(msg);}}
   catch(e){{window.prompt('Copy this command:',text);}}
@@ -1213,10 +1210,10 @@ function submitModal(){{
   const p=modalInput.value.trim();
   if(!p){{closeModal();return;}}
   closeModal();
-  flash('saving & rebuilding…');
+  flashSticky('saving & rebuilding…');
   fetch('/_set-root',{{method:'POST',body:p}})
     .then(r=>r.ok?Promise.resolve():r.text().then(t=>Promise.reject(t)))
-    .then(()=>{{flash('root updated — reloading');setTimeout(()=>location.reload(),800);}})
+    .then(()=>softReload())
     .catch(e=>flash('failed: '+(e||'unknown error')));
 }}
 document.getElementById('setroot').addEventListener('click',e=>{{e.preventDefault();openModal();}});
@@ -1226,10 +1223,10 @@ modal.addEventListener('click',e=>{{if(e.target===modal)closeModal();}});
 modalInput.addEventListener('keydown',e=>{{if(e.key==='Enter')submitModal();else if(e.key==='Escape')closeModal();}});
 document.getElementById('rebuild').addEventListener('click',e=>{{
   e.preventDefault();
-  flash('rebuilding…');
+  flashSticky('rebuilding…');
   fetch('/_rebuild')
     .then(r=>r.ok?Promise.resolve():Promise.reject())
-    .then(()=>{{flash('rebuilt — reloading');setTimeout(()=>location.reload(),800);}})
+    .then(()=>softReload())
     .catch(()=>flash('rebuild failed'));
 }});
 </script></body></html>
