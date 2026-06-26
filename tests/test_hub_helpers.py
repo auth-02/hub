@@ -35,9 +35,28 @@ class TestClassify(unittest.TestCase):
         p = Path("/repo/tasks/slug/data/input.csv")
         self.assertEqual(hub._classify(p, "tasks/slug/data/input.csv"), "data")
 
-    def test_inside_prompts_dir(self):
+    def test_inside_prompts_dir_at_repo_root_returns_none(self):
+        # Top-level prompts/ is not in the spec; only tasks/<slug>/prompts/** → prompt
         p = Path("/repo/prompts/system.txt")
-        self.assertEqual(hub._classify(p, "prompts/system.txt"), "prompt")
+        self.assertIsNone(hub._classify(p, "prompts/system.txt"))
+
+    def test_prompts_inside_tasks_dir(self):
+        # Bug-fix: tasks/<slug>/prompts/ must classify as prompt, not task
+        p = Path("/repo/tasks/slug/prompts/system.txt")
+        self.assertEqual(hub._classify(p, "tasks/slug/prompts/system.txt"), "prompt")
+
+    def test_non_manifest_in_tasks_returns_none(self):
+        # Only manifest.md at tasks/<slug>/manifest.md gets kind=task
+        p = Path("/repo/tasks/my-task/notes.md")
+        self.assertIsNone(hub._classify(p, "tasks/my-task/notes.md"))
+
+    def test_skill_md_classified_as_skill(self):
+        p = Path("/repo/app/skills/rate_limiting/SKILL.md")
+        self.assertEqual(hub._classify(p, "app/skills/rate_limiting/SKILL.md"), "skill")
+
+    def test_skill_reference_returns_none(self):
+        p = Path("/repo/app/skills/rate_limiting/references/algorithms.md")
+        self.assertIsNone(hub._classify(p, "app/skills/rate_limiting/references/algorithms.md"))
 
     def test_inside_docs_dir(self):
         p = Path("/repo/docs/guide.md")

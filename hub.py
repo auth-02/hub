@@ -88,17 +88,6 @@ EXTS = {".md", ".html", ".htm"}
 PROMPT_EXTS = {".txt"}
 DATA_EXTS = {".pdf", ".xlsx", ".xls", ".csv", ".tsv"}
 
-KIND_DIRS = (
-    ("artifacts", "artifact"),
-    ("runs",      "run"),
-    ("data",      "data"),
-    ("tasks",     "task"),
-    ("docs",      "doc"),
-    ("prompts",   "prompt"),
-    ("skills",    "skill"),
-)
-
-
 def _included(path: Path) -> bool:
     ext = path.suffix.lower()
     if ext in EXTS:
@@ -142,19 +131,32 @@ def discover() -> dict[str, list[dict]]:
 
 
 def _classify(path: Path, rel: str) -> str | None:
+    """Kind resolution per HUB-LAYOUT.md §3. First match wins."""
     stem = path.stem.lower()
+    parts = rel.split("/")
+
     if stem == "claude":
         return "claude"
     if stem == "readme":
         return "readme"
-    posix = path.as_posix()
-    for dirname, kind in KIND_DIRS:
-        if f"/{dirname}/" in posix or rel.startswith(f"{dirname}/"):
-            # For skills/, only the SKILL.md root file gets kind=skill;
-            # reference files keep their natural kind for filtering purposes.
-            if kind == "skill" and stem != "skill":
-                return None
-            return kind
+
+    # Task family — tasks/ at repo root; order matters: sub-dirs before task itself
+    if parts[0] == "tasks" and len(parts) >= 3:
+        sub = parts[2]
+        if sub == "runs":        return "run"
+        if sub == "artifacts":   return "artifact"
+        if sub == "prompts":     return "prompt"
+        if sub == "data":        return "data"
+        if len(parts) == 3 and stem == "manifest":
+            return "task"
+
+    if parts[0] == "docs":
+        return "doc"
+
+    # Skills — hub extension; skills/ may be nested at any depth
+    if stem == "skill" and "/skills/" in path.as_posix():
+        return "skill"
+
     return None
 
 
