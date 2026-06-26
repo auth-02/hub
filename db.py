@@ -414,6 +414,37 @@ def get_all_tasks(conn: sqlite3.Connection, scan_root: str = "") -> list:
     return sorted(tasks.values(), key=lambda x: x["mtime"], reverse=True)
 
 
+def get_orphan_tasks(conn: sqlite3.Connection, scan_root: str = "") -> list:
+    """Return task slugs that have children but no manifest (kind='task')."""
+    root_filter = ""
+    params: list = []
+    if scan_root:
+        root_filter = "AND f.abs LIKE ?"
+        params.append(scan_root.rstrip("/") + "/%")
+    rows = conn.execute(
+        f"""SELECT f.task_slug, f.task_repo, MAX(f.mtime),
+                   COALESCE(ts.status, 'ongoing') AS status
+            FROM files f
+            LEFT JOIN task_status ts
+              ON ts.task_slug = f.task_slug AND ts.task_repo = f.task_repo
+            WHERE f.kind != 'task' AND f.task_slug IS NOT NULL {root_filter}
+              AND NOT EXISTS (
+                SELECT 1 FROM files m
+                WHERE m.kind = 'task'
+                  AND m.task_slug = f.task_slug
+                  AND m.task_repo = f.task_repo
+              )
+            GROUP BY f.task_slug, f.task_repo""",
+        params,
+    ).fetchall()
+    return [
+        {"sl": slug, "rp": trepo, "abs": None, "mtime": mtime,
+         "status": status, "runs": 0, "artifacts": 0, "prompts": 0,
+         "docs": 0, "data": 0, "orphan": True}
+        for slug, trepo, mtime, status in rows
+    ]
+
+
 def export_html_data(conn: sqlite3.Connection) -> tuple:
     """Return (fts_json, lineage_json) strings to embed in the hub HTML."""
     files = conn.execute(

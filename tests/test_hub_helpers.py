@@ -45,26 +45,28 @@ class TestClassify(unittest.TestCase):
         p = Path("/repo/tasks/slug/prompts/system.txt")
         self.assertEqual(hub._classify(p, "tasks/slug/prompts/system.txt"), "prompt")
 
-    def test_non_manifest_in_tasks_returns_none(self):
-        # Only manifest.md at tasks/<slug>/manifest.md gets kind=task
+    def test_non_manifest_in_tasks_gets_md_catch_all(self):
+        # Only manifest.md gets kind=task; other .md in tasks root get MD catch-all
         p = Path("/repo/tasks/my-task/notes.md")
-        self.assertIsNone(hub._classify(p, "tasks/my-task/notes.md"))
+        self.assertEqual(hub._classify(p, "tasks/my-task/notes.md"), "md")
 
     def test_skill_md_classified_as_skill(self):
         p = Path("/repo/app/skills/rate_limiting/SKILL.md")
         self.assertEqual(hub._classify(p, "app/skills/rate_limiting/SKILL.md"), "skill")
 
-    def test_skill_reference_returns_none(self):
+    def test_skill_reference_gets_md_catch_all(self):
+        # Non-SKILL.md files inside skills/ get MD catch-all (they're searchable docs)
         p = Path("/repo/app/skills/rate_limiting/references/algorithms.md")
-        self.assertIsNone(hub._classify(p, "app/skills/rate_limiting/references/algorithms.md"))
+        self.assertEqual(hub._classify(p, "app/skills/rate_limiting/references/algorithms.md"), "md")
 
     def test_inside_docs_dir(self):
         p = Path("/repo/docs/guide.md")
         self.assertEqual(hub._classify(p, "docs/guide.md"), "doc")
 
-    def test_plain_file_returns_none(self):
+    def test_plain_md_returns_md_kind(self):
+        # Loose .md not matching any structural pattern → MD catch-all
         p = Path("/repo/src/app.md")
-        self.assertIsNone(hub._classify(p, "src/app.md"))
+        self.assertEqual(hub._classify(p, "src/app.md"), "md")
 
 
 class TestTaskSlug(unittest.TestCase):

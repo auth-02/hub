@@ -220,14 +220,15 @@ footer{{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-f
 .cal-chip.s-ongoing{{border-left-color:#2F6B4F;}}
 .cal-chip.s-paused{{border-left-color:#C99A20;}}
 .cal-chip.s-completed{{border-left-color:var(--mute);}}
+.cal-chip[class*="k-"]{{border-left-color:var(--line);color:var(--mute);}}
 .cal-chip:hover{{background:var(--deep);}}
 
 /* ── Work view ─────────────────────────────────────────────────────────── */
 #work-view{{display:none;margin-top:18px;}}
 #work-view.show{{display:block;}}
-.stat-strip{{display:flex;gap:28px;font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);padding-bottom:14px;margin-bottom:16px;border-bottom:1px solid var(--line);}}
-.stat-strip b{{font-family:var(--disp);font-size:16px;color:var(--ink);font-weight:500;margin-right:4px;font-style:normal;}}
-.stat-dot{{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:middle;}}
+.stat-strip{{display:flex;gap:36px;font-family:var(--mono);font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);padding-bottom:16px;margin-bottom:18px;border-bottom:1px solid var(--line);align-items:center;}}
+.stat-strip b{{font-family:var(--disp);font-size:26px;color:var(--ink);font-weight:500;margin-right:5px;font-style:normal;line-height:1;}}
+.stat-dot{{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:7px;vertical-align:middle;}}
 .d-on{{background:#2F6B4F;}}.d-pause{{background:#C99A20;}}.d-done{{background:var(--mute);}}
 .task-row{{display:flex;align-items:flex-start;gap:14px;padding:14px 6px;border-bottom:1px solid var(--line);cursor:pointer;transition:background 140ms;}}
 .task-row:hover{{background:var(--alt);}}
@@ -336,7 +337,7 @@ background-image:radial-gradient(circle,#C9BFA3 .7px,transparent .7px);backgroun
       <span class="pv-title" id="pv-title"></span>
       <div class="pv-actions">
         <a class="pv-btn primary" id="pv-open" href="#" target="_blank" rel="noopener">Open</a>
-        <button class="pv-btn" id="pv-float" title="open in new tab">⤤</button>
+        <button class="pv-btn" id="pv-float" title="open as floating window">⧉</button>
         <button class="pv-btn" id="pv-close">✕</button>
       </div>
     </div>
@@ -362,6 +363,9 @@ background-image:radial-gradient(circle,#C9BFA3 .7px,transparent .7px);backgroun
   <div class="kanban-col" data-status="completed">
     <div class="kanban-head" data-status="completed"><span>completed</span><span class="kanban-count" data-count="completed">0</span></div>
     <div class="kanban-body" data-status="completed"></div>
+  </div>
+  <div id="board-empty" style="display:none;width:100%;text-align:center;padding:60px 24px;font-family:var(--mono);font-size:12px;color:var(--mute);letter-spacing:.08em;">
+    no tasks yet · run <code style="background:var(--alt);padding:2px 6px;">hub new task &lt;slug&gt;</code> to create one
   </div>
 </div>
 <div id="calendar">
@@ -480,7 +484,11 @@ function apply(){{
   const raw=q.value.trim().toLowerCase();
   const rm=raw.match(/(?:^|\s)repo:(\S*)/);
   const typedRepo=rm?rm[1]:'';
-  const t=raw.replace(/(?:^|\s)repo:\S*/g,'').trim();
+  const rs=raw.match(/(?:^|\s)status:(\S*)/);
+  const typedStatus=rs?rs[1]:'';
+  const rk=raw.match(/(?:^|\s)kind:(\S*)/);
+  const typedKind=rk?rk[1]:'';
+  const t=raw.replace(/(?:^|\s)(?:repo|status|kind):\S*/g,'').trim();
   sessionStorage.setItem('docs_hub_q',raw);
   sessionStorage.setItem('docs_hub_kind',kind);
   sessionStorage.setItem('docs_hub_repos',[...activeRepos].join(','));
@@ -495,7 +503,9 @@ function apply(){{
     const terms=t.split(/\s+/).filter(Boolean);
     const body=r._fts?(r._fts.b+' '+r._fts.t).toLowerCase():'';
     const okText=terms.length===0||terms.every(w=>r.dataset.search.includes(w)||body.includes(w));
-    r.classList.toggle('hidden',!(okKind&&okChip&&okTyped&&okText));
+    const okStatus=!typedStatus||(r.dataset.status||'')=== typedStatus;
+    const okKind2=!typedKind||(r.dataset.kind||'').startsWith(typedKind);
+    r.classList.toggle('hidden',!(okKind&&okKind2&&okChip&&okTyped&&okText&&okStatus));
   }});
   document.querySelectorAll('.repo').forEach(s=>{{
     const any=[...s.querySelectorAll('.row')].some(r=>!r.classList.contains('hidden'));
@@ -657,11 +667,13 @@ function openFloat(abs,title,href){{
 }}
 document.getElementById('pv-float').addEventListener('click',()=>{{
   if(selIdx<0||!selRows[selIdx]) return;
-  window.open(selRows[selIdx].href,'_blank','noopener');
+  const r=selRows[selIdx];
+  openFloat(r.dataset.abs,r.querySelector('.path').textContent,r.href);
+  closePreview();
 }});
 rows.forEach(r=>r.addEventListener('dblclick',e=>{{
   e.preventDefault();
-  window.open(r.href,'_blank','noopener');
+  openFloat(r.dataset.abs,r.querySelector('.path').textContent,r.href);
 }}));
 
 // ── Keyboard nav ──────────────────────────────────────────────────────────
@@ -827,6 +839,15 @@ function buildCard(t){{
   return card;
 }}
 function renderBoard(){{
+  const boardEmpty=document.getElementById('board-empty');
+  const kanbanCols=document.querySelectorAll('.kanban-col');
+  if(!TASKS_DATA.length){{
+    kanbanCols.forEach(c=>c.style.display='none');
+    boardEmpty.style.display='block';
+    return;
+  }}
+  kanbanCols.forEach(c=>c.style.display='');
+  boardEmpty.style.display='none';
   const counts={{ongoing:0,paused:0,completed:0}};
   document.querySelectorAll('.kanban-body').forEach(b=>b.innerHTML='');
   TASKS_DATA.forEach(t=>{{
@@ -873,9 +894,18 @@ function renderCalendar(){{
   const y=calRef.getFullYear(),mo=calRef.getMonth();
   document.getElementById('cal-title').textContent=MONTHS[mo]+' '+y;
   const byDay={{}};
+  const taskAbsInCal=new Set(TASKS_DATA.map(t=>t.abs).filter(Boolean));
   TASKS_DATA.forEach(t=>{{
     const d=new Date(t.mtime*1000);
-    if(d.getFullYear()===y&&d.getMonth()===mo){{(byDay[d.getDate()]=byDay[d.getDate()]||[]).push(t);}}
+    if(d.getFullYear()===y&&d.getMonth()===mo){{(byDay[d.getDate()]=byDay[d.getDate()]||[]).push({{_t:t,type:'task'}});}}
+  }});
+  rows.forEach(r=>{{
+    const mt=parseInt(r.dataset.mtime||'0',10);
+    if(!mt||taskAbsInCal.has(r.dataset.abs)) return;
+    const d=new Date(mt*1000);
+    if(d.getFullYear()===y&&d.getMonth()===mo){{
+      (byDay[d.getDate()]=byDay[d.getDate()]||[]).push({{_r:r,type:'file'}});
+    }}
   }});
   const now=new Date();
   const isThisMonth=now.getFullYear()===y&&now.getMonth()===mo;
@@ -886,10 +916,17 @@ function renderCalendar(){{
   for(let i=0;i<firstDow;i++)h+='<div class="cal-cell blank"></div>';
   for(let day=1;day<=days;day++){{
     const today=isThisMonth&&now.getDate()===day;
-    const tasks=byDay[day]||[];
-    const chips=tasks.map(t=>{{
-      const st=['ongoing','paused','completed'].includes(t.status)?t.status:'ongoing';
-      return `<a class="cal-chip s-${{st}}" href="${{fileHref(t.abs)}}" target="_blank" rel="noopener" title="${{esc(t.rp+' / '+t.sl)}}">${{esc(tagName(t.sl))}}</a>`;
+    const entries=byDay[day]||[];
+    const chips=entries.map(e=>{{
+      if(e.type==='task'){{
+        const t=e._t;
+        const st=['ongoing','paused','completed'].includes(t.status)?t.status:'ongoing';
+        return `<a class="cal-chip s-${{st}}" href="${{fileHref(t.abs)}}" target="_blank" rel="noopener" title="${{esc(t.rp+' / '+t.sl)}}">${{esc(tagName(t.sl))}}</a>`;
+      }}
+      const r=e._r;
+      const kd=r.dataset.kind||'md';
+      const lbl=(r.querySelector('.path')?.textContent||'').split('/').pop().replace(/\.[^.]+$/,'');
+      return `<a class="cal-chip k-${{kd}}" href="${{r.href}}" target="_blank" rel="noopener" title="${{r.dataset.abs}}">${{esc(lbl)}}</a>`;
     }}).join('');
     h+=`<div class="cal-cell${{today?' cal-today':''}}"><div class="cal-day">${{day}}</div>${{chips}}</div>`;
   }}
@@ -903,12 +940,15 @@ function renderWorkView(){{
   const raw=q.value.trim().toLowerCase();
   const rm=raw.match(/(?:^|\s)repo:(\S*)/);
   const typedRepo=rm?rm[1]:'';
-  const textQ=raw.replace(/(?:^|\s)repo:\S*/g,'').trim();
+  const rs2=raw.match(/(?:^|\s)status:(\S*)/);
+  const typedStatus2=rs2?rs2[1]:'';
+  const textQ=raw.replace(/(?:^|\s)(?:repo|status|kind):\S*/g,'').trim();
   const terms=textQ.split(/\s+/).filter(Boolean);
 
   function taskMatches(t){{
     if(activeRepos.size>0&&!activeRepos.has(t.rp.toLowerCase())) return false;
     if(typedRepo&&!t.rp.toLowerCase().startsWith(typedRepo)) return false;
+    if(typedStatus2&&(t.status||'ongoing')!==typedStatus2) return false;
     if(!terms.length) return true;
     const haystack=(t.sl+' '+t.rp).toLowerCase();
     return terms.every(w=>haystack.includes(w));
@@ -944,10 +984,11 @@ function renderWorkView(){{
       const done=t.plan.filter(p=>p.d).length;
       linParts.push(`plan ${{done}}/${{t.plan.length}}`);
     }}
+    const orphanBadge=t.orphan?`<span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--mute);border:1px solid var(--line);padding:1px 5px;margin-left:6px;vertical-align:middle">no manifest</span>`:'';
     return `<div class="task-row" data-abs="${{esc(t.abs||'')}}" data-sl="${{esc(t.sl)}}" data-rp="${{esc(t.rp)}}">
       <span class="task-tick ${{dotCls}}"></span>
       <div class="task-body">
-        <div class="task-name">${{esc(tagName(t.sl))}}</div>
+        <div class="task-name">${{esc(tagName(t.sl))}}${{orphanBadge}}</div>
         <div class="task-loc"><span class="t-repo">${{esc(t.rp)}}</span> · tasks/${{esc(t.sl)}}</div>
         ${{linParts.length?`<div class="task-lin">${{linParts.join(' · ')}}</div>`:''}}
       </div>
@@ -993,7 +1034,8 @@ function openTrace(t){{
   const stMap={{ongoing:'ts-on',paused:'ts-pause',completed:'ts-done'}};
 
   document.getElementById('trace-crumb').innerHTML=
-    `${{esc(t.rp)}} / <span class="tc-accent">tasks</span> / ${{esc(t.sl)}}`;
+    `${{esc(t.rp)}} / <span class="tc-accent">tasks</span> / ${{esc(t.sl)}}`+
+    (t.orphan?' <span style="font-family:var(--mono);font-size:9px;color:var(--mute);border:1px solid var(--line);padding:1px 6px;margin-left:6px">no manifest</span>':'');
   document.getElementById('trace-title').textContent=tagName(t.sl);
   document.getElementById('trace-status').className='trace-status '+(stMap[st]||'ts-on');
   document.getElementById('trace-status').textContent=st+' · updated '+feedAgo(t.mtime);

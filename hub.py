@@ -130,10 +130,18 @@ def discover() -> dict[str, list[dict]]:
     return groups
 
 
-def _classify(path: Path, rel: str) -> str | None:
-    """Kind resolution per HUB-LAYOUT.md §3. First match wins."""
+def _classify(path: Path, rel: str, repo_name: str = "") -> str | None:
+    """Kind resolution per HUB-LAYOUT.md §3. First match wins.
+
+    repo_name is the immediate parent directory name (the "repo"). When the repo
+    dir is itself named "tasks", the rel is already one level inside tasks/, so
+    we prefix it so the structural patterns still fire correctly.
+    """
     stem = path.stem.lower()
-    parts = rel.split("/")
+    # When the containing repo is named "tasks", the file is already inside
+    # tasks/<slug>/... — prepend so classification patterns match.
+    effective_rel = f"tasks/{rel}" if repo_name.lower() == "tasks" else rel
+    parts = effective_rel.split("/")
 
     if stem == "claude":
         return "claude"
@@ -157,6 +165,9 @@ def _classify(path: Path, rel: str) -> str | None:
     if stem == "skill" and "/skills/" in path.as_posix():
         return "skill"
 
+    # MD catch-all per spec §3 — any .md/.html that didn't match above
+    if path.suffix.lower() in (".md", ".html", ".htm"):
+        return "md"
     return None
 
 
@@ -207,7 +218,7 @@ def _meta(path: Path, repo_root: Path) -> dict:
         "rel":        rel,
         "mtime":      mtime,
         "ext":        path.suffix.lower().lstrip("."),
-        "kind":       _classify(path, rel),
+        "kind":       _classify(path, rel, repo_root.name),
         "task_slug":  _task_slug(path),
         "task_repo":  _task_repo(path, repo_root),
         "skill_slug": _skill_slug(path),
@@ -315,6 +326,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
                 f'<a class="row" href="{html.escape(_href(f["abs"]))}" '
                 f'target="_blank" rel="noopener" '
                 f'data-kind="{badge_cls}" '
+                f'data-mtime="{int(f["mtime"])}" '
                 f'data-search="{html.escape((repo + " " + f["rel"]).lower())}" '
                 f'data-abs="{html.escape(f["abs"])}"{task_attrs}>'
                 f'<span class="badge {badge_cls}">{badge}</span>'
@@ -452,6 +464,11 @@ def main() -> None:
     activity_json = db.get_activity_json(conn, str(ROOT))
     timeline_tasks = db.get_timeline_data(conn, str(ROOT))
     all_tasks = db.get_all_tasks(conn, str(ROOT))
+    orphan_tasks = db.get_orphan_tasks(conn, str(ROOT))
+    existing_keys = {(t["sl"], t["rp"]) for t in all_tasks}
+    for ot in orphan_tasks:
+        if (ot["sl"], ot["rp"]) not in existing_keys:
+            all_tasks.append(ot)
     conn.close()
 
     for t in all_tasks:
