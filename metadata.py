@@ -7,6 +7,7 @@ from pathlib import Path
 # Pre-compiled patterns — compiled once at import time, not per call.
 _FRONTMATTER   = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 _FM_TITLE      = re.compile(r"^title:\s*['\"]?(.+?)['\"]?\s*$", re.MULTILINE)
+_FM_STATUS     = re.compile(r"^status:\s*(\S+)\s*$", re.MULTILINE)
 _H1            = re.compile(r"^#\s+(.+)$", re.MULTILINE)
 _MD_FM_STRIP   = re.compile(r"^---\s*\n.*?\n---\s*\n?", re.DOTALL)
 _MD_FENCE      = re.compile(r"```[\s\S]*?```")
@@ -58,6 +59,23 @@ def extract_title(path: str, text: str) -> str:
     if m:
         return m.group(1).strip()
     return Path(path).stem.replace("-", " ").replace("_", " ").title()
+
+
+_VALID_STATUSES = {"ongoing", "paused", "completed"}
+
+
+def extract_status(text: str) -> str:
+    """Return status from frontmatter, defaulting to 'ongoing' per spec §4.1."""
+    head = text[:2000]
+    if head.startswith("---"):
+        m = _FRONTMATTER.match(head)
+        if m:
+            s = _FM_STATUS.search(m.group(1))
+            if s:
+                val = s.group(1).lower().strip("\"'")
+                if val in _VALID_STATUSES:
+                    return val
+    return "ongoing"
 
 
 def extract_body(path: str, text: str, max_chars: int = 2000) -> str:

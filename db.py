@@ -1,12 +1,24 @@
 """SQLite persistence for hub: file metadata, lineage graph, FTS5 full-text index."""
 from __future__ import annotations
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
 
 _HERE = Path(__file__).resolve().parent
-_STATUS_SIDECAR = Path.home() / ".hub-state" / "task-status.json"
+
+
+def _state_dir() -> Path:
+    """XDG_STATE_HOME/hub, falling back to ~/.local/state/hub."""
+    xdg = os.environ.get("XDG_STATE_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".local" / "state"
+    d = base / "hub"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+_STATUS_SIDECAR = _state_dir() / "task-status.json"
 
 _DDL = """
 PRAGMA journal_mode=WAL;
@@ -240,6 +252,16 @@ def build_lineage(conn: sqlite3.Connection) -> None:
 
     conn.executemany(
         "INSERT OR IGNORE INTO lineage(src_id,dst_id,rel_type) VALUES(?,?,?)", edges
+    )
+    conn.commit()
+
+
+def seed_status_from_frontmatter(conn: sqlite3.Connection, task_slug: str, task_repo: str, status: str) -> None:
+    """Set status from manifest frontmatter only if no row exists yet (user toggle wins)."""
+    conn.execute(
+        """INSERT OR IGNORE INTO task_status(task_slug,task_repo,status,updated)
+           VALUES(?,?,?,?)""",
+        (task_slug, task_repo, status, time.time()),
     )
     conn.commit()
 

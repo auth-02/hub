@@ -379,6 +379,9 @@ def main() -> None:
                 title = metadata.extract_title(f["abs"], text)
                 body  = metadata.extract_body(f["abs"], text)
                 db.upsert(conn, {**f, "repo": repo}, title, body)
+                if f.get("kind") == "task" and f.get("task_slug"):
+                    status = metadata.extract_status(text)
+                    db.seed_status_from_frontmatter(conn, f["task_slug"], f["task_repo"], status)
     db.prune(conn, live_paths)
     db.build_lineage(conn)
     db.backfill_activity(conn)
