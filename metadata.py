@@ -9,6 +9,11 @@ _FRONTMATTER   = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 _FM_TITLE      = re.compile(r"^title:\s*['\"]?(.+?)['\"]?\s*$", re.MULTILINE)
 _FM_STATUS     = re.compile(r"^status:\s*(\S+)\s*$", re.MULTILINE)
 _PLAN_ITEM     = re.compile(r"^- \[( |x)\] (.+)$", re.MULTILINE | re.IGNORECASE)
+_DECISIONS_SECTION = re.compile(
+    r"^#{1,3}\s+decisions\s*\n(.*?)(?=^#{1,3}\s|\Z)",
+    re.MULTILINE | re.IGNORECASE | re.DOTALL,
+)
+_DECISION_ITEM = re.compile(r"^\d+\.\s+(.+)$", re.MULTILINE)
 _H1            = re.compile(r"^#\s+(.+)$", re.MULTILINE)
 _MD_FM_STRIP   = re.compile(r"^---\s*\n.*?\n---\s*\n?", re.DOTALL)
 _MD_FENCE      = re.compile(r"```[\s\S]*?```")
@@ -77,6 +82,14 @@ def extract_status(text: str) -> str:
                 if val in _VALID_STATUSES:
                     return val
     return "ongoing"
+
+
+def extract_decisions(text: str) -> list:
+    """Extract numbered items from the Decisions section of a manifest."""
+    m = _DECISIONS_SECTION.search(text[:15_000])
+    if not m:
+        return []
+    return [item.group(1).strip() for item in _DECISION_ITEM.finditer(m.group(1))]
 
 
 def extract_plan(text: str) -> list:

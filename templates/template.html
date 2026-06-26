@@ -263,6 +263,11 @@ background-image:radial-gradient(circle,#C9BFA3 .7px,transparent .7px);backgroun
 .trace-plan li::before{{position:absolute;left:0;font-family:var(--mono);font-size:12px;}}
 .trace-plan li.tp-done{{color:var(--ink-soft);}}.trace-plan li.tp-done::before{{content:'[x]';color:var(--accent);}}
 .trace-plan li.tp-todo::before{{content:'[ ]';color:var(--mute);}}
+.trace-section-label{{font-family:var(--mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin:22px 0 8px;}}
+.trace-decisions{{list-style:none;margin:0 0 24px;padding:0;}}
+.trace-decisions li{{font-size:13px;padding:5px 0 5px 0;position:relative;color:var(--ink);border-bottom:1px solid var(--line);display:flex;gap:10px;}}
+.trace-decisions li:last-child{{border-bottom:none;}}
+.td-num{{font-family:var(--mono);font-size:11px;color:var(--accent);flex-shrink:0;min-width:18px;}}
 .trace-lineage{{display:grid;grid-template-columns:110px 1fr;border-top:1px solid var(--line);margin-top:8px;}}
 .tl-lbl{{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);padding:12px 0;border-bottom:1px solid var(--line);}}
 .tl-files{{padding:8px 0 8px 16px;border-bottom:1px solid var(--line);border-left:1px solid var(--line);}}
@@ -386,6 +391,8 @@ background-image:radial-gradient(circle,#C9BFA3 .7px,transparent .7px);backgroun
     <div class="trace-title" id="trace-title"></div>
     <div class="trace-status" id="trace-status"></div>
     <ul class="trace-plan" id="trace-plan"></ul>
+    <div class="trace-section-label" id="trace-decisions-label" style="display:none">// decisions</div>
+    <ul class="trace-decisions" id="trace-decisions"></ul>
     <div class="trace-lineage" id="trace-lineage"></div>
     <div class="trace-actions" id="trace-actions"></div>
   </div>
@@ -1047,6 +1054,18 @@ function openTrace(t){{
     ).join('');
   }} else {{
     planEl.innerHTML='<li class="tp-todo" style="color:var(--mute);font-style:italic">no plan checklist in manifest</li>';
+  }}
+
+  const decisionsEl=document.getElementById('trace-decisions');
+  const decisionsLbl=document.getElementById('trace-decisions-label');
+  if(t.decisions&&t.decisions.length){{
+    decisionsEl.innerHTML=t.decisions.map((d,i)=>
+      `<li><span class="td-num">${{i+1}}.</span><span>${{esc(d)}}</span></li>`
+    ).join('');
+    decisionsLbl.style.display='block';
+  }} else {{
+    decisionsEl.innerHTML='';
+    decisionsLbl.style.display='none';
   }}
 
   // Lineage grid from LINEAGE_DATA keyed by manifest abs

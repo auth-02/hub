@@ -475,6 +475,7 @@ def main() -> None:
         if t.get("abs"):
             _text = metadata.read_safe(t["abs"])
             t["plan"] = metadata.extract_plan(_text)
+            t["decisions"] = metadata.extract_decisions(_text)
 
     tasks_json = json.dumps(all_tasks, separators=(",", ":"))
 
