@@ -359,11 +359,72 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
     )
 
 
+def _cmd_init(target: Path) -> None:
+    """hub init — scaffold tasks/ and hub.toml stub in target directory."""
+    tasks_dir = target / "tasks"
+    tasks_dir.mkdir(exist_ok=True)
+    gitignore = target / ".gitignore"
+    if gitignore.exists():
+        content = gitignore.read_text(encoding="utf-8")
+        if "tasks/" not in content:
+            with gitignore.open("a", encoding="utf-8") as fh:
+                if not content.endswith("\n"):
+                    fh.write("\n")
+                fh.write("tasks/\n")
+            print(f"  updated  {gitignore.relative_to(target)}")
+    print(f"  created  {tasks_dir.relative_to(target)}/")
+    print("  hub init done — run 'hub new task <slug>' to scaffold your first task.")
+
+
+def _slugify_title(slug: str) -> str:
+    return slug.replace("-", " ").replace("_", " ").title()
+
+
+def _cmd_new_task(slug: str, target: Path) -> None:
+    """hub new task <slug> — scaffold a minimal valid task per HUB-LAYOUT.md Appendix."""
+    import re
+    if not re.match(r"^[a-z0-9][a-z0-9-]*$", slug):
+        print(f"  error: slug must be lowercase-hyphenated (got '{slug}')")
+        sys.exit(1)
+    task_dir = target / "tasks" / slug
+    task_dir.mkdir(parents=True, exist_ok=True)
+    for sub in ("runs", "artifacts", "prompts", "data"):
+        (task_dir / sub).mkdir(exist_ok=True)
+    manifest = task_dir / "manifest.md"
+    if not manifest.exists():
+        title = _slugify_title(slug)
+        manifest.write_text(
+            f"---\nstatus: ongoing\ntitle: {title}\n---\n\n# {title}\n",
+            encoding="utf-8",
+        )
+        print(f"  created  tasks/{slug}/manifest.md")
+        for sub in ("runs", "artifacts", "prompts", "data"):
+            print(f"  created  tasks/{slug}/{sub}/")
+    else:
+        print(f"  exists   tasks/{slug}/manifest.md — skipped")
+
+
 def main() -> None:
     global ROOT
     ap = argparse.ArgumentParser(description="Hub index builder")
     ap.add_argument("--demo", action="store_true", help="Use bundled example fixture")
+
+    # Subcommands: hub init, hub new task <slug>
+    sub = ap.add_subparsers(dest="cmd")
+    sub.add_parser("init", help="Scaffold tasks/ in the current directory")
+    new_p = sub.add_parser("new", help="Scaffold a new task")
+    new_p.add_argument("kind", choices=["task"], help="Object kind to create")
+    new_p.add_argument("slug", help="Task slug (lowercase-hyphenated)")
+
     args, _ = ap.parse_known_args()
+
+    if args.cmd == "init":
+        _cmd_init(Path.cwd())
+        return
+    if args.cmd == "new" and getattr(args, "kind", None) == "task":
+        _cmd_new_task(args.slug, Path.cwd())
+        return
+
     if args.demo:
         ROOT = _HERE / "example"
 
