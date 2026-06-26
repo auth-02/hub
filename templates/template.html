@@ -9,6 +9,8 @@
 :root{{--bg:#F4EFE4;--alt:#ECE5D2;--deep:#E4DCC4;--ink:#1A1A1A;--mute:#8A8377;--line:#D9D1BC;--accent:#7A2828;--accent2:#1E5A6B;
 --disp:'Fraunces',serif;--body:'Inter',system-ui,sans-serif;--mono:'JetBrains Mono','SF Mono',Menlo,monospace;}}
 *{{box-sizing:border-box}}
+@keyframes _hub_fadein{{from{{opacity:0.4}}to{{opacity:1}}}}
+html{{animation:_hub_fadein 0.18s ease-out;}}
 body{{margin:0;background:var(--bg);color:var(--ink);font-family:var(--body);font-size:14px;
 background-image:radial-gradient(circle,#C9BFA3 .7px,transparent .7px);background-size:22px 22px;}}
 .wrap{{max-width:1280px;margin:0 auto;padding:48px 24px 80px;}}
@@ -533,16 +535,7 @@ document.querySelectorAll('.repo-name').forEach(el=>el.addEventListener('click',
 q.value=sessionStorage.getItem('docs_hub_q')||'';
 activeRepos=new Set((sessionStorage.getItem('docs_hub_repos')||'').split(',').filter(Boolean));
 
-window.scrollTo(0,parseInt(sessionStorage.getItem('docs_hub_y')||'0'));
-// Reload by swapping content — existing page stays visible until new HTML is ready,
-// so there is no blank-page flash during rebuild.
-function softReload(){{
-  sessionStorage.setItem('docs_hub_y',window.scrollY);
-  fetch('/?_v='+Date.now())
-    .then(r=>r.text())
-    .then(html=>{{document.open();document.write(html);document.close();}})
-    .catch(()=>location.reload());
-}}
+function softReload(){{location.reload();}}
 setInterval(()=>softReload(),120000);
 
 // ── Hub Feed ──────────────────────────────────────────────────────────────
