@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 import server
@@ -238,6 +239,127 @@ class TestRenderCsv(unittest.TestCase):
             self.assertNotIn("<script>", result)
         finally:
             os.unlink(name)
+
+
+class TestDetectColTypes(unittest.TestCase):
+    def test_text_column(self):
+        rows = [["Alice"], ["Bob"], ["Carol"]]
+        types = server._detect_col_types(rows, 1)
+        self.assertEqual(types, ["text"])
+
+    def test_numeric_column(self):
+        rows = [["100"], ["200"], ["300"]]
+        types = server._detect_col_types(rows, 1)
+        self.assertEqual(types, ["num"])
+
+    def test_currency_column(self):
+        rows = [["$1,234.56"], ["$200.00"], ["$99.99"]]
+        types = server._detect_col_types(rows, 1)
+        self.assertEqual(types, ["currency"])
+
+    def test_percentage_column(self):
+        rows = [["12.5%"], ["30%"], ["100%"]]
+        types = server._detect_col_types(rows, 1)
+        self.assertEqual(types, ["pct"])
+
+    def test_empty_column_defaults_to_text(self):
+        rows = [[""], [""], [""]]
+        types = server._detect_col_types(rows, 1)
+        self.assertEqual(types, ["text"])
+
+    def test_mixed_col_falls_back_to_text(self):
+        # Less than 60% numeric → text
+        rows = [["100"], ["abc"], ["200"], ["def"], ["xyz"]]
+        types = server._detect_col_types(rows, 1)
+        self.assertEqual(types, ["text"])
+
+    def test_multi_col_detection(self):
+        rows = [["Alice", "100"], ["Bob", "200"], ["Carol", "300"]]
+        types = server._detect_col_types(rows, 2)
+        self.assertEqual(types[0], "text")
+        self.assertEqual(types[1], "num")
+
+
+class TestFmtCell(unittest.TestCase):
+    def test_text_unchanged(self):
+        self.assertEqual(server._fmt_cell("hello", "text"), "hello")
+
+    def test_empty_value_returned_as_is(self):
+        self.assertEqual(server._fmt_cell("", "num"), "")
+
+    def test_dash_returned_as_is(self):
+        self.assertEqual(server._fmt_cell("-", "num"), "-")
+
+    def test_na_returned_as_is(self):
+        self.assertEqual(server._fmt_cell("N/A", "num"), "N/A")
+
+    def test_num_integer_formatted(self):
+        self.assertEqual(server._fmt_cell("1000", "num"), "1,000")
+
+    def test_num_with_comma_formatted(self):
+        self.assertEqual(server._fmt_cell("1,000,000", "num"), "1,000,000")
+
+    def test_num_float_formatted(self):
+        result = server._fmt_cell("1234.56", "num")
+        self.assertIn(",", result)
+        self.assertIn("1,234", result)
+
+    def test_currency_formatted(self):
+        self.assertEqual(server._fmt_cell("$1234", "currency"), "$1,234.00")
+
+    def test_pct_returned_unchanged(self):
+        self.assertEqual(server._fmt_cell("45.5%", "pct"), "45.5%")
+
+    def test_date_returned_unchanged(self):
+        self.assertEqual(server._fmt_cell("2024-01-15", "date"), "2024-01-15")
+
+
+class TestIsWithin(unittest.TestCase):
+    def test_child_inside_parent(self):
+        self.assertTrue(server._is_within(Path("/a/b/c.md"), Path("/a/b")))
+
+    def test_child_is_parent(self):
+        self.assertTrue(server._is_within(Path("/a/b"), Path("/a/b")))
+
+    def test_child_outside_parent(self):
+        self.assertFalse(server._is_within(Path("/etc/passwd"), Path("/a/b")))
+
+    def test_prefix_not_enough(self):
+        # /a/bc should not be within /a/b
+        self.assertFalse(server._is_within(Path("/a/bc/file.md"), Path("/a/b")))
+
+
+class TestRenderMdExtended(unittest.TestCase):
+    def test_horizontal_rule(self):
+        result = server._render_md("---")
+        self.assertIn("<hr", result)
+
+    def test_strikethrough(self):
+        result = server._render_md("~~deleted~~")
+        self.assertIn("<del>deleted</del>", result)
+
+    def test_nested_list_items(self):
+        src = "- parent\n  - child"
+        result = server._render_md(src)
+        self.assertIn("<ul>", result)
+
+    def test_xss_in_code_fence_escaped(self):
+        src = "```\n<script>alert(1)</script>\n```"
+        result = server._render_md(src)
+        self.assertNotIn("<script>", result)
+        self.assertIn("&lt;script&gt;", result)
+
+    def test_blank_input_returns_empty_or_whitespace(self):
+        result = server._render_md("")
+        self.assertIsInstance(result, str)
+
+    def test_task_checkbox_unchecked(self):
+        result = server._render_md("- [ ] Todo item")
+        self.assertIn("Todo item", result)
+
+    def test_task_checkbox_checked(self):
+        result = server._render_md("- [x] Done item")
+        self.assertIn("Done item", result)
 
 
 if __name__ == "__main__":

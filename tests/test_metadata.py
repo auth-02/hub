@@ -139,5 +139,116 @@ class TestExtractHtmlBody(unittest.TestCase):
         self.assertLessEqual(len(result), 100)
 
 
+class TestExtractStatus(unittest.TestCase):
+    def test_default_ongoing_when_no_frontmatter(self):
+        self.assertEqual(metadata.extract_status("just plain text"), "ongoing")
+
+    def test_ongoing_from_frontmatter(self):
+        self.assertEqual(metadata.extract_status("---\nstatus: ongoing\n---\n"), "ongoing")
+
+    def test_paused_from_frontmatter(self):
+        self.assertEqual(metadata.extract_status("---\nstatus: paused\n---\n"), "paused")
+
+    def test_completed_from_frontmatter(self):
+        self.assertEqual(metadata.extract_status("---\nstatus: completed\n---\n"), "completed")
+
+    def test_invalid_status_falls_back_to_ongoing(self):
+        self.assertEqual(metadata.extract_status("---\nstatus: blocked\n---\n"), "ongoing")
+
+    def test_status_case_insensitive(self):
+        self.assertEqual(metadata.extract_status("---\nstatus: PAUSED\n---\n"), "paused")
+
+    def test_status_with_double_quotes(self):
+        self.assertEqual(metadata.extract_status('---\nstatus: "completed"\n---\n'), "completed")
+
+    def test_status_with_single_quotes(self):
+        self.assertEqual(metadata.extract_status("---\nstatus: 'paused'\n---\n"), "paused")
+
+    def test_empty_text_returns_ongoing(self):
+        self.assertEqual(metadata.extract_status(""), "ongoing")
+
+    def test_status_not_in_frontmatter_returns_ongoing(self):
+        self.assertEqual(metadata.extract_status("---\ntitle: My Task\n---\n"), "ongoing")
+
+
+class TestExtractPlan(unittest.TestCase):
+    def test_empty_text_returns_empty_list(self):
+        self.assertEqual(metadata.extract_plan(""), [])
+
+    def test_no_checkboxes_returns_empty_list(self):
+        self.assertEqual(metadata.extract_plan("- plain item\n- another"), [])
+
+    def test_unchecked_item(self):
+        items = metadata.extract_plan("- [ ] Do something")
+        self.assertEqual(len(items), 1)
+        self.assertFalse(items[0]["d"])
+        self.assertEqual(items[0]["t"], "Do something")
+
+    def test_checked_item_lowercase_x(self):
+        items = metadata.extract_plan("- [x] Done thing")
+        self.assertEqual(len(items), 1)
+        self.assertTrue(items[0]["d"])
+        self.assertEqual(items[0]["t"], "Done thing")
+
+    def test_checked_item_uppercase_x(self):
+        items = metadata.extract_plan("- [X] Capital X")
+        self.assertTrue(items[0]["d"])
+
+    def test_mixed_plan_preserves_order(self):
+        text = "- [x] Step 1\n- [ ] Step 2\n- [x] Step 3"
+        items = metadata.extract_plan(text)
+        self.assertEqual(len(items), 3)
+        self.assertEqual([i["d"] for i in items], [True, False, True])
+        self.assertEqual([i["t"] for i in items], ["Step 1", "Step 2", "Step 3"])
+
+    def test_text_after_checkbox_preserved_including_markup(self):
+        items = metadata.extract_plan("- [ ] **Bold step** with `code`")
+        self.assertEqual(items[0]["t"], "**Bold step** with `code`")
+
+    def test_space_only_in_brackets_is_unchecked(self):
+        items = metadata.extract_plan("- [ ] Pending")
+        self.assertFalse(items[0]["d"])
+
+
+class TestExtractDecisions(unittest.TestCase):
+    def test_no_decisions_section_returns_empty(self):
+        self.assertEqual(metadata.extract_decisions("no section here"), [])
+
+    def test_h2_decisions_section(self):
+        text = "## Decisions\n1. Use SQLite\n2. Stdlib only\n"
+        self.assertEqual(metadata.extract_decisions(text), ["Use SQLite", "Stdlib only"])
+
+    def test_h3_decisions_section(self):
+        text = "### Decisions\n1. First decision\n"
+        self.assertEqual(metadata.extract_decisions(text), ["First decision"])
+
+    def test_h1_decisions_section(self):
+        text = "# Decisions\n1. Top level\n"
+        self.assertEqual(metadata.extract_decisions(text), ["Top level"])
+
+    def test_decisions_case_insensitive(self):
+        text = "## DECISIONS\n1. Case test\n"
+        self.assertEqual(metadata.extract_decisions(text), ["Case test"])
+
+    def test_empty_decisions_section_returns_empty(self):
+        text = "## Decisions\n\n## Next Section\n"
+        self.assertEqual(metadata.extract_decisions(text), [])
+
+    def test_stops_at_next_heading(self):
+        text = "## Decisions\n1. Keep this\n## Other Section\n2. Not this\n"
+        decisions = metadata.extract_decisions(text)
+        self.assertEqual(decisions, ["Keep this"])
+
+    def test_non_numbered_items_ignored(self):
+        text = "## Decisions\n- bullet point\n1. numbered only\n"
+        decisions = metadata.extract_decisions(text)
+        self.assertEqual(decisions, ["numbered only"])
+
+    def test_decisions_text_stripped(self):
+        text = "## Decisions\n1.   extra spaces   \n"
+        decisions = metadata.extract_decisions(text)
+        self.assertEqual(decisions, ["extra spaces"])
+
+
 if __name__ == "__main__":
     unittest.main()

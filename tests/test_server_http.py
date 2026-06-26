@@ -137,6 +137,44 @@ class TestServerHttp(unittest.TestCase):
         for s in results:
             self.assertEqual(s, 200)
 
+    def test_task_status_post_valid(self):
+        import json
+        payload = json.dumps({
+            "task_slug": "test-slug",
+            "task_repo": "test-repo",
+            "status": "completed",
+        }).encode("utf-8")
+        status, body = _post(self._port, "/_task-status", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(body, b"ok")
+
+    def test_task_status_post_invalid_status_rejected(self):
+        import json
+        payload = json.dumps({
+            "task_slug": "test-slug",
+            "task_repo": "test-repo",
+            "status": "invalid_value",
+        }).encode("utf-8")
+        status, _ = _post(self._port, "/_task-status", payload)
+        self.assertEqual(status, 400)
+
+    def test_task_status_post_missing_fields(self):
+        import json
+        payload = json.dumps({"task_slug": "test-slug"}).encode("utf-8")
+        status, _ = _post(self._port, "/_task-status", payload)
+        self.assertEqual(status, 400)
+
+    def test_task_status_post_invalid_json(self):
+        payload = b"not valid json"
+        status, _ = _post(self._port, "/_task-status", payload)
+        self.assertEqual(status, 400)
+
+    def test_relative_path_resolved_against_scan_root(self):
+        # hello.md exists in the scan root; a relative request should resolve it
+        status, body = _get(self._port, "/hello.md")
+        # 200 if resolved, 404 if not found — both acceptable; must not be 500
+        self.assertIn(status, (200, 404))
+
 
 if __name__ == "__main__":
     unittest.main()

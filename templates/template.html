@@ -885,11 +885,16 @@ document.querySelectorAll('.kanban-col').forEach(col=>{{
   col.addEventListener('dragleave',()=>col.classList.remove('over'));
   col.addEventListener('drop',e=>{{
     e.preventDefault();col.classList.remove('over');
-    const card=document.querySelector('.kanban-card.dragging');
+    // Use dataTransfer — more reliable than .dragging class which may be
+    // removed by dragend before drop fires in some browsers.
+    const raw=e.dataTransfer.getData('text/plain');
+    if(!raw)return;
+    const sep=raw.indexOf(':');
+    const rp=raw.slice(0,sep),sl=raw.slice(sep+1);
+    const card=document.querySelector(`.kanban-card[data-sl="${{sl}}"][data-rp="${{rp}}"]`);
     if(!card)return;
     const empty=body.querySelector('.kanban-empty');if(empty)empty.remove();
     body.appendChild(card);
-    const sl=card.dataset.sl,rp=card.dataset.rp;
     const t=TASKS_DATA.find(x=>x.sl===sl&&x.rp===rp);
     if(t)t.status=status;
     fetch('/_task-status',{{method:'POST',headers:{{'Content-Type':'application/json'}},
