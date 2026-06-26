@@ -872,9 +872,14 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 conn = sqlite3.connect(str(_DB_PATH), timeout=30)
                 _db.set_status(conn, task_slug, task_repo, status)
                 conn.close()
-                # Regenerate the index so the new status is baked into the
-                # embedded TASKS_DATA / TASK_STATUS_DATA and survives a refresh.
-                self._rebuild(_active_root)
+                # Regenerate the HTML so TASKS_DATA baked into the page reflects
+                # the new status immediately when the client reloads.
+                result = self._rebuild(_active_root)
+                if result.returncode != 0:
+                    # DB write succeeded; log the rebuild error but still return ok
+                    # so the client reloads and at least shows the sidecar status.
+                    import sys as _sys2
+                    print(result.stderr or result.stdout, file=_sys2.stderr)
                 self._send(200, "text/plain", b"ok")
             except Exception as e:
                 self._send(400, "text/plain", str(e).encode())

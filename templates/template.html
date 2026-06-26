@@ -892,7 +892,12 @@ document.querySelectorAll('.kanban-col').forEach(col=>{{
     if(t)t.status=status;
     fetch('/_task-status',{{method:'POST',headers:{{'Content-Type':'application/json'}},
       body:JSON.stringify({{task_slug:sl,task_repo:rp,status:status}})
-    }}).then(()=>flash('moved → '+status)).catch(()=>flash('status update failed'));
+    }}).then(r=>{{
+      if(!r.ok){{flash('status update failed');return;}}
+      // Server has already rebuilt the HTML with the new status.
+      // Reload so TASKS_DATA reflects the DB — keeps board accurate across view switches.
+      softReload();
+    }}).catch(()=>flash('status update failed'));
     document.querySelectorAll('.kanban-body').forEach(b=>{{
       const s=b.dataset.status,n=b.querySelectorAll('.kanban-card').length;
       document.querySelector('.kanban-count[data-count="'+s+'"]').textContent=n;
