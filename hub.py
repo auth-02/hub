@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """Build a single browsable hub of every .md / .html file under a scan root.
 
-Stdlib-only. Re-run any time; a launchd agent does this every 120 s.
+Stdlib-only. Re-run any time; an optional background watcher does this on change.
 
 Configuration (all optional, via environment variables):
-    HUB_SCAN_ROOT   directory to scan          (default: ~/tifin)
+    HUB_SCAN_ROOT   directory to scan          (default: current working directory)
     HUB_OUTPUT      output html file           (default: build/docs-index.html)
     HUB_SERVER_PORT local server port          (default: unset — uses file:// links)
     HUB_DEBUG       "1"/"true" enables logging  (default: off)
     HUB_LOG         log file path (debug only)  (default: .hub.log)
+
+State directory (db, sidecar):
+    $XDG_STATE_HOME/hub  or  ~/.local/state/hub
 """
 from __future__ import annotations
 
+import argparse
 import html
 import json
 import os
@@ -34,11 +38,20 @@ def _env_path(var: str, default: Path) -> Path:
     return Path(val).expanduser() if val else default
 
 
-SCAN_ROOT_FILE = Path.home() / "agents" / "hub" / ".scan_root"
+def _state_dir() -> Path:
+    """XDG_STATE_HOME/hub, falling back to ~/.local/state/hub."""
+    xdg = os.environ.get("XDG_STATE_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".local" / "state"
+    d = base / "hub"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+SCAN_ROOT_FILE = _state_dir() / ".scan_root"
 
 
 def _resolve_scan_root() -> Path:
-    """Priority: HUB_SCAN_ROOT env > .scan_root sidecar > ~/tifin default."""
+    """Priority: HUB_SCAN_ROOT env > .scan_root sidecar > current working directory."""
     env = os.environ.get("HUB_SCAN_ROOT")
     if env:
         return Path(env).expanduser()
@@ -48,7 +61,7 @@ def _resolve_scan_root() -> Path:
             return Path(text).expanduser()
     except OSError:
         pass
-    return Path.home() / "tifin"
+    return Path.cwd()
 
 
 # ── Configurable paths ──────────────────────────────────────────────────────
@@ -57,7 +70,7 @@ OUTPUT = _env_path("HUB_OUTPUT", _HERE / "build" / "docs-index.html")
 DEBUG  = os.environ.get("HUB_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
 LOG    = _env_path("HUB_LOG",    _HERE / ".hub.log")
 FAVICON = _env_path("HUB_FAVICON", _HERE / "assets" / "favicon.svg")
-DB     = _env_path("HUB_DB",    Path.home() / ".hub-state" / "hub.db")
+DB     = _env_path("HUB_DB",    _state_dir() / "hub.db")
 
 _SERVER_PORT   = os.environ.get("HUB_SERVER_PORT", "").strip()
 _SERVER_ORIGIN = f"http://localhost:{_SERVER_PORT}" if _SERVER_PORT else ""
@@ -250,6 +263,23 @@ def _collect_git(scan_root: Path, since_days: int = 7) -> list[dict]:
     return commits
 
 
+def _first_run_html(root: Path) -> str:
+    r = html.escape(str(root))
+    return (
+        '<div class="first-run">'
+        '<div class="first-run-eyebrow">// nothing to index yet</div>'
+        f'<div class="first-run-title">Hub looks for <em>.md</em> &amp; <em>.html</em> under <code>{r}</code>.</div>'
+        '<p class="first-run-body">Drop docs anywhere and they\'ll appear. '
+        'To unlock lineage, tasks live under '
+        '<code>tasks/&lt;slug&gt;/</code> with a manifest.</p>'
+        '<pre class="first-run-cmd">'
+        '<span class="first-run-prompt">$</span> hub new task my-first-task\n'
+        '<span class="first-run-comment"># scaffolds manifest + runs/ artifacts/ prompts/ data/</span>'
+        '</pre>'
+        '</div>'
+    )
+
+
 def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]", timeline_json: str = "{}", tasks_json: str = "[]") -> str:
     total     = sum(len(v) for v in groups.values())
     md_total  = sum(1 for v in groups.values() for f in v if f["ext"] == "md")
@@ -315,7 +345,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         md_total=md_total,
         html_total=html_total,
         repo_count=len(groups),
-        body="".join(rows_html) or f'<p class="empty">No .md / .html files found under {html.escape(str(ROOT))}.</p>',
+        body="".join(rows_html) or _first_run_html(ROOT),
         repo_chips=repo_chips,
         fts_json=fts_json,
         lineage_json=lineage_json,
@@ -328,6 +358,13 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
 
 
 def main() -> None:
+    global ROOT
+    ap = argparse.ArgumentParser(description="Hub index builder")
+    ap.add_argument("--demo", action="store_true", help="Use bundled example fixture")
+    args, _ = ap.parse_known_args()
+    if args.demo:
+        ROOT = _HERE / "example"
+
     groups = discover()
 
     conn = db.open_db(DB)

@@ -32,8 +32,19 @@ from urllib.parse import quote, unquote
 
 # ── Scan root resolution (mirrors hub.py) ──────────────────────────────────
 _HERE = Path(__file__).resolve().parent
-_SIDECAR = Path.home() / "agents" / "hub" / ".scan_root"
-_DB_PATH = Path.home() / ".hub-state" / "hub.db"
+
+
+def _state_dir() -> Path:
+    """XDG_STATE_HOME/hub, falling back to ~/.local/state/hub."""
+    xdg = os.environ.get("XDG_STATE_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".local" / "state"
+    d = base / "hub"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+_SIDECAR = _state_dir() / ".scan_root"
+_DB_PATH = _state_dir() / "hub.db"
 
 # Serialize hub.py rebuilds so the watcher and request-triggered rebuilds
 # (/_set-root, /_rebuild, /_task-status) never run two writers at once.
@@ -198,7 +209,7 @@ def _resolve_scan_root() -> Path:
             return Path(text).expanduser()
     except OSError:
         pass
-    return Path.home() / "tifin"
+    return Path.cwd()
 
 
 SCAN_ROOT = _resolve_scan_root()
@@ -957,6 +968,7 @@ class _HubServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 # ── Entry point ─────────────────────────────────────────────────────────────
 
 def main() -> None:
+    global _active_root
     ap = argparse.ArgumentParser(description="hub markdown server")
     ap.add_argument(
         "--port", "-p",
@@ -964,14 +976,21 @@ def main() -> None:
         default=int(os.environ.get("HUB_SERVER_PORT", "8787")),
         metavar="PORT",
     )
+    ap.add_argument("--demo", action="store_true", help="Use bundled example fixture")
     args = ap.parse_args()
 
+    if args.demo:
+        _active_root = _HERE / "example"
+
     HubHandler.server_port = args.port
+
+    # Trigger an initial build so the index is fresh on first load.
+    HubHandler._rebuild(_active_root)
 
     threading.Thread(target=_watcher, args=(args.port,), daemon=True).start()
 
     with _HubServer(("::", args.port), HubHandler) as srv:
-        print(f"  Scan root : {SCAN_ROOT}")
+        print(f"  Scan root : {_active_root}")
         print(f"  Listening : http://localhost:{args.port}")
         print()
         print("  Ctrl+C to stop")
