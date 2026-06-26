@@ -269,6 +269,8 @@ th,td{border:1px solid var(--line);padding:.45rem .75rem;text-align:left;}
 th{background:var(--deep);font-family:var(--mono);font-size:.8rem;
    letter-spacing:.06em;text-transform:uppercase;}
 tr:nth-child(even) td{background:rgba(0,0,0,.02);}
+td.col-num,td.col-sci,td.col-currency,td.col-pct{text-align:right;font-family:var(--mono);font-size:.85rem;}
+th.col-num,th.col-sci,th.col-currency,th.col-pct{text-align:right;}
 hr{border:none;border-top:1px solid var(--line);margin:2rem 0;}
 ul,ol{margin:.75rem 0 .75rem 1.75rem;}
 li{margin:.25rem 0;}
@@ -302,6 +304,11 @@ h1,h2,h3{scroll-margin-top:90px;}
 .outline.collapsed{width:auto;}
 @media (max-width:1340px){.outline{display:none;}}
 @media print{.outline{display:none;}}
+@media (min-width:1340px){
+  body{display:grid;grid-template-columns:220px minmax(0,1fr);gap:0 24px;padding-left:24px;}
+  .outline{position:sticky;top:80px;width:auto;left:auto;max-width:200px;align-self:start;}
+  .page{max-width:860px;margin:0;}
+}
 
 /* Directory listing */
 .dir-list{list-style:none;margin:0;padding:0;}
@@ -381,6 +388,70 @@ def _inline(text: str) -> str:
         text = text.replace(f"\x04{idx}\x05", f"<code>{code}</code>")
 
     return text
+
+
+_RE_SCI  = re.compile(r'^[+-]?\d+\.?\d*[eE][+-]?\d+$')
+_RE_BARE_NUM = re.compile(r'^[+-]?[\d,]+(\.\d+)?$')
+_RE_CURRENCY = re.compile(r'^[$€£¥][+-]?[\d,]+(\.\d+)?([eE][+-]?\d+)?$')
+_RE_PCT  = re.compile(r'^[+-]?\d+\.?\d*%$')
+_RE_DATE = re.compile(r'^\d{4}-\d{2}-\d{2}$')
+
+
+def _detect_col_types(rows: list[list[str]], ncols: int) -> list[str]:
+    """Infer column types from a majority of non-empty values."""
+    types: list[str] = []
+    for j in range(ncols):
+        vals = [row[j].strip() for row in rows if j < len(row) and row[j].strip()]
+        if not vals:
+            types.append("text")
+            continue
+        hits: dict[str, int] = {"sci": 0, "num": 0, "currency": 0, "pct": 0, "date": 0}
+        for v in vals:
+            if _RE_SCI.match(v):         hits["sci"] += 1
+            elif _RE_CURRENCY.match(v):  hits["currency"] += 1
+            elif _RE_PCT.match(v):       hits["pct"] += 1
+            elif _RE_DATE.match(v):      hits["date"] += 1
+            elif _RE_BARE_NUM.match(v.replace(",", "")): hits["num"] += 1
+        majority = len(vals) * 0.6
+        if hits["sci"] >= majority:       types.append("sci")
+        elif hits["currency"] >= majority: types.append("currency")
+        elif hits["pct"] >= majority:     types.append("pct")
+        elif hits["date"] >= majority:    types.append("date")
+        elif (hits["num"] + hits["sci"]) >= majority: types.append("num")
+        else:                             types.append("text")
+    return types
+
+
+def _fmt_cell(v: str, col_type: str) -> str:
+    """Format a table cell value by detected column type."""
+    v = v.strip()
+    if not v or v in ("-", "—", "N/A", "n/a"):
+        return v
+    if col_type == "text":
+        return v
+    if col_type in ("sci", "num"):
+        clean = v.replace(",", "")
+        try:
+            f = float(clean)
+            if "e" in clean.lower() or "E" in clean:
+                # scientific notation → comma-formatted
+                return f"{int(f):,}" if f == int(f) else f"{f:,.4g}"
+            if "." in clean:
+                dec_places = len(clean.split(".")[-1])
+                return f"{f:,.{min(dec_places, 6)}f}"
+            return f"{int(f):,}"
+        except ValueError:
+            return v
+    if col_type == "currency":
+        sym = v[0]
+        rest = v[1:].replace(",", "")
+        try:
+            f = float(rest)
+            return f"{sym}{f:,.2f}"
+        except ValueError:
+            return v
+    # pct, date — already human-readable
+    return v
 
 
 def _render_md(src: str) -> str:
@@ -479,9 +550,18 @@ def _render_md(src: str) -> str:
             while i < N and "|" in lines[i]:
                 rows.append([c.strip() for c in lines[i].strip().strip("|").split("|")])
                 i += 1
-            ths = "".join(f"<th>{_inline(h)}</th>" for h in headers)
+            col_types = _detect_col_types(rows, len(headers))
+            ths = "".join(
+                f'<th class="col-{col_types[j] if j < len(col_types) else "text"}">'
+                f'{_inline(h)}</th>'
+                for j, h in enumerate(headers)
+            )
             trs = "".join(
-                "<tr>" + "".join(f"<td>{_inline(c)}</td>" for c in row) + "</tr>"
+                "<tr>" + "".join(
+                    f'<td class="col-{col_types[j] if j < len(col_types) else "text"}">'
+                    f'{_inline(_fmt_cell(c, col_types[j] if j < len(col_types) else "text"))}</td>'
+                    for j, c in enumerate(row)
+                ) + "</tr>"
                 for row in rows
             )
             out.append(f"<table><thead><tr>{ths}</tr></thead><tbody>{trs}</tbody></table>")

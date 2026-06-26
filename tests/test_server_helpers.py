@@ -188,7 +188,7 @@ class TestRenderMd(unittest.TestCase):
         src = "| A | B |\n|---|---|\n| 1 | 2 |"
         result = server._render_md(src)
         self.assertIn("<table>", result)
-        self.assertIn("<th>", result)
+        self.assertIn("<th ", result)  # class attribute added by typed-column renderer
 
     def test_blockquote(self):
         result = server._render_md("> quoted text")

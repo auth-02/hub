@@ -336,7 +336,7 @@ background-image:radial-gradient(circle,#C9BFA3 .7px,transparent .7px);backgroun
       <span class="pv-title" id="pv-title"></span>
       <div class="pv-actions">
         <a class="pv-btn primary" id="pv-open" href="#" target="_blank" rel="noopener">Open</a>
-        <button class="pv-btn" id="pv-float" title="open as floating window">⧉</button>
+        <button class="pv-btn" id="pv-float" title="open in new tab">⤤</button>
         <button class="pv-btn" id="pv-close">✕</button>
       </div>
     </div>
@@ -657,13 +657,11 @@ function openFloat(abs,title,href){{
 }}
 document.getElementById('pv-float').addEventListener('click',()=>{{
   if(selIdx<0||!selRows[selIdx]) return;
-  const r=selRows[selIdx];
-  openFloat(r.dataset.abs,r.querySelector('.path').textContent,r.href);
-  closePreview();
+  window.open(selRows[selIdx].href,'_blank','noopener');
 }});
 rows.forEach(r=>r.addEventListener('dblclick',e=>{{
   e.preventDefault();
-  openFloat(r.dataset.abs,r.querySelector('.path').textContent,r.href);
+  window.open(r.href,'_blank','noopener');
 }}));
 
 // ── Keyboard nav ──────────────────────────────────────────────────────────
