@@ -454,6 +454,11 @@ def main() -> None:
     all_tasks = db.get_all_tasks(conn, str(ROOT))
     conn.close()
 
+    for t in all_tasks:
+        if t.get("abs"):
+            _text = metadata.read_safe(t["abs"])
+            t["plan"] = metadata.extract_plan(_text)
+
     tasks_json = json.dumps(all_tasks, separators=(",", ":"))
 
     git_commits = _collect_git(ROOT)

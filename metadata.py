@@ -8,6 +8,7 @@ from pathlib import Path
 _FRONTMATTER   = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 _FM_TITLE      = re.compile(r"^title:\s*['\"]?(.+?)['\"]?\s*$", re.MULTILINE)
 _FM_STATUS     = re.compile(r"^status:\s*(\S+)\s*$", re.MULTILINE)
+_PLAN_ITEM     = re.compile(r"^- \[( |x)\] (.+)$", re.MULTILINE | re.IGNORECASE)
 _H1            = re.compile(r"^#\s+(.+)$", re.MULTILINE)
 _MD_FM_STRIP   = re.compile(r"^---\s*\n.*?\n---\s*\n?", re.DOTALL)
 _MD_FENCE      = re.compile(r"```[\s\S]*?```")
@@ -76,6 +77,14 @@ def extract_status(text: str) -> str:
                 if val in _VALID_STATUSES:
                     return val
     return "ongoing"
+
+
+def extract_plan(text: str) -> list:
+    """Extract plan checkboxes from markdown. Returns [{d: bool, t: str}, ...]."""
+    items = []
+    for m in _PLAN_ITEM.finditer(text[:10_000]):
+        items.append({"d": m.group(1).lower() == "x", "t": m.group(2).strip()})
+    return items
 
 
 def extract_body(path: str, text: str, max_chars: int = 2000) -> str:
