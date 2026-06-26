@@ -305,9 +305,9 @@ h1,h2,h3{scroll-margin-top:90px;}
 @media (max-width:1340px){.outline{display:none;}}
 @media print{.outline{display:none;}}
 @media (min-width:1340px){
-  body{display:grid;grid-template-columns:220px minmax(0,1fr);gap:0 24px;padding-left:24px;}
-  .outline{position:sticky;top:80px;width:auto;left:auto;max-width:200px;align-self:start;}
-  .page{max-width:860px;margin:0;}
+  body.with-outline{display:grid;grid-template-columns:220px minmax(0,1fr);gap:0 24px;padding-left:24px;}
+  body.with-outline .outline{position:sticky;top:80px;width:auto;left:auto;max-width:200px;align-self:start;}
+  body.with-outline .page{max-width:860px;margin:0;}
 }
 
 /* Directory listing */
@@ -333,7 +333,7 @@ _PAGE = """\
 <link rel="icon" type="image/svg+xml" href="{favicon}">
 <style>{css}</style>
 </head>
-<body><button class="doc-print" onclick="window.print()" title="Save as PDF (Cmd/Ctrl+P)">⤓ PDF</button><div class="page">
+<body class="{body_class}"><button class="doc-print" onclick="window.print()" title="Save as PDF (Cmd/Ctrl+P)">⤓ PDF</button>{outline}<div class="page">
 {nav}
 {body}
 </div></body>
@@ -978,9 +978,10 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         except ValueError:
             nav_html = ""
 
+        # Outline is a sibling of .page (a direct child of <body>) so the
+        # wide-screen grid (body.with-outline) can place it in its own column.
+        # Nesting it inside .page made it overlap the document text.
         body, outline = _add_outline(body)
-        if outline:
-            body = outline + body
 
         links = _get_lineage(str(path.resolve()))
         lineage_html = _render_lineage_html(links, self.__class__.server_port)
@@ -997,6 +998,8 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             css=_CSS + _DOC_CHROME_CSS,
             nav=nav_html,
             body=body,
+            outline=outline,
+            body_class="with-outline" if outline else "",
             favicon=_favicon_href(self.__class__.server_port),
         ).encode("utf-8")
         self._send(200, "text/html; charset=utf-8", html)
