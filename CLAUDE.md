@@ -27,12 +27,16 @@ hub/
 ├── hub.py              entry point — scan, DB update, render
 ├── server.py           HTTP server — serves index, renders .md, file watcher,
 │                       /_rebuild and /_set-root endpoints
-├── db.py               SQLite layer — schema, upsert, lineage, FTS export
+├── db.py               SQLite layer — migrations, upsert, lineage, FTS export
 ├── metadata.py         metadata extraction — title + body from markdown/html
+├── migrations/         schema as ordered *.sql files, applied by user_version
+│   ├── 001_initial_schema.sql
+│   └── 002_skill_columns.sql
 ├── tests/
 │   ├── run_tests.py    test runner entry point
 │   ├── test_metadata.py
 │   ├── test_db.py
+│   ├── test_migrations.py
 │   ├── test_hub_helpers.py
 │   ├── test_server_helpers.py
 │   └── test_server_http.py     integration — spins up real server
@@ -92,6 +96,15 @@ lineage   -- src_id → dst_id, rel_type:
 fts       -- FTS5 virtual table over files(title, body, repo, rel, kind)
           --   auto-synced via INSERT/UPDATE/DELETE triggers
 ```
+
+Schema lives in `migrations/*.sql`, not inline in `db.py`. Each file is named
+`NNN_description.sql`; `open_db()` runs every migration whose `NNN` exceeds the
+DB's `PRAGMA user_version`, then bumps the version — so each runs at most once,
+in order. A DB created before migrations existed (user_version 0, schema already
+current) is detected and stamped to the latest version without re-running.
+
+**Add a schema change:** drop a new `migrations/NNN_*.sql` (next number) — no
+`db.py` edit needed. Never edit an already-applied migration; add a new one.
 
 ## Template system (`templates/template.html`)
 

@@ -20,74 +20,9 @@ def _state_dir() -> Path:
 
 _STATUS_SIDECAR = _state_dir() / "task-status.json"
 
-_DDL = """
-PRAGMA journal_mode=WAL;
-PRAGMA foreign_keys=ON;
-
-CREATE TABLE IF NOT EXISTS files (
-    id        INTEGER PRIMARY KEY,
-    abs       TEXT NOT NULL UNIQUE,
-    repo      TEXT NOT NULL,
-    rel       TEXT NOT NULL,
-    ext       TEXT NOT NULL,
-    kind      TEXT,
-    mtime     REAL NOT NULL,
-    title     TEXT,
-    body      TEXT,
-    task_slug TEXT,
-    task_repo TEXT,
-    updated   REAL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS activity_log (
-    id        INTEGER PRIMARY KEY,
-    abs       TEXT NOT NULL,
-    kind      TEXT,
-    task_slug TEXT,
-    task_repo TEXT,
-    rel       TEXT NOT NULL,
-    event     TEXT NOT NULL,
-    ts        REAL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS task_status (
-    task_slug TEXT NOT NULL,
-    task_repo TEXT NOT NULL,
-    status    TEXT NOT NULL DEFAULT 'ongoing',
-    updated   REAL NOT NULL,
-    PRIMARY KEY (task_slug, task_repo)
-);
-
-CREATE TABLE IF NOT EXISTS lineage (
-    id       INTEGER PRIMARY KEY,
-    src_id   INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-    dst_id   INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-    rel_type TEXT NOT NULL,
-    UNIQUE(src_id, dst_id, rel_type)
-);
-
-CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(
-    title, body, repo, rel, kind,
-    content='files', content_rowid='id'
-);
-
-CREATE TRIGGER IF NOT EXISTS fts_ins AFTER INSERT ON files BEGIN
-  INSERT INTO fts(rowid,title,body,repo,rel,kind)
-  VALUES (new.id,new.title,new.body,new.repo,new.rel,new.kind);
-END;
-
-CREATE TRIGGER IF NOT EXISTS fts_upd AFTER UPDATE ON files BEGIN
-  INSERT INTO fts(fts,rowid,title,body,repo,rel,kind)
-  VALUES ('delete',old.id,old.title,old.body,old.repo,old.rel,old.kind);
-  INSERT INTO fts(rowid,title,body,repo,rel,kind)
-  VALUES (new.id,new.title,new.body,new.repo,new.rel,new.kind);
-END;
-
-CREATE TRIGGER IF NOT EXISTS fts_del AFTER DELETE ON files BEGIN
-  INSERT INTO fts(fts,rowid,title,body,repo,rel,kind)
-  VALUES ('delete',old.id,old.title,old.body,old.repo,old.rel,old.kind);
-END;
-"""
+# Schema lives in migrations/*.sql, applied in filename order and gated by the
+# SQLite PRAGMA user_version. See _run_migrations().
+_MIGRATIONS_DIR = _HERE / "migrations"
 
 
 def _write_status_sidecar(conn: sqlite3.Connection) -> None:
@@ -122,14 +57,51 @@ def _restore_from_sidecar(conn: sqlite3.Connection) -> None:
         pass
 
 
-def _migrate(conn: sqlite3.Connection) -> None:
-    """Add columns that were introduced after the initial schema."""
-    for col, default in (("skill_slug", "NULL"), ("skill_repo", "NULL")):
-        try:
-            conn.execute(f"ALTER TABLE files ADD COLUMN {col} TEXT DEFAULT {default}")
-            conn.commit()
-        except sqlite3.OperationalError:
-            pass  # column already exists
+def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
+    return conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name=?", (name,)
+    ).fetchone() is not None
+
+
+def _discover_migrations() -> list:
+    """Return [(version:int, path:Path), ...] sorted ascending by leading number."""
+    found = []
+    for p in _MIGRATIONS_DIR.glob("*.sql"):
+        num = p.name.split("_", 1)[0]
+        if not num.isdigit():
+            continue
+        found.append((int(num), p))
+    found.sort(key=lambda t: t[0])
+    return found
+
+
+def _run_migrations(conn: sqlite3.Connection) -> None:
+    """Apply pending migrations/*.sql, gated by PRAGMA user_version.
+
+    Each file is named `NNN_description.sql`; NNN is its version. A migration
+    runs only when NNN > the DB's current user_version, then user_version is
+    bumped to NNN. So every migration runs at most once per DB, in order.
+    """
+    migrations = _discover_migrations()
+    if not migrations:
+        return
+    latest = migrations[-1][0]
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+
+    # Baseline: a DB created before migrations existed has user_version=0 but a
+    # fully-formed schema (the old _DDL + _migrate() ran on every open). Stamp it
+    # to the latest version and skip — re-running 002's ALTER would throw.
+    if version == 0 and _table_exists(conn, "files"):
+        conn.execute(f"PRAGMA user_version = {int(latest)}")
+        conn.commit()
+        return
+
+    for num, path in migrations:
+        if num <= version:
+            continue
+        conn.executescript(path.read_text(encoding="utf-8"))
+        conn.execute(f"PRAGMA user_version = {int(num)}")
+        conn.commit()
 
 
 def open_db(db_path: Path) -> sqlite3.Connection:
@@ -138,9 +110,9 @@ def open_db(db_path: Path) -> sqlite3.Connection:
     # "database is locked".
     conn = sqlite3.connect(str(db_path), timeout=30)
     conn.execute("PRAGMA busy_timeout=30000")
-    conn.executescript(_DDL)
-    conn.commit()
-    _migrate(conn)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    _run_migrations(conn)
     _restore_from_sidecar(conn)
     _write_status_sidecar(conn)  # keep sidecar in sync on every open
     return conn
