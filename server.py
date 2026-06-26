@@ -797,6 +797,21 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 self._send(404, "text/plain", b"docs-index.html not found - run hub.py first.")
             return
 
+        # Static hub assets (CSS, JS, favicon, etc.)
+        if url_path.startswith("/assets/"):
+            asset = (_HERE / url_path.lstrip("/")).resolve()
+            if not _is_within(asset, (_HERE / "assets").resolve()):
+                self._send(403, "text/plain", b"Forbidden")
+                return
+            if not asset.exists():
+                self._send(404, "text/plain", b"Not found")
+                return
+            ext = asset.suffix.lower()
+            mime = {"css": "text/css", "js": "application/javascript",
+                    "svg": "image/svg+xml"}.get(ext.lstrip("."), "application/octet-stream")
+            self._send(200, mime, asset.read_bytes())
+            return
+
         fs_path = Path(url_path)
 
         # Absolute path from hub _href() → use directly.
