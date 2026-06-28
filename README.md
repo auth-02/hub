@@ -6,8 +6,8 @@
 
 **Point it at a folder. Get every `.md` and `.html` inside as one searchable, previewable page.**
 
-[![PyPI](https://img.shields.io/pypi/v/hubspaces)](https://pypi.org/project/hubspaces/)
-[![Python](https://img.shields.io/pypi/pyversions/hubspaces)](https://pypi.org/project/hubspaces/)
+[![PyPI](https://img.shields.io/pypi/v/hubspaces?cacheSeconds=600)](https://pypi.org/project/hubspaces/)
+[![Python](https://img.shields.io/pypi/pyversions/hubspaces?cacheSeconds=600)](https://pypi.org/project/hubspaces/)
 [![tests](https://github.com/auth-02/hub/actions/workflows/tests.yml/badge.svg)](https://github.com/auth-02/hub/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
