@@ -6,6 +6,13 @@
 
 **Point it at a folder. Get every `.md` and `.html` inside as one searchable, previewable page.**
 
+[![PyPI](https://img.shields.io/pypi/v/hubspaces)](https://pypi.org/project/hubspaces/)
+[![Python](https://img.shields.io/pypi/pyversions/hubspaces)](https://pypi.org/project/hubspaces/)
+[![tests](https://github.com/auth-02/hub/actions/workflows/tests.yml/badge.svg)](https://github.com/auth-02/hub/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+**[📖 Docs & live demo →](https://auth-02.github.io/hub/)**
+
 </div>
 
 Hub scans a directory tree, indexes every document into SQLite with full-text search and task lineage, and serves a fast local browser at `http://localhost:8787`. No npm. No framework. No runtime dependencies — pure stdlib Python (3.11+).
@@ -126,6 +133,23 @@ Hub understands this layout and builds a lineage graph automatically:
 ```
 
 `hub new task <slug>` scaffolds a valid task for you.
+
+---
+
+## Agent plugin (optional)
+
+Hub is the **viewer**. If you drive work with Claude Code, the companion
+`hub-agent` plugin is the **producer** — it bundles the `manifest` skill, which
+creates and maintains the `tasks/<slug>/manifest.md` structure above as you
+work, so the board, trace, and timeline fill themselves in.
+
+```
+/plugin marketplace add auth-02/hub
+/plugin install hub-agent@hub
+```
+
+Fully opt-in — Hub needs no plugin and no agent to deliver the full
+index/search/preview/trace experience.
 
 ---
 
