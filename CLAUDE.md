@@ -6,15 +6,15 @@ SQLite, and serves a browsable index via a local HTTP server.
 ## Run
 
 Code lives in the `hubspace/` package. Run via `-m` (no install needed) or the
-console scripts (`hub`, `hub-server`) after `pip install .` / `pipx install .`.
+single `hub` console script after `pip install .` / `pipx install .`.
 
 ```bash
-python3 -m hubspace.cli.server                    # start server (port 8787, watcher included)
+python3 -m hubspace.cli.hub serve                 # start server (port 8787, watcher included)
 HUB_SERVER_PORT=8787 python3 -m hubspace.cli.hub  # rebuild index
 open http://localhost:8787/                   # open hub
 
 # After install, equivalently:
-hub-server --port 8787
+hub serve --port 8787
 hub
 ```
 
@@ -45,9 +45,9 @@ hub/                          repo root
 │   │   ├── metadata.py   metadata extraction — title + body from markdown/html
 │   │   ├── scan.py       pure path → kind/metadata classification (_classify, _meta)
 │   │   └── migrations/   schema as ordered *.sql files, applied by user_version
-│   ├── cli/              entry-point commands (hub, hub-server)
-│   │   ├── hub.py        scan, DB update, index render (hub = hubspace.cli.hub:main)
-│   │   └── server.py     HTTP server, watcher (hub-server = hubspace.cli.server:main)
+│   ├── cli/              the `hub` command (hub = hubspace.cli.hub:main)
+│   │   ├── hub.py        scan, DB update, index render; subcommands init/new/serve
+│   │   └── server.py     HTTP server + watcher; `hub serve` calls server.serve()
 │   ├── render/           file → HTML: columns.py, markdown.py, tabular.py, page.py
 │   ├── utils/            generic helpers — text.py (slug/escape/time), paths.py
 │   ├── static/          served assets + str.format template: favicon.svg, hub.css/js,

@@ -34,21 +34,21 @@ git clone https://github.com/auth-02/hub && cd hub
 pipx install .
 ```
 
-This puts two commands on your `PATH`: **`hub`** (build the index) and **`hub-server`** (serve it + watch for changes).
+This puts the **`hub`** command on your `PATH`: `hub` builds the index, and `hub serve` serves it and watches for changes.
 
 ## Run
 
 ```bash
 cd ~/my-project        # any folder you want to browse
-hub-server             # serves http://localhost:8787 and rebuilds on change
+hub serve              # serves http://localhost:8787 and rebuilds on change
 ```
 
 Then open <http://localhost:8787>. That's it — Hub indexes the current directory by default.
 
-Want to see it before pointing it at your own files? `hub --demo` builds the index from a bundled example repo, then `hub-server --demo` serves it.
+Want to see it before pointing it at your own files? `hub serve --demo` builds and serves a bundled example repo.
 
 ```bash
-hub-server --demo
+hub serve --demo
 ```
 
 ---
@@ -194,8 +194,8 @@ launchctl kickstart -k gui/$(id -u)/com.user.hub
 
 ```bash
 git clone https://github.com/auth-02/hub && cd hub
-python3 -m hubspace.cli.server      # run from source, no install
-python3 tests/run_tests.py      # 246 tests, stdlib unittest
+python3 -m hubspace.cli.hub serve   # run from source, no install
+python3 tests/run_tests.py          # stdlib unittest
 ```
 
 Layout: code is the `hubspace/` package; all generated/writable state (index, DB, log)

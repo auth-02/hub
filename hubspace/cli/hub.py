@@ -338,9 +338,7 @@ def main() -> None:
             "  hub init                           scaffold tasks/ in the current directory\n"
             "  hub new task add-sso-login         create a task (manifest.md only)\n"
             "  hub new task add-sso-login --with all   ...and pre-create runs/ artifacts/ data/\n"
-            "\n"
-            "serve the hub locally with the companion command:\n"
-            "  hub-server --port 8787\n"
+            "  hub serve --port 8787              serve the hub over HTTP (watches + rebuilds)\n"
         ),
     )
     ap.add_argument("--version", action="version", version=f"hub {__version__}")
@@ -350,6 +348,10 @@ def main() -> None:
     # Subcommands: hub init, hub new task <slug>
     sub = ap.add_subparsers(dest="cmd", title="commands", metavar="<command>")
     sub.add_parser("init", help="Scaffold tasks/ in the current directory")
+    serve_p = sub.add_parser("serve", help="Serve the hub over HTTP (watches + rebuilds)")
+    serve_p.add_argument("--port", "-p", type=int, default=None, metavar="PORT",
+                         help="Port to listen on (default: hub.toml port or 8787)")
+    serve_p.add_argument("--demo", action="store_true", help="Use bundled example fixture")
     new_p = sub.add_parser("new", help="Scaffold a new task (hub new task <slug>)")
     new_p.add_argument("kind", choices=["task"], help="Object kind to create")
     new_p.add_argument("slug", help="Task slug (lowercase-hyphenated)")
@@ -364,6 +366,10 @@ def main() -> None:
 
     if args.cmd == "init":
         _cmd_init(Path.cwd())
+        return
+    if args.cmd == "serve":
+        from .server import serve, default_port
+        serve(args.port if args.port is not None else default_port(), args.demo)
         return
     if args.cmd == "new" and getattr(args, "kind", None) == "task":
         _cmd_new_task(args.slug, Path.cwd(), getattr(args, "with_dirs", None))

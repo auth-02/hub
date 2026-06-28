@@ -399,38 +399,43 @@ def _make_server(port: int, handler: type) -> _HubServer:
 
 # ── Entry point ─────────────────────────────────────────────────────────────
 
-def main() -> None:
-    global _active_root
-    ap = argparse.ArgumentParser(description="hub markdown server")
-    ap.add_argument("--version", action="version", version=f"hub-server {__version__}")
-    ap.add_argument(
-        "--port", "-p",
-        type=int,
-        default=int(config.resolve_port(config.load_config()) or "8787"),
-        metavar="PORT",
-    )
-    ap.add_argument("--demo", action="store_true", help="Use bundled example fixture")
-    args = ap.parse_args()
+def default_port() -> int:
+    """Configured port, or 8787."""
+    return int(config.resolve_port(config.load_config()) or "8787")
 
-    if args.demo:
+
+def serve(port: int, demo: bool = False) -> None:
+    """Run the hub HTTP server (the implementation behind `hub serve`)."""
+    global _active_root
+    if demo:
         _active_root = config.example_dir()
 
-    HubHandler.server_port = args.port
+    HubHandler.server_port = port
 
     # Trigger an initial build so the index is fresh on first load.
     HubHandler._rebuild(_active_root)
 
-    threading.Thread(target=_watcher, args=(args.port,), daemon=True).start()
+    threading.Thread(target=_watcher, args=(port,), daemon=True).start()
 
-    with _make_server(args.port, HubHandler) as srv:
+    with _make_server(port, HubHandler) as srv:
         print(f"  Scan root : {_active_root}")
-        print(f"  Listening : http://localhost:{args.port}")
+        print(f"  Listening : http://localhost:{port}")
         print()
         print("  Ctrl+C to stop")
         try:
             srv.serve_forever()
         except KeyboardInterrupt:
             print("\nStopped.")
+
+
+def main() -> None:
+    """Direct entry point for `python -m hubspace.cli.server` (use `hub serve`)."""
+    ap = argparse.ArgumentParser(description="hub markdown server (prefer `hub serve`)")
+    ap.add_argument("--version", action="version", version=f"hub {__version__}")
+    ap.add_argument("--port", "-p", type=int, default=default_port(), metavar="PORT")
+    ap.add_argument("--demo", action="store_true", help="Use bundled example fixture")
+    args = ap.parse_args()
+    serve(args.port, args.demo)
 
 
 if __name__ == "__main__":

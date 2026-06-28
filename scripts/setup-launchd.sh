@@ -57,7 +57,8 @@ cat > "$AGENTS/com.user.hub-server.plist" <<EOF
         <string>run</string>
         <string>--project</string>
         <string>$HUB_DIR</string>
-        <string>hub-server</string>
+        <string>hub</string>
+        <string>serve</string>
         <string>--port</string>
         <string>$PORT</string>
     </array>

@@ -35,7 +35,6 @@ Repository = "https://github.com/auth-02/hub"
 
 [project.scripts]
 hub = "hubspace.cli.hub:main"
-hub-server = "hubspace.cli.server:main"
 
 # README screenshots / illustrations are docs-only (4.7 MB) — keep them out of
 # the installed wheel. The 68 KB example/ fixture stays in for `hub --demo`.
