@@ -194,7 +194,7 @@ launchctl kickstart -k gui/$(id -u)/com.user.hub
 
 ```bash
 git clone https://github.com/auth-02/hub && cd hub
-python3 -m hubspace.server      # run from source, no install
+python3 -m hubspace.cli.server      # run from source, no install
 python3 tests/run_tests.py      # 246 tests, stdlib unittest
 ```
 

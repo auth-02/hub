@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from hubspace import metadata
+from hubspace.core import metadata
 
 
 class TestReadSafe(unittest.TestCase):

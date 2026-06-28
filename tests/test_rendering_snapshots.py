@@ -14,7 +14,8 @@ import zipfile
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from hubspace import metadata, server
+from hubspace.core import metadata
+from hubspace.cli import server
 
 
 def _make_xlsx(path: Path, shared_strings: list[str]) -> None:

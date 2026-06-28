@@ -32,8 +32,9 @@ from urllib.parse import quote, unquote
 
 # ── Scan root resolution (shared with hub.py via config.py) ─────────────────
 _HERE = Path(__file__).resolve().parent
-from . import __version__
-from . import config
+_PKG_ROOT = _HERE.parent  # hubspace/ — holds assets/, templates/, example/
+from .. import __version__
+from ..core import config
 
 
 def _state_dir() -> Path:
@@ -144,7 +145,7 @@ _DOC_PRINT_BTN = (
 
 
 def _favicon_href(port: int) -> str:
-    return f"http://localhost:{port}" + quote(str(_HERE / "assets" / "favicon.svg"), safe="/:@")
+    return f"http://localhost:{port}" + quote(str(_PKG_ROOT / "assets" / "favicon.svg"), safe="/:@")
 
 
 def _inject_into_html(src: str, lineage_html: str, favicon: str = "") -> str:
@@ -869,8 +870,8 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
 
         # Static hub assets (CSS, JS, favicon, etc.)
         if url_path.startswith("/assets/"):
-            asset = (_HERE / url_path.lstrip("/")).resolve()
-            if not _is_within(asset, (_HERE / "assets").resolve()):
+            asset = (_PKG_ROOT / url_path.lstrip("/")).resolve()
+            if not _is_within(asset, (_PKG_ROOT / "assets").resolve()):
                 self._send(403, "text/plain", b"Forbidden")
                 return
             if not asset.exists():
@@ -896,7 +897,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         resolved = fs_path.resolve()
         if not (
             _is_within(resolved, _active_root.resolve())
-            or _is_within(resolved, _HERE.resolve())
+            or _is_within(resolved, _PKG_ROOT.resolve())
         ):
             self._send(403, "text/plain", b"Forbidden")
             return
@@ -951,7 +952,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 if status not in ("ongoing", "completed", "paused"):
                     self._send(400, "text/plain", b"invalid status")
                     return
-                from . import db as _db
+                from ..core import db as _db
                 conn = sqlite3.connect(str(_DB_PATH), timeout=30)
                 _db.set_status(conn, task_slug, task_repo, status)
                 conn.close()
@@ -999,9 +1000,9 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         env = os.environ.copy()
         env["HUB_SERVER_PORT"] = str(HubHandler.server_port)
         env["HUB_SCAN_ROOT"] = str(root)
-        # Ensure `-m hubspace.hub` resolves regardless of the child's CWD
+        # Ensure `-m hubspace.cli.hub` resolves regardless of the child's CWD
         # (installed: already importable; dev: package parent on PYTHONPATH).
-        _pkg_parent = str(_HERE.parent)
+        _pkg_parent = str(_PKG_ROOT.parent)
         env["PYTHONPATH"] = (
             _pkg_parent + os.pathsep + env["PYTHONPATH"]
             if env.get("PYTHONPATH") else _pkg_parent
@@ -1009,7 +1010,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         with _REBUILD_LOCK:
             try:
                 return subprocess.run(
-                    [sys.executable, "-m", "hubspace.hub"],
+                    [sys.executable, "-m", "hubspace.cli.hub"],
                     env=env, capture_output=True, text=True,
                     timeout=600,
                 )
@@ -1176,7 +1177,7 @@ def main() -> None:
     args = ap.parse_args()
 
     if args.demo:
-        _active_root = _HERE / "example"
+        _active_root = _PKG_ROOT / "example"
 
     HubHandler.server_port = args.port
 

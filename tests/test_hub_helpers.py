@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from hubspace import hub
+from hubspace.cli import hub
 
 
 class TestClassify(unittest.TestCase):

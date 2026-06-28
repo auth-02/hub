@@ -26,12 +26,13 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
-from . import __version__
-from . import config
-from . import db
-from . import metadata
+from .. import __version__
+from ..core import config
+from ..core import db
+from ..core import metadata
 
 _HERE = Path(__file__).resolve().parent
+_PKG_ROOT = _HERE.parent  # hubspace/ — holds assets/, templates/, example/
 
 
 def _env_path(var: str, default: Path) -> Path:
@@ -58,13 +59,13 @@ ROOT   = _resolve_scan_root()
 OUTPUT = config.output_path()
 DEBUG  = os.environ.get("HUB_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
 LOG    = config.log_path()
-FAVICON = _env_path("HUB_FAVICON", _HERE / "assets" / "favicon.svg")
+FAVICON = _env_path("HUB_FAVICON", _PKG_ROOT / "assets" / "favicon.svg")
 DB     = _env_path("HUB_DB",    _state_dir() / "hub.db")
 
 _SERVER_PORT   = config.resolve_port(CONFIG)
 _SERVER_ORIGIN = f"http://localhost:{_SERVER_PORT}" if _SERVER_PORT else ""
 
-_TEMPLATE_PATH = _HERE / "templates" / "template.html"
+_TEMPLATE_PATH = _PKG_ROOT / "templates" / "template.html"
 
 EXCLUDE_DIRS = {
     ".claude", ".git", "node_modules", ".venv", "venv", "env", "__pycache__",
@@ -497,7 +498,7 @@ def main() -> None:
     if args.root:
         ROOT = config.resolve_scan_root(CONFIG, SCAN_ROOT_FILE, flag=args.root)
     if args.demo:
-        ROOT = _HERE / "example"
+        ROOT = _PKG_ROOT / "example"
 
     groups = discover()
 
