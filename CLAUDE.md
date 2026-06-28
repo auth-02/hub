@@ -45,8 +45,9 @@ hub/                          repo root
 │   │   ├── metadata.py   metadata extraction — title + body from markdown/html
 │   │   └── migrations/   schema as ordered *.sql files, applied by user_version
 │   ├── cli/              entry-point commands (hub, hub-server)
-│   │   ├── hub.py        scan, DB update, render  (hub = hubspace.cli.hub:main)
-│   │   └── server.py     HTTP server (hub-server = hubspace.cli.server:main)
+│   │   ├── hub.py        scan, DB update, index render (hub = hubspace.cli.hub:main)
+│   │   └── server.py     HTTP server, watcher (hub-server = hubspace.cli.server:main)
+│   ├── render/           file → HTML: columns.py, markdown.py, tabular.py, page.py
 │   ├── utils/            generic helpers — text.py (slug/escape/time), paths.py
 │   ├── static/          served web assets + str.format template — favicon.svg, hub.css, hub.js, hub.html
 │   └── plugin/           hub-agent Claude plugin (manifest skill; excluded from wheel)

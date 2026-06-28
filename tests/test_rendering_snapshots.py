@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from hubspace.core import metadata
-from hubspace.cli import server
+from hubspace import render
 
 
 def _make_xlsx(path: Path, shared_strings: list[str]) -> None:
@@ -58,7 +58,7 @@ class TestLargeTable(unittest.TestCase):
     def test_thousand_row_table_not_truncated(self):
         header = "| id | value |\n| --- | --- |\n"
         rows = "".join(f"| {i} | v{i} |\n" for i in range(1000))
-        html = server._render_md(header + rows)
+        html = render._render_md(header + rows)
         self.assertEqual(html.count("<table>"), 1)
         # 1000 body rows (header <tr> lives inside <thead>, counted separately).
         tbody = html.split("<tbody>", 1)[1].split("</tbody>", 1)[0]
@@ -71,7 +71,7 @@ class TestDeepOutline(unittest.TestCase):
         # Mimic a deep CLAUDE.md: many headings, h1..h4.
         levels = [1, 2, 3, 4, 2, 3, 3, 2]
         html = "".join(f"<h{n}>Heading {i}</h{n}>" for i, n in enumerate(levels))
-        body, outline = server._add_outline(html)
+        body, outline = render._add_outline(html)
         # h1–h3 get an id injected so anchors resolve; h4+ are intentionally
         # left out of the outline (the depth cap that fixed the overlap).
         expected_ids = sum(1 for n in levels if n <= 3)
@@ -86,7 +86,7 @@ class TestDeepOutline(unittest.TestCase):
         # The overlap fix caps indentation classes at lvl3 — deeper headings
         # must not emit lvl4+ classes that would run off the panel.
         html = "".join(f"<h{n}>H{n}</h{n}>" for n in (1, 2, 3, 4, 5, 6))
-        _body, outline = server._add_outline(html)
+        _body, outline = render._add_outline(html)
         self.assertNotIn("lvl4", outline)
         self.assertNotIn("lvl5", outline)
 
