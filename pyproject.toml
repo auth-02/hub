@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "hubspace"
+name = "hubspaces"
 version = "0.1.0"
 description = "Local markdown/HTML browser with split-pane preview, full-text search, and a task board — stdlib-only."
 readme = "README.md"
