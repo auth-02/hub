@@ -1,4 +1,4 @@
-![Hub — Every .md & .html, one page](hubspace/assets/screenshots/banner.png)
+![Hub — Every .md & .html, one page](https://raw.githubusercontent.com/auth-02/hub/main/hubspace/assets/screenshots/banner.png)
 
 <div align="center">
 
@@ -49,27 +49,27 @@ hub-server --demo
 ### Index — grouped by repo, filtered by kind, sorted by recency
 Status badges on every task manifest. Click to cycle `ongoing → completed → paused`, saved instantly.
 
-![Hub index](hubspace/assets/screenshots/index.png)
+![Hub index](https://raw.githubusercontent.com/auth-02/hub/main/hubspace/assets/screenshots/index.png)
 
 ### Split-pane preview with task trace
 Click any row to open a live preview. The `// trace` panel links to related runs, artifacts, and the parent task.
 
-![Split-pane preview](hubspace/assets/screenshots/preview.png)
+![Split-pane preview](https://raw.githubusercontent.com/auth-02/hub/main/hubspace/assets/screenshots/preview.png)
 
 ### Hub Feed — floating activity drawer
 Press `Ctrl+F` or click the `// feed` tab on the right edge. Shows the last 50 file events across the scan root — what changed, which task, when.
 
-![Hub feed drawer](hubspace/assets/screenshots/feed-drawer.png)
+![Hub feed drawer](https://raw.githubusercontent.com/auth-02/hub/main/hubspace/assets/screenshots/feed-drawer.png)
 
 ### Hub Timeline — daily work summary
 Press `Ctrl+T` or click the `// timeline` tab. Answers *What have I been working on? / yesterday? / this week?* — grouped by task, with git commits, runs logged, artifacts generated, and task status inline.
 
-![Hub timeline drawer](hubspace/assets/screenshots/timeline.png)
+![Hub timeline drawer](https://raw.githubusercontent.com/auth-02/hub/main/hubspace/assets/screenshots/timeline.png)
 
 ### Markdown & HTML document pages
 Every file opened in its own tab gets a clean reading view with a `// trace` bar below the heading. HTML artifacts are served with the hub's own CSS injected.
 
-![Markdown document page](hubspace/assets/screenshots/doc.png)
+![Markdown document page](https://raw.githubusercontent.com/auth-02/hub/main/hubspace/assets/screenshots/doc.png)
 
 ---
 
@@ -171,7 +171,7 @@ launchctl kickstart -k gui/$(id -u)/com.user.hub
 ```bash
 git clone https://github.com/auth-02/hub && cd hub
 python3 -m hubspace.server      # run from source, no install
-python3 tests/run_tests.py      # 240 tests, stdlib unittest
+python3 tests/run_tests.py      # 246 tests, stdlib unittest
 ```
 
 Layout: code is the `hubspace/` package; all generated/writable state (index, DB, log)
