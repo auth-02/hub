@@ -5,5 +5,5 @@ __pycache__/
 .hub.log
 .venv/
 *.DS_Store
-
+.hub-server.out
 /tasks/
