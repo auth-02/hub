@@ -450,14 +450,30 @@ def _cmd_new_task(slug: str, target: Path, with_dirs: list[str] | None = None) -
 
 def main() -> None:
     global ROOT
-    ap = argparse.ArgumentParser(description="Hub index builder")
+    ap = argparse.ArgumentParser(
+        prog="hub",
+        description="Build a browsable hub of every .md / .html file under a scan root. "
+                    "Run with no command to (re)build the index.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            "  hub                                rebuild the index (default action)\n"
+            "  hub --demo                         rebuild against the bundled example fixture\n"
+            "  hub init                           scaffold tasks/ in the current directory\n"
+            "  hub new task add-sso-login         create a task (manifest.md only)\n"
+            "  hub new task add-sso-login --with all   ...and pre-create runs/ artifacts/ data/\n"
+            "\n"
+            "serve the hub locally with the companion command:\n"
+            "  hub-server --port 8787\n"
+        ),
+    )
     ap.add_argument("--demo", action="store_true", help="Use bundled example fixture")
     ap.add_argument("--root", help="Scan root (overrides HUB_SCAN_ROOT, hub.toml, sidecar)")
 
     # Subcommands: hub init, hub new task <slug>
-    sub = ap.add_subparsers(dest="cmd")
+    sub = ap.add_subparsers(dest="cmd", title="commands", metavar="<command>")
     sub.add_parser("init", help="Scaffold tasks/ in the current directory")
-    new_p = sub.add_parser("new", help="Scaffold a new task")
+    new_p = sub.add_parser("new", help="Scaffold a new task (hub new task <slug>)")
     new_p.add_argument("kind", choices=["task"], help="Object kind to create")
     new_p.add_argument("slug", help="Task slug (lowercase-hyphenated)")
     new_p.add_argument(
