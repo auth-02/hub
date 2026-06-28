@@ -26,6 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
+from . import __version__
 from . import config
 from . import db
 from . import metadata
@@ -426,6 +427,7 @@ def _cmd_new_task(slug: str, target: Path) -> None:
 def main() -> None:
     global ROOT
     ap = argparse.ArgumentParser(description="Hub index builder")
+    ap.add_argument("--version", action="version", version=f"hub {__version__}")
     ap.add_argument("--demo", action="store_true", help="Use bundled example fixture")
     ap.add_argument("--root", help="Scan root (overrides HUB_SCAN_ROOT, hub.toml, sidecar)")
 

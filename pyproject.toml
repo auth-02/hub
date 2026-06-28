@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hubspaces"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Local markdown/HTML browser with split-pane preview, full-text search, and a task board — stdlib-only."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -39,6 +39,9 @@ hub-server = "hubspace.server:main"
 
 # README screenshots / illustrations are docs-only (4.7 MB) — keep them out of
 # the installed wheel. The 68 KB example/ fixture stays in for `hub --demo`.
+[tool.hatch.version]
+path = "hubspace/__init__.py"
+
 [tool.hatch.build.targets.wheel]
 packages = ["hubspace"]
 exclude = [

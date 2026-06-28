@@ -32,6 +32,7 @@ from urllib.parse import quote, unquote
 
 # ── Scan root resolution (shared with hub.py via config.py) ─────────────────
 _HERE = Path(__file__).resolve().parent
+from . import __version__
 from . import config
 
 
@@ -684,9 +685,15 @@ def _rows_to_table(rows: list) -> str:
         return "<p>Empty file.</p>"
     head = rows[0]
     body_rows = rows[1:]
+    col_types = _detect_col_types([[str(c) for c in r] for r in body_rows], len(head))
     ths = "".join(f"<th>{_esc_cell(c)}</th>" for c in head)
     trs = "".join(
-        "<tr>" + "".join(f"<td>{_esc_cell(c)}</td>" for c in row) + "</tr>"
+        "<tr>" + "".join(
+            "<td>"
+            + _esc_cell(_fmt_cell(str(c), col_types[j] if j < len(col_types) else "text"))
+            + "</td>"
+            for j, c in enumerate(row)
+        ) + "</tr>"
         for row in body_rows
     )
     return f"<table><thead><tr>{ths}</tr></thead><tbody>{trs}</tbody></table>"
@@ -713,6 +720,72 @@ def _strip_ns(tag: str) -> str:
     return tag.split("}")[-1]
 
 
+# Built-in numFmtId values that denote dates/times (ECMA-376 §18.8.30).
+_XLSX_DATE_FMTS = {14, 15, 16, 17, 22}
+_XLSX_TIME_FMTS = {18, 19, 20, 21, 45, 46, 47}
+
+
+def _date_kind_from_code(code: str) -> str | None:
+    """Classify a custom numFmt format code as 'date', 'datetime', or None."""
+    # Drop quoted literals and bracketed sections ([Red], [h], locale tags).
+    c = re.sub(r'"[^"]*"', "", code.lower())
+    c = re.sub(r"\[[^\]]*\]", "", c)
+    has_date = "y" in c or "d" in c or "mmm" in c
+    has_time = "h" in c or "s" in c or "mm:" in c or ":mm" in c
+    if has_time:
+        return "datetime" if has_date else "datetime"
+    return "date" if has_date else None
+
+
+def _xlsx_date_styles(zf: zipfile.ZipFile, names: list[str]) -> dict[int, str]:
+    """Map cellXfs index → 'date'/'datetime' for date-formatted styles."""
+    import xml.etree.ElementTree as ET
+    if "xl/styles.xml" not in names:
+        return {}
+    root = ET.fromstring(zf.read("xl/styles.xml"))
+    custom: dict[int, str] = {}
+    for el in root.iter():
+        if _strip_ns(el.tag) == "numFmt":
+            fid = el.get("numFmtId")
+            kind = _date_kind_from_code(el.get("formatCode") or "")
+            if fid is not None and kind:
+                custom[int(fid)] = kind
+    styles: dict[int, str] = {}
+    for el in root.iter():
+        if _strip_ns(el.tag) != "cellXfs":
+            continue
+        idx = 0
+        for xf in el:
+            if _strip_ns(xf.tag) != "xf":
+                continue
+            nfid = xf.get("numFmtId")
+            if nfid is not None:
+                n = int(nfid)
+                if n in _XLSX_DATE_FMTS:
+                    styles[idx] = "datetime" if n == 22 else "date"
+                elif n in _XLSX_TIME_FMTS:
+                    styles[idx] = "datetime"
+                elif n in custom:
+                    styles[idx] = custom[n]
+            idx += 1
+        break
+    return styles
+
+
+def _excel_serial_to_str(val: str, kind: str) -> str:
+    """Convert an Excel serial date number to an ISO date/datetime string."""
+    from datetime import datetime, timedelta
+    try:
+        n = float(val)
+    except ValueError:
+        return val
+    # Excel's epoch is 1899-12-30 (the offset absorbs the fictional 1900 leap day).
+    dt = datetime(1899, 12, 30) + timedelta(days=n)
+    if kind == "datetime" and (dt.hour or dt.minute or dt.second):
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    return dt.strftime("%Y-%m-%d")
+
+
 def _render_xlsx(path: Path) -> str:
     """Render the first worksheet of an .xlsx file as an HTML table (stdlib zipfile + xml)."""
     import xml.etree.ElementTree as ET
@@ -735,6 +808,7 @@ def _render_xlsx(path: Path) -> str:
                     return '<p class="empty">No worksheet found.</p>'
                 sheet_name = sheets[0]
             sheet_root = ET.fromstring(zf.read(sheet_name))
+            date_styles = _xlsx_date_styles(zf, names)
 
         rows: list = []
         for el in sheet_root.iter():
@@ -759,6 +833,13 @@ def _render_xlsx(path: Path) -> str:
                         val = shared[int(val)]
                     except (ValueError, IndexError):
                         val = ""
+                elif ctype in (None, "n") and val:
+                    # Numeric cell: a date-formatted style means the raw value is
+                    # an Excel serial number — convert it to a readable date.
+                    sidx = c.get("s")
+                    kind = date_styles.get(int(sidx)) if sidx is not None else None
+                    if kind:
+                        val = _excel_serial_to_str(val, kind)
                 cells.append(val)
             rows.append(cells)
         return _rows_to_table(rows)
@@ -1058,8 +1139,25 @@ class _HubServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
     daemon_threads = True
 
     def server_bind(self) -> None:
-        self.socket.setsockopt(_socket.IPPROTO_IPV6, _socket.IPV6_V6ONLY, 0)
+        # Dual-stack only applies to IPv6 sockets; guard so the IPv4 fallback
+        # (and platforms lacking IPV6_V6ONLY) don't raise.
+        if self.address_family == _socket.AF_INET6:
+            try:
+                self.socket.setsockopt(_socket.IPPROTO_IPV6, _socket.IPV6_V6ONLY, 0)
+            except (AttributeError, OSError):
+                pass
         super().server_bind()
+
+
+def _make_server(port: int, handler: type) -> _HubServer:
+    """Bind a dual-stack IPv6 socket, falling back to IPv4 on hosts without an
+    IPv6 stack (many containers, restricted CI, some corporate networks)."""
+    try:
+        _HubServer.address_family = _socket.AF_INET6
+        return _HubServer(("::", port), handler)
+    except OSError:
+        _HubServer.address_family = _socket.AF_INET
+        return _HubServer(("0.0.0.0", port), handler)
 
 
 # ── Entry point ─────────────────────────────────────────────────────────────
@@ -1067,6 +1165,7 @@ class _HubServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
 def main() -> None:
     global _active_root
     ap = argparse.ArgumentParser(description="hub markdown server")
+    ap.add_argument("--version", action="version", version=f"hub-server {__version__}")
     ap.add_argument(
         "--port", "-p",
         type=int,
@@ -1086,7 +1185,7 @@ def main() -> None:
 
     threading.Thread(target=_watcher, args=(args.port,), daemon=True).start()
 
-    with _HubServer(("::", args.port), HubHandler) as srv:
+    with _make_server(args.port, HubHandler) as srv:
         print(f"  Scan root : {_active_root}")
         print(f"  Listening : http://localhost:{args.port}")
         print()
