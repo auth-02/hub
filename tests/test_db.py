@@ -20,7 +20,8 @@ def _make_conn():
 
 def _fake_meta(abs_path, repo="repo", rel="tasks/slug/manifest.md",
                ext="md", kind="task", mtime=None,
-               task_slug="slug", task_repo="repo"):
+               task_slug="slug", task_repo="repo",
+               skill_slug=None, skill_repo=None):
     return {
         "abs": abs_path,
         "repo": repo,
@@ -30,6 +31,8 @@ def _fake_meta(abs_path, repo="repo", rel="tasks/slug/manifest.md",
         "mtime": mtime or time.time(),
         "task_slug": task_slug,
         "task_repo": task_repo,
+        "skill_slug": skill_slug,
+        "skill_repo": skill_repo,
     }
 
 

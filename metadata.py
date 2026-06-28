@@ -7,6 +7,13 @@ from pathlib import Path
 # Pre-compiled patterns — compiled once at import time, not per call.
 _FRONTMATTER   = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 _FM_TITLE      = re.compile(r"^title:\s*['\"]?(.+?)['\"]?\s*$", re.MULTILINE)
+_FM_STATUS     = re.compile(r"^status:\s*(\S+)\s*$", re.MULTILINE)
+_PLAN_ITEM     = re.compile(r"^- \[( |x)\] (.+)$", re.MULTILINE | re.IGNORECASE)
+_DECISIONS_SECTION = re.compile(
+    r"^#{1,3}\s+decisions\s*\n(.*?)(?=^#{1,3}\s|\Z)",
+    re.MULTILINE | re.IGNORECASE | re.DOTALL,
+)
+_DECISION_ITEM = re.compile(r"^\d+\.\s+(.+)$", re.MULTILINE)
 _H1            = re.compile(r"^#\s+(.+)$", re.MULTILINE)
 _MD_FM_STRIP   = re.compile(r"^---\s*\n.*?\n---\s*\n?", re.DOTALL)
 _MD_FENCE      = re.compile(r"```[\s\S]*?```")
@@ -58,6 +65,39 @@ def extract_title(path: str, text: str) -> str:
     if m:
         return m.group(1).strip()
     return Path(path).stem.replace("-", " ").replace("_", " ").title()
+
+
+_VALID_STATUSES = {"ongoing", "paused", "completed"}
+
+
+def extract_status(text: str) -> str:
+    """Return status from frontmatter, defaulting to 'ongoing' per spec §4.1."""
+    head = text[:2000]
+    if head.startswith("---"):
+        m = _FRONTMATTER.match(head)
+        if m:
+            s = _FM_STATUS.search(m.group(1))
+            if s:
+                val = s.group(1).lower().strip("\"'")
+                if val in _VALID_STATUSES:
+                    return val
+    return "ongoing"
+
+
+def extract_decisions(text: str) -> list:
+    """Extract numbered items from the Decisions section of a manifest."""
+    m = _DECISIONS_SECTION.search(text[:15_000])
+    if not m:
+        return []
+    return [item.group(1).strip() for item in _DECISION_ITEM.finditer(m.group(1))]
+
+
+def extract_plan(text: str) -> list:
+    """Extract plan checkboxes from markdown. Returns [{d: bool, t: str}, ...]."""
+    items = []
+    for m in _PLAN_ITEM.finditer(text[:10_000]):
+        items.append({"d": m.group(1).lower() == "x", "t": m.group(2).strip()})
+    return items
 
 
 def extract_body(path: str, text: str, max_chars: int = 2000) -> str:

@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """Build a single browsable hub of every .md / .html file under a scan root.
 
-Stdlib-only. Re-run any time; a launchd agent does this every 120 s.
+Stdlib-only. Re-run any time; an optional background watcher does this on change.
 
 Configuration (all optional, via environment variables):
-    HUB_SCAN_ROOT   directory to scan          (default: ~/tifin)
+    HUB_SCAN_ROOT   directory to scan          (default: current working directory)
     HUB_OUTPUT      output html file           (default: build/docs-index.html)
     HUB_SERVER_PORT local server port          (default: unset — uses file:// links)
     HUB_DEBUG       "1"/"true" enables logging  (default: off)
     HUB_LOG         log file path (debug only)  (default: .hub.log)
+
+State directory (db, sidecar):
+    $XDG_STATE_HOME/hub  or  ~/.local/state/hub
 """
 from __future__ import annotations
 
+import argparse
 import html
 import json
 import os
@@ -34,11 +38,20 @@ def _env_path(var: str, default: Path) -> Path:
     return Path(val).expanduser() if val else default
 
 
-SCAN_ROOT_FILE = Path.home() / "agents" / "hub" / ".scan_root"
+def _state_dir() -> Path:
+    """XDG_STATE_HOME/hub, falling back to ~/.local/state/hub."""
+    xdg = os.environ.get("XDG_STATE_HOME")
+    base = Path(xdg) if xdg else Path.home() / ".local" / "state"
+    d = base / "hub"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+SCAN_ROOT_FILE = _state_dir() / ".scan_root"
 
 
 def _resolve_scan_root() -> Path:
-    """Priority: HUB_SCAN_ROOT env > .scan_root sidecar > ~/tifin default."""
+    """Priority: HUB_SCAN_ROOT env > .scan_root sidecar > current working directory."""
     env = os.environ.get("HUB_SCAN_ROOT")
     if env:
         return Path(env).expanduser()
@@ -48,7 +61,7 @@ def _resolve_scan_root() -> Path:
             return Path(text).expanduser()
     except OSError:
         pass
-    return Path.home() / "tifin"
+    return Path.cwd()
 
 
 # ── Configurable paths ──────────────────────────────────────────────────────
@@ -57,7 +70,7 @@ OUTPUT = _env_path("HUB_OUTPUT", _HERE / "build" / "docs-index.html")
 DEBUG  = os.environ.get("HUB_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
 LOG    = _env_path("HUB_LOG",    _HERE / ".hub.log")
 FAVICON = _env_path("HUB_FAVICON", _HERE / "assets" / "favicon.svg")
-DB     = _env_path("HUB_DB",    Path.home() / ".hub-state" / "hub.db")
+DB     = _env_path("HUB_DB",    _state_dir() / "hub.db")
 
 _SERVER_PORT   = os.environ.get("HUB_SERVER_PORT", "").strip()
 _SERVER_ORIGIN = f"http://localhost:{_SERVER_PORT}" if _SERVER_PORT else ""
@@ -74,17 +87,6 @@ EXCLUDE_DIRS = {
 EXTS = {".md", ".html", ".htm"}
 PROMPT_EXTS = {".txt"}
 DATA_EXTS = {".pdf", ".xlsx", ".xls", ".csv", ".tsv"}
-
-KIND_DIRS = (
-    ("artifacts", "artifact"),
-    ("runs",      "run"),
-    ("data",      "data"),
-    ("tasks",     "task"),
-    ("docs",      "doc"),
-    ("prompts",   "prompt"),
-    ("skills",    "skill"),
-)
-
 
 def _included(path: Path) -> bool:
     ext = path.suffix.lower()
@@ -128,20 +130,44 @@ def discover() -> dict[str, list[dict]]:
     return groups
 
 
-def _classify(path: Path, rel: str) -> str | None:
+def _classify(path: Path, rel: str, repo_name: str = "") -> str | None:
+    """Kind resolution per HUB-LAYOUT.md §3. First match wins.
+
+    repo_name is the immediate parent directory name (the "repo"). When the repo
+    dir is itself named "tasks", the rel is already one level inside tasks/, so
+    we prefix it so the structural patterns still fire correctly.
+    """
     stem = path.stem.lower()
+    # When the containing repo is named "tasks", the file is already inside
+    # tasks/<slug>/... — prepend so classification patterns match.
+    effective_rel = f"tasks/{rel}" if repo_name.lower() == "tasks" else rel
+    parts = effective_rel.split("/")
+
     if stem == "claude":
         return "claude"
     if stem == "readme":
         return "readme"
-    posix = path.as_posix()
-    for dirname, kind in KIND_DIRS:
-        if f"/{dirname}/" in posix or rel.startswith(f"{dirname}/"):
-            # For skills/, only the SKILL.md root file gets kind=skill;
-            # reference files keep their natural kind for filtering purposes.
-            if kind == "skill" and stem != "skill":
-                return None
-            return kind
+
+    # Task family — tasks/ at repo root; order matters: sub-dirs before task itself
+    if parts[0] == "tasks" and len(parts) >= 3:
+        sub = parts[2]
+        if sub == "runs":        return "run"
+        if sub == "artifacts":   return "artifact"
+        if sub == "prompts":     return "prompt"
+        if sub == "data":        return "data"
+        if len(parts) == 3 and stem == "manifest":
+            return "task"
+
+    if parts[0] == "docs":
+        return "doc"
+
+    # Skills — hub extension; skills/ may be nested at any depth
+    if stem == "skill" and "/skills/" in path.as_posix():
+        return "skill"
+
+    # MD catch-all per spec §3 — any .md/.html that didn't match above
+    if path.suffix.lower() in (".md", ".html", ".htm"):
+        return "md"
     return None
 
 
@@ -192,7 +218,7 @@ def _meta(path: Path, repo_root: Path) -> dict:
         "rel":        rel,
         "mtime":      mtime,
         "ext":        path.suffix.lower().lstrip("."),
-        "kind":       _classify(path, rel),
+        "kind":       _classify(path, rel, repo_root.name),
         "task_slug":  _task_slug(path),
         "task_repo":  _task_repo(path, repo_root),
         "skill_slug": _skill_slug(path),
@@ -250,6 +276,23 @@ def _collect_git(scan_root: Path, since_days: int = 7) -> list[dict]:
     return commits
 
 
+def _first_run_html(root: Path) -> str:
+    r = html.escape(str(root))
+    return (
+        '<div class="first-run">'
+        '<div class="first-run-eyebrow">// nothing to index yet</div>'
+        f'<div class="first-run-title">Hub looks for <em>.md</em> &amp; <em>.html</em> under <code>{r}</code>.</div>'
+        '<p class="first-run-body">Drop docs anywhere and they\'ll appear. '
+        'To unlock lineage, tasks live under '
+        '<code>tasks/&lt;slug&gt;/</code> with a manifest.</p>'
+        '<pre class="first-run-cmd">'
+        '<span class="first-run-prompt">$</span> hub new task my-first-task\n'
+        '<span class="first-run-comment"># scaffolds manifest + runs/ artifacts/ prompts/ data/</span>'
+        '</pre>'
+        '</div>'
+    )
+
+
 def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]", timeline_json: str = "{}", tasks_json: str = "[]") -> str:
     total     = sum(len(v) for v in groups.values())
     md_total  = sum(1 for v in groups.values() for f in v if f["ext"] == "md")
@@ -283,6 +326,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
                 f'<a class="row" href="{html.escape(_href(f["abs"]))}" '
                 f'target="_blank" rel="noopener" '
                 f'data-kind="{badge_cls}" '
+                f'data-mtime="{int(f["mtime"])}" '
                 f'data-search="{html.escape((repo + " " + f["rel"]).lower())}" '
                 f'data-abs="{html.escape(f["abs"])}"{task_attrs}>'
                 f'<span class="badge {badge_cls}">{badge}</span>'
@@ -315,7 +359,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         md_total=md_total,
         html_total=html_total,
         repo_count=len(groups),
-        body="".join(rows_html) or f'<p class="empty">No .md / .html files found under {html.escape(str(ROOT))}.</p>',
+        body="".join(rows_html) or _first_run_html(ROOT),
         repo_chips=repo_chips,
         fts_json=fts_json,
         lineage_json=lineage_json,
@@ -327,7 +371,75 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
     )
 
 
+def _cmd_init(target: Path) -> None:
+    """hub init — scaffold tasks/ and hub.toml stub in target directory."""
+    tasks_dir = target / "tasks"
+    tasks_dir.mkdir(exist_ok=True)
+    gitignore = target / ".gitignore"
+    if gitignore.exists():
+        content = gitignore.read_text(encoding="utf-8")
+        if "tasks/" not in content:
+            with gitignore.open("a", encoding="utf-8") as fh:
+                if not content.endswith("\n"):
+                    fh.write("\n")
+                fh.write("tasks/\n")
+            print(f"  updated  {gitignore.relative_to(target)}")
+    print(f"  created  {tasks_dir.relative_to(target)}/")
+    print("  hub init done — run 'hub new task <slug>' to scaffold your first task.")
+
+
+def _slugify_title(slug: str) -> str:
+    return slug.replace("-", " ").replace("_", " ").title()
+
+
+def _cmd_new_task(slug: str, target: Path) -> None:
+    """hub new task <slug> — scaffold a minimal valid task per HUB-LAYOUT.md Appendix."""
+    import re
+    if not re.match(r"^[a-z0-9][a-z0-9-]*$", slug):
+        print(f"  error: slug must be lowercase-hyphenated (got '{slug}')")
+        sys.exit(1)
+    task_dir = target / "tasks" / slug
+    task_dir.mkdir(parents=True, exist_ok=True)
+    for sub in ("runs", "artifacts", "prompts", "data"):
+        (task_dir / sub).mkdir(exist_ok=True)
+    manifest = task_dir / "manifest.md"
+    if not manifest.exists():
+        title = _slugify_title(slug)
+        manifest.write_text(
+            f"---\nstatus: ongoing\ntitle: {title}\n---\n\n# {title}\n",
+            encoding="utf-8",
+        )
+        print(f"  created  tasks/{slug}/manifest.md")
+        for sub in ("runs", "artifacts", "prompts", "data"):
+            print(f"  created  tasks/{slug}/{sub}/")
+    else:
+        print(f"  exists   tasks/{slug}/manifest.md — skipped")
+
+
 def main() -> None:
+    global ROOT
+    ap = argparse.ArgumentParser(description="Hub index builder")
+    ap.add_argument("--demo", action="store_true", help="Use bundled example fixture")
+
+    # Subcommands: hub init, hub new task <slug>
+    sub = ap.add_subparsers(dest="cmd")
+    sub.add_parser("init", help="Scaffold tasks/ in the current directory")
+    new_p = sub.add_parser("new", help="Scaffold a new task")
+    new_p.add_argument("kind", choices=["task"], help="Object kind to create")
+    new_p.add_argument("slug", help="Task slug (lowercase-hyphenated)")
+
+    args, _ = ap.parse_known_args()
+
+    if args.cmd == "init":
+        _cmd_init(Path.cwd())
+        return
+    if args.cmd == "new" and getattr(args, "kind", None) == "task":
+        _cmd_new_task(args.slug, Path.cwd())
+        return
+
+    if args.demo:
+        ROOT = _HERE / "example"
+
     groups = discover()
 
     conn = db.open_db(DB)
@@ -340,6 +452,9 @@ def main() -> None:
                 title = metadata.extract_title(f["abs"], text)
                 body  = metadata.extract_body(f["abs"], text)
                 db.upsert(conn, {**f, "repo": repo}, title, body)
+                if f.get("kind") == "task" and f.get("task_slug"):
+                    status = metadata.extract_status(text)
+                    db.seed_status_from_frontmatter(conn, f["task_slug"], f["task_repo"], status)
     db.prune(conn, live_paths)
     db.build_lineage(conn)
     db.backfill_activity(conn)
@@ -349,7 +464,18 @@ def main() -> None:
     activity_json = db.get_activity_json(conn, str(ROOT))
     timeline_tasks = db.get_timeline_data(conn, str(ROOT))
     all_tasks = db.get_all_tasks(conn, str(ROOT))
+    orphan_tasks = db.get_orphan_tasks(conn, str(ROOT))
+    existing_keys = {(t["sl"], t["rp"]) for t in all_tasks}
+    for ot in orphan_tasks:
+        if (ot["sl"], ot["rp"]) not in existing_keys:
+            all_tasks.append(ot)
     conn.close()
+
+    for t in all_tasks:
+        if t.get("abs"):
+            _text = metadata.read_safe(t["abs"])
+            t["plan"] = metadata.extract_plan(_text)
+            t["decisions"] = metadata.extract_decisions(_text)
 
     tasks_json = json.dumps(all_tasks, separators=(",", ":"))
 

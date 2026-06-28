@@ -35,17 +35,83 @@ class TestClassify(unittest.TestCase):
         p = Path("/repo/tasks/slug/data/input.csv")
         self.assertEqual(hub._classify(p, "tasks/slug/data/input.csv"), "data")
 
-    def test_inside_prompts_dir(self):
+    def test_inside_prompts_dir_at_repo_root_returns_none(self):
+        # Top-level prompts/ is not in the spec; only tasks/<slug>/prompts/** → prompt
         p = Path("/repo/prompts/system.txt")
-        self.assertEqual(hub._classify(p, "prompts/system.txt"), "prompt")
+        self.assertIsNone(hub._classify(p, "prompts/system.txt"))
+
+    def test_prompts_inside_tasks_dir(self):
+        # Bug-fix: tasks/<slug>/prompts/ must classify as prompt, not task
+        p = Path("/repo/tasks/slug/prompts/system.txt")
+        self.assertEqual(hub._classify(p, "tasks/slug/prompts/system.txt"), "prompt")
+
+    def test_non_manifest_in_tasks_gets_md_catch_all(self):
+        # Only manifest.md gets kind=task; other .md in tasks root get MD catch-all
+        p = Path("/repo/tasks/my-task/notes.md")
+        self.assertEqual(hub._classify(p, "tasks/my-task/notes.md"), "md")
+
+    def test_skill_md_classified_as_skill(self):
+        p = Path("/repo/app/skills/rate_limiting/SKILL.md")
+        self.assertEqual(hub._classify(p, "app/skills/rate_limiting/SKILL.md"), "skill")
+
+    def test_skill_reference_gets_md_catch_all(self):
+        # Non-SKILL.md files inside skills/ get MD catch-all (they're searchable docs)
+        p = Path("/repo/app/skills/rate_limiting/references/algorithms.md")
+        self.assertEqual(hub._classify(p, "app/skills/rate_limiting/references/algorithms.md"), "md")
 
     def test_inside_docs_dir(self):
         p = Path("/repo/docs/guide.md")
         self.assertEqual(hub._classify(p, "docs/guide.md"), "doc")
 
-    def test_plain_file_returns_none(self):
+    def test_plain_md_returns_md_kind(self):
+        # Loose .md not matching any structural pattern → MD catch-all
         p = Path("/repo/src/app.md")
-        self.assertIsNone(hub._classify(p, "src/app.md"))
+        self.assertEqual(hub._classify(p, "src/app.md"), "md")
+
+    def test_html_in_docs_returns_doc(self):
+        p = Path("/repo/docs/page.html")
+        self.assertEqual(hub._classify(p, "docs/page.html"), "doc")
+
+    def test_html_outside_docs_returns_md_kind(self):
+        p = Path("/repo/views/index.html")
+        self.assertEqual(hub._classify(p, "views/index.html"), "md")
+
+    def test_htm_extension_returns_md_kind(self):
+        p = Path("/repo/page.htm")
+        self.assertEqual(hub._classify(p, "page.htm"), "md")
+
+    def test_classify_manifest_in_tasks_repo(self):
+        # When the repo dir itself is named "tasks", repo_name="tasks" shifts rel
+        p = Path("/scan/tasks/my-feature/manifest.md")
+        self.assertEqual(hub._classify(p, "my-feature/manifest.md", repo_name="tasks"), "task")
+
+    def test_classify_run_in_tasks_repo(self):
+        p = Path("/scan/tasks/my-feature/runs/2024-01-01/out.md")
+        self.assertEqual(
+            hub._classify(p, "my-feature/runs/2024-01-01/out.md", repo_name="tasks"), "run"
+        )
+
+    def test_classify_artifact_in_tasks_repo(self):
+        p = Path("/scan/tasks/slug/artifacts/note.md")
+        self.assertEqual(
+            hub._classify(p, "slug/artifacts/note.md", repo_name="tasks"), "artifact"
+        )
+
+    def test_classify_prompt_in_tasks_repo(self):
+        p = Path("/scan/tasks/slug/prompts/system.txt")
+        self.assertEqual(
+            hub._classify(p, "slug/prompts/system.txt", repo_name="tasks"), "prompt"
+        )
+
+    def test_classify_data_in_tasks_repo(self):
+        p = Path("/scan/tasks/slug/data/input.csv")
+        self.assertEqual(
+            hub._classify(p, "slug/data/input.csv", repo_name="tasks"), "data"
+        )
+
+    def test_nested_docs_subdir_returns_doc(self):
+        p = Path("/repo/docs/api/reference.md")
+        self.assertEqual(hub._classify(p, "docs/api/reference.md"), "doc")
 
 
 class TestTaskSlug(unittest.TestCase):
@@ -135,6 +201,35 @@ class TestIncluded(unittest.TestCase):
 
     def test_xlsx_in_data_dir(self):
         self.assertTrue(hub._included(Path("/repo/tasks/slug/data/report.xlsx")))
+
+
+class TestSkillSlug(unittest.TestCase):
+    def test_skill_md_returns_parent_dir_as_slug(self):
+        p = Path("/repo/app/skills/rate_limiting/SKILL.md")
+        self.assertEqual(hub._skill_slug(p), "rate_limiting")
+
+    def test_non_skill_stem_inside_skills_dir_returns_slug(self):
+        # _skill_slug returns the dir name one level inside skills/, not just SKILL.md
+        p = Path("/repo/app/skills/rate_limiting/notes.md")
+        self.assertEqual(hub._skill_slug(p), "rate_limiting")
+
+    def test_no_skills_dir_returns_none(self):
+        p = Path("/repo/README.md")
+        self.assertIsNone(hub._skill_slug(p))
+
+    def test_skill_dir_at_root_returns_slug(self):
+        p = Path("/repo/skills/auth/SKILL.md")
+        self.assertEqual(hub._skill_slug(p), "auth")
+
+
+class TestSkillRepo(unittest.TestCase):
+    def test_returns_parent_of_skills_dir(self):
+        p = Path("/root/cortex/app/skills/rate_limiting/SKILL.md")
+        self.assertEqual(hub._skill_repo(p, Path("/root/cortex")), "app")
+
+    def test_fallback_to_repo_root_name_when_no_skills_in_path(self):
+        p = Path("/root/cortex/docs/guide.md")
+        self.assertEqual(hub._skill_repo(p, Path("/root/cortex")), "cortex")
 
 
 class TestHref(unittest.TestCase):
