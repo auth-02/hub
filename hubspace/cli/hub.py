@@ -32,7 +32,7 @@ from ..core import db
 from ..core import metadata
 
 _HERE = Path(__file__).resolve().parent
-_PKG_ROOT = _HERE.parent  # hubspace/ — holds assets/, templates/, example/
+_PKG_ROOT = _HERE.parent  # hubspace/ — holds assets/, templates/
 
 
 def _env_path(var: str, default: Path) -> Path:
@@ -498,7 +498,7 @@ def main() -> None:
     if args.root:
         ROOT = config.resolve_scan_root(CONFIG, SCAN_ROOT_FILE, flag=args.root)
     if args.demo:
-        ROOT = _PKG_ROOT / "example"
+        ROOT = config.example_dir()
 
     groups = discover()
 

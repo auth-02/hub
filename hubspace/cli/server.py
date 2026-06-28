@@ -32,7 +32,7 @@ from urllib.parse import quote, unquote
 
 # ── Scan root resolution (shared with hub.py via config.py) ─────────────────
 _HERE = Path(__file__).resolve().parent
-_PKG_ROOT = _HERE.parent  # hubspace/ — holds assets/, templates/, example/
+_PKG_ROOT = _HERE.parent  # hubspace/ — holds assets/, templates/
 from .. import __version__
 from ..core import config
 
@@ -1177,7 +1177,7 @@ def main() -> None:
     args = ap.parse_args()
 
     if args.demo:
-        _active_root = _PKG_ROOT / "example"
+        _active_root = config.example_dir()
 
     HubHandler.server_port = args.port
 

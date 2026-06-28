@@ -49,8 +49,14 @@ exclude = [
     "hubspace/assets/hub-illustrations",
 ]
 
+# example/ now lives at the repo root (outside the package), but the demo
+# fixture must ship inside the installed package so `hub --demo` works. Map it
+# back under hubspace/ at build time; config.example_dir() resolves either spot.
+[tool.hatch.build.targets.wheel.force-include]
+"example" = "hubspace/example"
+
 [tool.hatch.build.targets.sdist]
-include = ["hubspace", "README.md", "LICENSE"]
+include = ["hubspace", "example", "README.md", "LICENSE"]
 exclude = [
     "hubspace/assets/screenshots",
     "hubspace/assets/hub-illustrations",

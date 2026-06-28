@@ -136,3 +136,14 @@ def resolve_default_view(config: dict) -> str:
     if isinstance(v, str) and v in _VALID_VIEWS:
         return v
     return ""
+
+
+def example_dir() -> Path:
+    """Locate the bundled demo fixture used by `hub --demo`.
+
+    Installed wheels carry it at ``hubspace/example`` (force-included at build
+    time); in a source checkout it lives at the repo root, outside the package.
+    """
+    pkg = Path(__file__).resolve().parent.parent  # hubspace/
+    bundled = pkg / "example"
+    return bundled if bundled.exists() else pkg.parent / "example"
