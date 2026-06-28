@@ -21,7 +21,6 @@ import json
 import os
 import subprocess
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
@@ -30,14 +29,11 @@ from .. import __version__
 from ..core import config
 from ..core import db
 from ..core import metadata
+from ..utils.paths import env_path
+from ..utils.text import relative_time
 
 _HERE = Path(__file__).resolve().parent
 _PKG_ROOT = _HERE.parent  # hubspace/ — holds assets/, templates/
-
-
-def _env_path(var: str, default: Path) -> Path:
-    val = os.environ.get(var)
-    return Path(val).expanduser() if val else default
 
 
 def _state_dir() -> Path:
@@ -59,8 +55,8 @@ ROOT   = _resolve_scan_root()
 OUTPUT = config.output_path()
 DEBUG  = os.environ.get("HUB_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
 LOG    = config.log_path()
-FAVICON = _env_path("HUB_FAVICON", _PKG_ROOT / "assets" / "favicon.svg")
-DB     = _env_path("HUB_DB",    _state_dir() / "hub.db")
+FAVICON = env_path("HUB_FAVICON", _PKG_ROOT / "assets" / "favicon.svg")
+DB     = env_path("HUB_DB",    _state_dir() / "hub.db")
 
 _SERVER_PORT   = config.resolve_port(CONFIG)
 _SERVER_ORIGIN = f"http://localhost:{_SERVER_PORT}" if _SERVER_PORT else ""
@@ -224,16 +220,6 @@ def _href(abs_path: str) -> str:
     return "file://" + quote(abs_path)
 
 
-def _ago(mtime: float) -> str:
-    if not mtime:
-        return "—"
-    delta = time.time() - mtime
-    if delta < 90:
-        return "just now"
-    for unit, secs in (("d", 86400), ("h", 3600), ("m", 60)):
-        if delta >= secs:
-            return f"{int(delta // secs)}{unit} ago"
-    return "just now"
 
 
 def _collect_git(scan_root: Path, since_days: int = 7) -> list[dict]:
@@ -323,7 +309,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
                 f'data-abs="{html.escape(f["abs"])}"{task_attrs}>'
                 f'<span class="badge {badge_cls}">{badge}</span>'
                 f'<span class="path">{html.escape(f["rel"])}</span>'
-                f'<span class="ago">{_ago(f["mtime"])}</span>'
+                f'<span class="ago">{relative_time(f["mtime"])}</span>'
                 f"</a>"
             )
         rows_html.append(

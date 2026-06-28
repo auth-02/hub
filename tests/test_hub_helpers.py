@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from hubspace.cli import hub
+from hubspace.utils.text import relative_time
 
 
 class TestClassify(unittest.TestCase):
@@ -152,25 +153,25 @@ class TestTaskRepo(unittest.TestCase):
 
 class TestAgo(unittest.TestCase):
     def test_zero_mtime_returns_dash(self):
-        self.assertEqual(hub._ago(0), "—")
+        self.assertEqual(relative_time(0), "—")
 
     def test_just_now(self):
-        self.assertEqual(hub._ago(time.time()), "just now")
+        self.assertEqual(relative_time(time.time()), "just now")
 
     def test_just_now_boundary(self):
-        self.assertEqual(hub._ago(time.time() - 89), "just now")
+        self.assertEqual(relative_time(time.time() - 89), "just now")
 
     def test_minutes(self):
-        result = hub._ago(time.time() - 120)
+        result = relative_time(time.time() - 120)
         self.assertTrue(result.endswith("m ago"), f"unexpected: {result}")
         self.assertEqual(result, "2m ago")
 
     def test_hours(self):
-        result = hub._ago(time.time() - 7200)
+        result = relative_time(time.time() - 7200)
         self.assertEqual(result, "2h ago")
 
     def test_days(self):
-        result = hub._ago(time.time() - 3 * 86400)
+        result = relative_time(time.time() - 3 * 86400)
         self.assertEqual(result, "3d ago")
 
 

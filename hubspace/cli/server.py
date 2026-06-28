@@ -35,6 +35,8 @@ _HERE = Path(__file__).resolve().parent
 _PKG_ROOT = _HERE.parent  # hubspace/ — holds assets/, templates/
 from .. import __version__
 from ..core import config
+from ..utils.paths import is_within
+from ..utils.text import esc_html, slugify
 
 
 def _state_dir() -> Path:
@@ -602,13 +604,6 @@ def _render_md(src: str) -> str:
 
 # ── Document outline / TOC ───────────────────────────────────────────────────
 
-def _slugify(text: str) -> str:
-    """Lowercase, strip HTML tags, collapse non-alphanumeric runs to '-', trim."""
-    text = re.sub(r"<[^>]+>", "", text)
-    text = text.lower()
-    text = re.sub(r"[^a-z0-9]+", "-", text)
-    return text.strip("-")
-
 
 def _add_outline(body_html: str) -> tuple[str, str]:
     """Inject ids into h1-h3 tags and build a floating outline nav.
@@ -623,7 +618,7 @@ def _add_outline(body_html: str) -> tuple[str, str]:
         level = int(m.group(1))
         inner = m.group(2)
         plain = re.sub(r"<[^>]+>", "", inner).strip()
-        slug = _slugify(plain) or "section"
+        slug = slugify(plain) or "section"
         if slug in seen:
             seen[slug] += 1
             slug = f"{slug}-{seen[slug]}"
@@ -665,19 +660,8 @@ def _add_outline(body_html: str) -> tuple[str, str]:
 
 # ── Request handler ─────────────────────────────────────────────────────────
 
-def _is_within(child: Path, parent: Path) -> bool:
-    try:
-        child.relative_to(parent)
-        return True
-    except ValueError:
-        return False
-
 
 # ── Data file renderers (csv / tsv / xlsx → HTML table) ─────────────────────
-
-def _esc_cell(s: str) -> str:
-    return (str(s).replace("&", "&amp;").replace("<", "&lt;")
-            .replace(">", "&gt;").replace('"', "&quot;"))
 
 
 def _rows_to_table(rows: list) -> str:
@@ -687,11 +671,11 @@ def _rows_to_table(rows: list) -> str:
     head = rows[0]
     body_rows = rows[1:]
     col_types = _detect_col_types([[str(c) for c in r] for r in body_rows], len(head))
-    ths = "".join(f"<th>{_esc_cell(c)}</th>" for c in head)
+    ths = "".join(f"<th>{esc_html(c)}</th>" for c in head)
     trs = "".join(
         "<tr>" + "".join(
             "<td>"
-            + _esc_cell(_fmt_cell(str(c), col_types[j] if j < len(col_types) else "text"))
+            + esc_html(_fmt_cell(str(c), col_types[j] if j < len(col_types) else "text"))
             + "</td>"
             for j, c in enumerate(row)
         ) + "</tr>"
@@ -714,7 +698,7 @@ def _render_csv(path: Path) -> str:
         rows = list(csv.reader(io.StringIO(text), delimiter=delim))
         return _rows_to_table(rows)
     except Exception as e:
-        return f'<p class="empty">Could not parse {_esc_cell(path.name)}: {_esc_cell(str(e))}</p>'
+        return f'<p class="empty">Could not parse {esc_html(path.name)}: {esc_html(str(e))}</p>'
 
 
 def _strip_ns(tag: str) -> str:
@@ -845,7 +829,7 @@ def _render_xlsx(path: Path) -> str:
             rows.append(cells)
         return _rows_to_table(rows)
     except Exception as e:
-        return f'<p class="empty">Could not parse {_esc_cell(path.name)}: {_esc_cell(str(e))}</p>'
+        return f'<p class="empty">Could not parse {esc_html(path.name)}: {esc_html(str(e))}</p>'
 
 
 class HubHandler(http.server.BaseHTTPRequestHandler):
@@ -871,7 +855,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         # Static hub assets (CSS, JS, favicon, etc.)
         if url_path.startswith("/assets/"):
             asset = (_PKG_ROOT / url_path.lstrip("/")).resolve()
-            if not _is_within(asset, (_PKG_ROOT / "assets").resolve()):
+            if not is_within(asset, (_PKG_ROOT / "assets").resolve()):
                 self._send(403, "text/plain", b"Forbidden")
                 return
             if not asset.exists():
@@ -896,8 +880,8 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         # Security: must be within scan root or hub directory
         resolved = fs_path.resolve()
         if not (
-            _is_within(resolved, _active_root.resolve())
-            or _is_within(resolved, _PKG_ROOT.resolve())
+            is_within(resolved, _active_root.resolve())
+            or is_within(resolved, _PKG_ROOT.resolve())
         ):
             self._send(403, "text/plain", b"Forbidden")
             return

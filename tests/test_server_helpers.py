@@ -9,26 +9,28 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from hubspace.cli import server
+from hubspace.utils.paths import is_within
+from hubspace.utils.text import esc_html, slugify
 
 
 class TestSlugify(unittest.TestCase):
     def test_basic(self):
-        self.assertEqual(server._slugify("Hello World"), "hello-world")
+        self.assertEqual(slugify("Hello World"), "hello-world")
 
     def test_punctuation_collapsed(self):
-        self.assertEqual(server._slugify("Foo: Bar & Baz!"), "foo-bar-baz")
+        self.assertEqual(slugify("Foo: Bar & Baz!"), "foo-bar-baz")
 
     def test_html_stripped(self):
-        self.assertEqual(server._slugify("<strong>Title</strong>"), "title")
+        self.assertEqual(slugify("<strong>Title</strong>"), "title")
 
     def test_leading_trailing_trimmed(self):
-        self.assertEqual(server._slugify("  hello  "), "hello")
+        self.assertEqual(slugify("  hello  "), "hello")
 
     def test_numbers_kept(self):
-        self.assertEqual(server._slugify("Step 2: Install"), "step-2-install")
+        self.assertEqual(slugify("Step 2: Install"), "step-2-install")
 
     def test_empty_string(self):
-        self.assertEqual(server._slugify(""), "")
+        self.assertEqual(slugify(""), "")
 
 
 class TestAddOutline(unittest.TestCase):
@@ -72,19 +74,19 @@ class TestAddOutline(unittest.TestCase):
 
 class TestEscCell(unittest.TestCase):
     def test_ampersand(self):
-        self.assertEqual(server._esc_cell("a&b"), "a&amp;b")
+        self.assertEqual(esc_html("a&b"), "a&amp;b")
 
     def test_less_than(self):
-        self.assertEqual(server._esc_cell("<script>"), "&lt;script&gt;")
+        self.assertEqual(esc_html("<script>"), "&lt;script&gt;")
 
     def test_quote(self):
-        self.assertIn("&quot;", server._esc_cell('"hello"'))
+        self.assertIn("&quot;", esc_html('"hello"'))
 
     def test_plain_string_unchanged(self):
-        self.assertEqual(server._esc_cell("hello"), "hello")
+        self.assertEqual(esc_html("hello"), "hello")
 
     def test_non_string_coerced(self):
-        self.assertEqual(server._esc_cell(42), "42")
+        self.assertEqual(esc_html(42), "42")
 
 
 class TestRowsToTable(unittest.TestCase):
@@ -316,17 +318,17 @@ class TestFmtCell(unittest.TestCase):
 
 class TestIsWithin(unittest.TestCase):
     def test_child_inside_parent(self):
-        self.assertTrue(server._is_within(Path("/a/b/c.md"), Path("/a/b")))
+        self.assertTrue(is_within(Path("/a/b/c.md"), Path("/a/b")))
 
     def test_child_is_parent(self):
-        self.assertTrue(server._is_within(Path("/a/b"), Path("/a/b")))
+        self.assertTrue(is_within(Path("/a/b"), Path("/a/b")))
 
     def test_child_outside_parent(self):
-        self.assertFalse(server._is_within(Path("/etc/passwd"), Path("/a/b")))
+        self.assertFalse(is_within(Path("/etc/passwd"), Path("/a/b")))
 
     def test_prefix_not_enough(self):
         # /a/bc should not be within /a/b
-        self.assertFalse(server._is_within(Path("/a/bc/file.md"), Path("/a/b")))
+        self.assertFalse(is_within(Path("/a/bc/file.md"), Path("/a/b")))
 
 
 class TestRenderMdExtended(unittest.TestCase):
