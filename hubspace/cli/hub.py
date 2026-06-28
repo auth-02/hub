@@ -55,7 +55,7 @@ ROOT   = _resolve_scan_root()
 OUTPUT = config.output_path()
 DEBUG  = os.environ.get("HUB_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
 LOG    = config.log_path()
-FAVICON = env_path("HUB_FAVICON", _PKG_ROOT / "assets" / "favicon.svg")
+FAVICON = env_path("HUB_FAVICON", config.static_dir() / "favicon.svg")
 DB     = env_path("HUB_DB",    _state_dir() / "hub.db")
 
 _SERVER_PORT   = config.resolve_port(CONFIG)

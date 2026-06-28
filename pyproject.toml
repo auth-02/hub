@@ -45,20 +45,15 @@ path = "hubspace/__init__.py"
 [tool.hatch.build.targets.wheel]
 packages = ["hubspace"]
 exclude = [
-    "hubspace/assets/screenshots",
-    "hubspace/assets/hub-illustrations",
     "hubspace/plugin",
 ]
 
-# example/ now lives at the repo root (outside the package), but the demo
-# fixture must ship inside the installed package so `hub --demo` works. Map it
-# back under hubspace/ at build time; config.example_dir() resolves either spot.
+# Runtime assets (favicon, hub.css, hub.js) live inside hubspace/assets and ship
+# with the package automatically. Only example/ sits outside the package, so map
+# it back under hubspace/ at build time; config.example_dir() resolves either
+# spot. Docs-only assets/ (screenshots, illustrations) are never packaged.
 [tool.hatch.build.targets.wheel.force-include]
 "example" = "hubspace/example"
 
 [tool.hatch.build.targets.sdist]
 include = ["hubspace", "example", "README.md", "LICENSE"]
-exclude = [
-    "hubspace/assets/screenshots",
-    "hubspace/assets/hub-illustrations",
-]

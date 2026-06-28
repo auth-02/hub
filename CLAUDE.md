@@ -36,17 +36,19 @@ hub/                          repo root
 ├── README.md             stranger-facing docs (images under hubspace/assets/)
 ├── docs/                 specs — HUB-LAYOUT.md (the producer/consumer contract)
 ├── example/              demo fixture repos — `hub --demo` (force-included in wheel)
+├── assets/               docs-only: screenshots/ + hub-illustrations/ (never packaged)
 ├── hubspace/             the package (importable + pip/pipx installable)
 │   ├── __init__.py       __version__ (single source; pyproject reads it)
 │   ├── core/             core logic — no CLI/HTTP concerns
-│   │   ├── config.py     hub.toml parsing, scan-root/port/view resolution, writable paths
+│   │   ├── config.py     hub.toml parsing; example_dir()/assets_dir() resolvers
 │   │   ├── db.py         SQLite layer — migrations, upsert, lineage, FTS export
 │   │   ├── metadata.py   metadata extraction — title + body from markdown/html
 │   │   └── migrations/   schema as ordered *.sql files, applied by user_version
-│   ├── cli/              entry-point commands (paths resolve assets/ via _PKG_ROOT)
+│   ├── cli/              entry-point commands (hub, hub-server)
 │   │   ├── hub.py        scan, DB update, render  (hub = hubspace.cli.hub:main)
 │   │   └── server.py     HTTP server (hub-server = hubspace.cli.server:main)
-│   ├── assets/           favicon.svg, hub.css, hub.js  (screenshots/ excluded from wheel)
+│   ├── utils/            generic helpers — text.py (slug/escape/time), paths.py
+│   ├── static/          runtime served web assets — favicon.svg, hub.css, hub.js (URL /static/)
 │   ├── templates/        template.html  (str.format()-based)
 │   └── plugin/           hub-agent Claude plugin (manifest skill; excluded from wheel)
 ├── tests/

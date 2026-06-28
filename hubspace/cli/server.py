@@ -147,7 +147,7 @@ _DOC_PRINT_BTN = (
 
 
 def _favicon_href(port: int) -> str:
-    return f"http://localhost:{port}" + quote(str(_PKG_ROOT / "assets" / "favicon.svg"), safe="/:@")
+    return f"http://localhost:{port}" + quote(str(config.static_dir() / "favicon.svg"), safe="/:@")
 
 
 def _inject_into_html(src: str, lineage_html: str, favicon: str = "") -> str:
@@ -853,9 +853,10 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             return
 
         # Static hub assets (CSS, JS, favicon, etc.)
-        if url_path.startswith("/assets/"):
-            asset = (_PKG_ROOT / url_path.lstrip("/")).resolve()
-            if not is_within(asset, (_PKG_ROOT / "assets").resolve()):
+        if url_path.startswith("/static/"):
+            static_root = config.static_dir().resolve()
+            asset = (static_root / url_path[len("/static/"):]).resolve()
+            if not is_within(asset, static_root):
                 self._send(403, "text/plain", b"Forbidden")
                 return
             if not asset.exists():

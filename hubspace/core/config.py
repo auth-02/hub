@@ -147,3 +147,13 @@ def example_dir() -> Path:
     pkg = Path(__file__).resolve().parent.parent  # hubspace/
     bundled = pkg / "example"
     return bundled if bundled.exists() else pkg.parent / "example"
+
+
+def static_dir() -> Path:
+    """Runtime static web assets (favicon.svg, hub.css, hub.js).
+
+    These live inside the package at ``hubspace/static`` so they ship in the
+    wheel automatically. (Docs-only screenshots/illustrations live in the
+    repo-root assets/ instead and are never packaged.)
+    """
+    return Path(__file__).resolve().parent.parent / "static"  # hubspace/static
