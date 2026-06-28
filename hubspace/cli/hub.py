@@ -29,6 +29,7 @@ from .. import __version__
 from ..core import config
 from ..core import db
 from ..core import metadata
+from ..core.scan import _included, _meta
 from ..utils.paths import env_path
 from ..utils.text import relative_time
 
@@ -71,20 +72,6 @@ EXCLUDE_DIRS = {
 }
 EXCLUDE_DIRS |= config.config_exclude_dirs(CONFIG)
 DEFAULT_VIEW = config.resolve_default_view(CONFIG)
-EXTS = {".md", ".html", ".htm"}
-PROMPT_EXTS = {".txt"}
-DATA_EXTS = {".pdf", ".xlsx", ".xls", ".csv", ".tsv"}
-
-def _included(path: Path) -> bool:
-    ext = path.suffix.lower()
-    if ext in EXTS:
-        return True
-    if ext in PROMPT_EXTS and "/prompts/" in path.as_posix():
-        return True
-    if ext in DATA_EXTS and "/data/" in path.as_posix():
-        return True
-    return False
-
 
 def log(msg: str) -> None:
     print(msg)
@@ -117,108 +104,10 @@ def discover() -> dict[str, list[dict]]:
     return groups
 
 
-def _classify(path: Path, rel: str, repo_name: str = "") -> str | None:
-    """Kind resolution per HUB-LAYOUT.md §3. First match wins.
-
-    repo_name is the immediate parent directory name (the "repo"). When the repo
-    dir is itself named "tasks", the rel is already one level inside tasks/, so
-    we prefix it so the structural patterns still fire correctly.
-    """
-    stem = path.stem.lower()
-    # When the containing repo is named "tasks", the file is already inside
-    # tasks/<slug>/... — prepend so classification patterns match.
-    effective_rel = f"tasks/{rel}" if repo_name.lower() == "tasks" else rel
-    parts = effective_rel.split("/")
-
-    if stem == "claude":
-        return "claude"
-    if stem == "readme":
-        return "readme"
-
-    # Task family — tasks/ at repo root; order matters: sub-dirs before task itself
-    if parts[0] == "tasks" and len(parts) >= 3:
-        sub = parts[2]
-        if sub == "runs":        return "run"
-        if sub == "artifacts":   return "artifact"
-        if sub == "prompts":     return "prompt"
-        if sub == "data":        return "data"
-        if len(parts) == 3 and stem == "manifest":
-            return "task"
-
-    if parts[0] == "docs":
-        return "doc"
-
-    # Skills — hub extension; skills/ may be nested at any depth
-    if stem == "skill" and "/skills/" in path.as_posix():
-        return "skill"
-
-    # MD catch-all per spec §3 — any .md/.html that didn't match above
-    if path.suffix.lower() in (".md", ".html", ".htm"):
-        return "md"
-    return None
-
-
-def _task_slug(path: Path) -> str | None:
-    parts = path.parts
-    for i, part in enumerate(parts):
-        if part == "tasks" and i + 1 < len(parts):
-            return parts[i + 1]
-    return None
-
-
-def _task_repo(path: Path, repo_root: Path) -> str:
-    """Return the directory that owns the tasks/ folder, regardless of scan root depth.
-
-    ~/tifin/cortex/tasks/slug/...  →  cortex   (scan root ~/tifin OR ~/tifin/cortex)
-    """
-    parts = path.parts
-    for i, part in enumerate(parts):
-        if part == "tasks" and i > 0:
-            return parts[i - 1]
-    return repo_root.name
-
-
-def _skill_slug(path: Path) -> str | None:
-    parts = path.parts
-    for i, part in enumerate(parts):
-        if part == "skills" and i + 1 < len(parts):
-            return parts[i + 1]
-    return None
-
-
-def _skill_repo(path: Path, repo_root: Path) -> str:
-    parts = path.parts
-    for i, part in enumerate(parts):
-        if part == "skills" and i > 0:
-            return parts[i - 1]
-    return repo_root.name
-
-
-def _meta(path: Path, repo_root: Path) -> dict:
-    try:
-        mtime = path.stat().st_mtime
-    except OSError:
-        mtime = 0.0
-    rel = path.relative_to(repo_root).as_posix()
-    return {
-        "abs":        str(path),
-        "rel":        rel,
-        "mtime":      mtime,
-        "ext":        path.suffix.lower().lstrip("."),
-        "kind":       _classify(path, rel, repo_root.name),
-        "task_slug":  _task_slug(path),
-        "task_repo":  _task_repo(path, repo_root),
-        "skill_slug": _skill_slug(path),
-        "skill_repo": _skill_repo(path, repo_root),
-    }
-
-
 def _href(abs_path: str) -> str:
     if _SERVER_PORT:
         return f"http://localhost:{_SERVER_PORT}" + quote(abs_path)
     return "file://" + quote(abs_path)
-
-
 
 
 def _collect_git(scan_root: Path, since_days: int = 7) -> list[dict]:

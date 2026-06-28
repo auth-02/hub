@@ -40,9 +40,10 @@ hub/                          repo root
 ├── hubspace/             the package (importable + pip/pipx installable)
 │   ├── __init__.py       __version__ (single source; pyproject reads it)
 │   ├── core/             core logic — no CLI/HTTP concerns
-│   │   ├── config.py     hub.toml parsing; example_dir()/assets_dir() resolvers
+│   │   ├── config.py     hub.toml parsing; example_dir()/static_dir() resolvers
 │   │   ├── db.py         SQLite layer — migrations, upsert, lineage, FTS export
 │   │   ├── metadata.py   metadata extraction — title + body from markdown/html
+│   │   ├── scan.py       pure path → kind/metadata classification (_classify, _meta)
 │   │   └── migrations/   schema as ordered *.sql files, applied by user_version
 │   ├── cli/              entry-point commands (hub, hub-server)
 │   │   ├── hub.py        scan, DB update, index render (hub = hubspace.cli.hub:main)
@@ -183,7 +184,7 @@ rm ~/.local/state/hub/hub.db && HUB_SERVER_PORT=8787 python3 -m hubspace.cli.hub
 ```
 
 **Add a new badge/kind:**
-1. Add to `KIND_DIRS` in `hubspace/cli/hub.py`
+1. Add the path rule to `_classify()` in `hubspace/core/scan.py`
 2. Add `.badge.{kind}` CSS and filter chip in `hubspace/static/hub.html`
 3. Add to `KIND_REL` in `db.build_lineage()` and JS `buildLineage()`
 
@@ -191,7 +192,7 @@ rm ~/.local/state/hub/hub.db && HUB_SERVER_PORT=8787 python3 -m hubspace.cli.hub
 Add to `EXCLUDE_DIRS` in `hubspace/cli/hub.py` and `_WATCH_EXCLUDE` in `hubspace/cli/server.py`.
 
 **Add a new indexed extension:**
-Add to `EXTS` (always) or `PROMPT_EXTS` (prompts/ only) in `hubspace/cli/hub.py`.
+Add to `EXTS` (always) or `PROMPT_EXTS` (prompts/ only) in `hubspace/core/scan.py`.
 Update `metadata.extract_body()` if the format needs special stripping.
 
 ## Git / PR workflow
