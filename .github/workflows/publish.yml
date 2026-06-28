@@ -1,0 +1,60 @@
+name: publish
+
+# Trusted publishing (OIDC) — no stored tokens. Configure matching publishers:
+#   TestPyPI: project `hubspace`, owner auth-02, repo hub, workflow `publish.yml`,
+#             environment `testpypi`.
+#   PyPI:     same, environment `pypi`.
+# TestPyPI:  Actions tab → this workflow → "Run workflow" (dry-run from any branch).
+# PyPI:      publish a GitHub Release (tag) — runs automatically.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade build
+      - run: python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  testpypi:
+    # Dry-run: manual dispatch only.
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+
+  pypi:
+    # Real release: only when a GitHub Release is published.
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -1,13 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
-name = "hub"
+name = "hubspace"
 version = "0.1.0"
-description = "Local markdown/HTML browser with split-pane preview and full-text search"
+description = "Local markdown/HTML browser with split-pane preview, full-text search, and a task board — stdlib-only."
+readme = "README.md"
 requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Atharva" }]
+keywords = ["markdown", "documentation", "browser", "full-text-search", "static-site", "notes"]
 dependencies = []
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Environment :: Web Environment",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Documentation",
+    "Topic :: Text Processing :: Markup :: Markdown",
+    "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/auth-02/hub"
+Repository = "https://github.com/auth-02/hub"
 
 [project.scripts]
-hub = "hub:main"
-hub-server = "server:main"
+hub = "hubspace.hub:main"
+hub-server = "hubspace.server:main"
 
-[tool.uv]
-dev-dependencies = []
+# README screenshots / illustrations are docs-only (4.7 MB) — keep them out of
+# the installed wheel. The 68 KB example/ fixture stays in for `hub --demo`.
+[tool.hatch.build.targets.wheel]
+packages = ["hubspace"]
+exclude = [
+    "hubspace/assets/screenshots",
+    "hubspace/assets/hub-illustrations",
+]
+
+[tool.hatch.build.targets.sdist]
+include = ["hubspace", "README.md", "LICENSE"]
+exclude = [
+    "hubspace/assets/screenshots",
+    "hubspace/assets/hub-illustrations",
+]

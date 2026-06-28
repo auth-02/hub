@@ -30,17 +30,14 @@ import zipfile
 from pathlib import Path
 from urllib.parse import quote, unquote
 
-# ── Scan root resolution (mirrors hub.py) ──────────────────────────────────
+# ── Scan root resolution (shared with hub.py via config.py) ─────────────────
 _HERE = Path(__file__).resolve().parent
+from . import config
 
 
 def _state_dir() -> Path:
     """XDG_STATE_HOME/hub, falling back to ~/.local/state/hub."""
-    xdg = os.environ.get("XDG_STATE_HOME")
-    base = Path(xdg) if xdg else Path.home() / ".local" / "state"
-    d = base / "hub"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    return config.state_dir()
 
 
 _SIDECAR = _state_dir() / ".scan_root"
@@ -200,16 +197,8 @@ def _render_lineage_html(links: list, port: int) -> str:
 
 
 def _resolve_scan_root() -> Path:
-    env = os.environ.get("HUB_SCAN_ROOT")
-    if env:
-        return Path(env).expanduser()
-    try:
-        text = _SIDECAR.read_text(encoding="utf-8").strip()
-        if text:
-            return Path(text).expanduser()
-    except OSError:
-        pass
-    return Path.cwd()
+    """flag > HUB_SCAN_ROOT env > hub.toml > .scan_root sidecar > CWD (see config.py)."""
+    return config.resolve_scan_root(config.load_config(), _SIDECAR)
 
 
 SCAN_ROOT = _resolve_scan_root()
@@ -790,11 +779,11 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
 
         # Root → hub index
         if url_path in ("/", ""):
-            docs = _HERE / "build" / "docs-index.html"
+            docs = config.output_path()
             if docs.exists():
                 self._send(200, "text/html; charset=utf-8", docs.read_bytes())
             else:
-                self._send(404, "text/plain", b"docs-index.html not found - run hub.py first.")
+                self._send(404, "text/plain", b"docs-index.html not found - run hub first.")
             return
 
         # Static hub assets (CSS, JS, favicon, etc.)
@@ -881,9 +870,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 if status not in ("ongoing", "completed", "paused"):
                     self._send(400, "text/plain", b"invalid status")
                     return
-                import sys as _sys
-                _sys.path.insert(0, str(_HERE))
-                import db as _db
+                from . import db as _db
                 conn = sqlite3.connect(str(_DB_PATH), timeout=30)
                 _db.set_status(conn, task_slug, task_repo, status)
                 conn.close()
@@ -931,16 +918,23 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         env = os.environ.copy()
         env["HUB_SERVER_PORT"] = str(HubHandler.server_port)
         env["HUB_SCAN_ROOT"] = str(root)
+        # Ensure `-m hubspace.hub` resolves regardless of the child's CWD
+        # (installed: already importable; dev: package parent on PYTHONPATH).
+        _pkg_parent = str(_HERE.parent)
+        env["PYTHONPATH"] = (
+            _pkg_parent + os.pathsep + env["PYTHONPATH"]
+            if env.get("PYTHONPATH") else _pkg_parent
+        )
         with _REBUILD_LOCK:
             try:
                 return subprocess.run(
-                    [sys.executable, str(_HERE / "hub.py")],
+                    [sys.executable, "-m", "hubspace.hub"],
                     env=env, capture_output=True, text=True,
                     timeout=600,
                 )
             except subprocess.TimeoutExpired as exc:
                 exc.kill()
-                return subprocess.CompletedProcess(exc.args, 1, "", "hub.py timed out after 600 s")
+                return subprocess.CompletedProcess(exc.args, 1, "", "hub timed out after 600 s")
 
     def _serve_md(self, path: Path) -> None:
         src = path.read_text(encoding="utf-8", errors="replace")
@@ -1076,7 +1070,7 @@ def main() -> None:
     ap.add_argument(
         "--port", "-p",
         type=int,
-        default=int(os.environ.get("HUB_SERVER_PORT", "8787")),
+        default=int(config.resolve_port(config.load_config()) or "8787"),
         metavar="PORT",
     )
     ap.add_argument("--demo", action="store_true", help="Use bundled example fixture")

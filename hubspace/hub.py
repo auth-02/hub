@@ -26,9 +26,9 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import db
-import metadata
+from . import config
+from . import db
+from . import metadata
 
 _HERE = Path(__file__).resolve().parent
 
@@ -40,39 +40,27 @@ def _env_path(var: str, default: Path) -> Path:
 
 def _state_dir() -> Path:
     """XDG_STATE_HOME/hub, falling back to ~/.local/state/hub."""
-    xdg = os.environ.get("XDG_STATE_HOME")
-    base = Path(xdg) if xdg else Path.home() / ".local" / "state"
-    d = base / "hub"
-    d.mkdir(parents=True, exist_ok=True)
-    return d
+    return config.state_dir()
 
 
+CONFIG = config.load_config()
 SCAN_ROOT_FILE = _state_dir() / ".scan_root"
 
 
 def _resolve_scan_root() -> Path:
-    """Priority: HUB_SCAN_ROOT env > .scan_root sidecar > current working directory."""
-    env = os.environ.get("HUB_SCAN_ROOT")
-    if env:
-        return Path(env).expanduser()
-    try:
-        text = SCAN_ROOT_FILE.read_text(encoding="utf-8").strip()
-        if text:
-            return Path(text).expanduser()
-    except OSError:
-        pass
-    return Path.cwd()
+    """flag > HUB_SCAN_ROOT env > hub.toml > .scan_root sidecar > CWD (see config.py)."""
+    return config.resolve_scan_root(CONFIG, SCAN_ROOT_FILE)
 
 
 # ── Configurable paths ──────────────────────────────────────────────────────
 ROOT   = _resolve_scan_root()
-OUTPUT = _env_path("HUB_OUTPUT", _HERE / "build" / "docs-index.html")
+OUTPUT = config.output_path()
 DEBUG  = os.environ.get("HUB_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
-LOG    = _env_path("HUB_LOG",    _HERE / ".hub.log")
+LOG    = config.log_path()
 FAVICON = _env_path("HUB_FAVICON", _HERE / "assets" / "favicon.svg")
 DB     = _env_path("HUB_DB",    _state_dir() / "hub.db")
 
-_SERVER_PORT   = os.environ.get("HUB_SERVER_PORT", "").strip()
+_SERVER_PORT   = config.resolve_port(CONFIG)
 _SERVER_ORIGIN = f"http://localhost:{_SERVER_PORT}" if _SERVER_PORT else ""
 
 _TEMPLATE_PATH = _HERE / "templates" / "template.html"
@@ -84,6 +72,8 @@ EXCLUDE_DIRS = {
     ".cache", ".gradle", "target", "out", ".terraform", ".dagster",
     "graphify-out",
 }
+EXCLUDE_DIRS |= config.config_exclude_dirs(CONFIG)
+DEFAULT_VIEW = config.resolve_default_view(CONFIG)
 EXTS = {".md", ".html", ".htm"}
 PROMPT_EXTS = {".txt"}
 DATA_EXTS = {".pdf", ".xlsx", ".xls", ".csv", ".tsv"}
@@ -368,6 +358,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         timeline_json=timeline_json,
         tasks_json=tasks_json,
         server_origin_json=json.dumps(_SERVER_ORIGIN),
+        default_view_json=json.dumps(DEFAULT_VIEW),
     )
 
 
@@ -385,7 +376,23 @@ def _cmd_init(target: Path) -> None:
                 fh.write("tasks/\n")
             print(f"  updated  {gitignore.relative_to(target)}")
     print(f"  created  {tasks_dir.relative_to(target)}/")
+    hub_toml = target / "hub.toml"
+    if not hub_toml.exists():
+        hub_toml.write_text(_HUB_TOML_STUB, encoding="utf-8")
+        print(f"  created  {hub_toml.relative_to(target)}")
+    else:
+        print(f"  exists   {hub_toml.relative_to(target)} — skipped")
     print("  hub init done — run 'hub new task <slug>' to scaffold your first task.")
+
+
+_HUB_TOML_STUB = """\
+# hub configuration — all keys optional. Environment variables override these.
+[hub]
+# scan_root    = "."                      # directory to index (default: CWD)
+# port         = 8787                      # local server port
+# exclude_dirs = ["vendor", "fixtures"]   # extra dirs to skip (added to built-ins)
+# default_view = "list"                    # work | list | board | calendar | activity
+"""
 
 
 def _slugify_title(slug: str) -> str:
@@ -420,6 +427,7 @@ def main() -> None:
     global ROOT
     ap = argparse.ArgumentParser(description="Hub index builder")
     ap.add_argument("--demo", action="store_true", help="Use bundled example fixture")
+    ap.add_argument("--root", help="Scan root (overrides HUB_SCAN_ROOT, hub.toml, sidecar)")
 
     # Subcommands: hub init, hub new task <slug>
     sub = ap.add_subparsers(dest="cmd")
@@ -437,6 +445,8 @@ def main() -> None:
         _cmd_new_task(args.slug, Path.cwd())
         return
 
+    if args.root:
+        ROOT = config.resolve_scan_root(CONFIG, SCAN_ROOT_FILE, flag=args.root)
     if args.demo:
         ROOT = _HERE / "example"
 

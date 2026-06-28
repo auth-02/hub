@@ -30,12 +30,11 @@ cat > "$AGENTS/com.user.hub.plist" <<EOF
         <string>run</string>
         <string>--project</string>
         <string>$HUB_DIR</string>
-        <string>hub.py</string>
+        <string>hub</string>
     </array>
     <key>EnvironmentVariables</key>
     <dict>
         <key>HUB_SCAN_ROOT</key><string>$SCAN_ROOT</string>
-        <key>HUB_OUTPUT</key><string>$HUB_DIR/build/docs-index.html</string>
         <key>HUB_SERVER_PORT</key><string>$PORT</string>
     </dict>
     <key>WorkingDirectory</key><string>$HUB_DIR</string>
@@ -58,7 +57,7 @@ cat > "$AGENTS/com.user.hub-server.plist" <<EOF
         <string>run</string>
         <string>--project</string>
         <string>$HUB_DIR</string>
-        <string>server.py</string>
+        <string>hub-server</string>
         <string>--port</string>
         <string>$PORT</string>
     </array>
