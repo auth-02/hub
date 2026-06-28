@@ -1,0 +1,29 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} · py${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS is the v1 supported platform; Linux is best-effort (Decision 6).
+        os: [macos-latest, ubuntu-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run test suite (stdlib only, no install)
+        run: python3 tests/run_tests.py
+      - name: Verify clean install + demo
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install .
+          hub --demo
