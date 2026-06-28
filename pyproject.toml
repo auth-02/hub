@@ -47,6 +47,7 @@ packages = ["hubspace"]
 exclude = [
     "hubspace/assets/screenshots",
     "hubspace/assets/hub-illustrations",
+    "hubspace/plugin",
 ]
 
 # example/ now lives at the repo root (outside the package), but the demo

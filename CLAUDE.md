@@ -35,6 +35,7 @@ hub/                          repo root
 ├── LICENSE               MIT
 ├── README.md             stranger-facing docs (images under hubspace/assets/)
 ├── docs/                 specs — HUB-LAYOUT.md (the producer/consumer contract)
+├── example/              demo fixture repos — `hub --demo` (force-included in wheel)
 ├── hubspace/             the package (importable + pip/pipx installable)
 │   ├── __init__.py       __version__ (single source; pyproject reads it)
 │   ├── core/             core logic — no CLI/HTTP concerns
@@ -47,7 +48,7 @@ hub/                          repo root
 │   │   └── server.py     HTTP server (hub-server = hubspace.cli.server:main)
 │   ├── assets/           favicon.svg, hub.css, hub.js  (screenshots/ excluded from wheel)
 │   ├── templates/        template.html  (str.format()-based)
-│   └── example/          fixture repos for dev + `hub --demo`
+│   └── plugin/           hub-agent Claude plugin (manifest skill; excluded from wheel)
 ├── tests/
 │   ├── run_tests.py      test runner (adds repo root → `from hubspace import …`)
 │   ├── test_config.py    hub.toml + path resolution
