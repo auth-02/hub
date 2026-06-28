@@ -277,7 +277,7 @@ def _first_run_html(root: Path) -> str:
         '<code>tasks/&lt;slug&gt;/</code> with a manifest.</p>'
         '<pre class="first-run-cmd">'
         '<span class="first-run-prompt">$</span> hub new task my-first-task\n'
-        '<span class="first-run-comment"># scaffolds manifest + runs/ artifacts/ prompts/ data/</span>'
+        '<span class="first-run-comment"># scaffolds manifest.md (subdirs are created on demand)</span>'
         '</pre>'
         '</div>'
     )
@@ -399,16 +399,35 @@ def _slugify_title(slug: str) -> str:
     return slug.replace("-", " ").replace("_", " ").title()
 
 
-def _cmd_new_task(slug: str, target: Path) -> None:
-    """hub new task <slug> — scaffold a minimal valid task per HUB-LAYOUT.md Appendix."""
+# Manifest-owned subdirs that --with may pre-create. prompts/ is intentionally
+# excluded — the PROMPT kind belongs to pre-existing prompts/ folders only and
+# is not part of task scaffolding (see docs/HUB-LAYOUT.md §2).
+_TASK_SUBDIRS = ("runs", "artifacts", "data")
+
+
+def _resolve_with_dirs(with_dirs: list[str] | None) -> list[str]:
+    """Expand repeated --with values (incl. 'all') into an ordered, de-duped list."""
+    if not with_dirs:
+        return []
+    if "all" in with_dirs:
+        return list(_TASK_SUBDIRS)
+    return [d for d in _TASK_SUBDIRS if d in with_dirs]
+
+
+def _cmd_new_task(slug: str, target: Path, with_dirs: list[str] | None = None) -> None:
+    """hub new task <slug> [--with runs|artifacts|data|all] — scaffold a task.
+
+    Creates manifest.md only by default; subdirs are otherwise created lazily by
+    whatever first writes into them. Pass --with to pre-create chosen subdirs.
+    Re-running on an existing task is safe and creates any still-missing --with
+    dirs, so it doubles as the "add these later" path.
+    """
     import re
     if not re.match(r"^[a-z0-9][a-z0-9-]*$", slug):
         print(f"  error: slug must be lowercase-hyphenated (got '{slug}')")
         sys.exit(1)
     task_dir = target / "tasks" / slug
     task_dir.mkdir(parents=True, exist_ok=True)
-    for sub in ("runs", "artifacts", "prompts", "data"):
-        (task_dir / sub).mkdir(exist_ok=True)
     manifest = task_dir / "manifest.md"
     if not manifest.exists():
         title = _slugify_title(slug)
@@ -417,10 +436,16 @@ def _cmd_new_task(slug: str, target: Path) -> None:
             encoding="utf-8",
         )
         print(f"  created  tasks/{slug}/manifest.md")
-        for sub in ("runs", "artifacts", "prompts", "data"):
-            print(f"  created  tasks/{slug}/{sub}/")
     else:
         print(f"  exists   tasks/{slug}/manifest.md — skipped")
+
+    for sub in _resolve_with_dirs(with_dirs):
+        d = task_dir / sub
+        if d.exists():
+            print(f"  exists   tasks/{slug}/{sub}/ — skipped")
+        else:
+            d.mkdir(parents=True, exist_ok=True)
+            print(f"  created  tasks/{slug}/{sub}/")
 
 
 def main() -> None:
@@ -435,6 +460,12 @@ def main() -> None:
     new_p = sub.add_parser("new", help="Scaffold a new task")
     new_p.add_argument("kind", choices=["task"], help="Object kind to create")
     new_p.add_argument("slug", help="Task slug (lowercase-hyphenated)")
+    new_p.add_argument(
+        "--with", dest="with_dirs", action="append", default=[],
+        choices=["all", *_TASK_SUBDIRS], metavar="DIR",
+        help="Pre-create subdir(s): runs, artifacts, data, or all. Repeatable. "
+             "Safe to re-run on an existing task to add them later.",
+    )
 
     args, _ = ap.parse_known_args()
 
@@ -442,7 +473,7 @@ def main() -> None:
         _cmd_init(Path.cwd())
         return
     if args.cmd == "new" and getattr(args, "kind", None) == "task":
-        _cmd_new_task(args.slug, Path.cwd())
+        _cmd_new_task(args.slug, Path.cwd(), getattr(args, "with_dirs", None))
         return
 
     if args.root:

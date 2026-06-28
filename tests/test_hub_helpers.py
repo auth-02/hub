@@ -247,5 +247,68 @@ class TestHref(unittest.TestCase):
             self.assertIn("doc.md", result)
 
 
+class TestResolveWithDirs(unittest.TestCase):
+    def test_none_is_empty(self):
+        self.assertEqual(hub._resolve_with_dirs(None), [])
+
+    def test_empty_is_empty(self):
+        self.assertEqual(hub._resolve_with_dirs([]), [])
+
+    def test_all_expands_to_canonical_order(self):
+        self.assertEqual(hub._resolve_with_dirs(["all"]), ["runs", "artifacts", "data"])
+
+    def test_all_wins_over_others(self):
+        self.assertEqual(
+            hub._resolve_with_dirs(["all", "runs"]), ["runs", "artifacts", "data"]
+        )
+
+    def test_subset_in_canonical_order(self):
+        # input order doesn't matter — output follows _TASK_SUBDIRS
+        self.assertEqual(hub._resolve_with_dirs(["data", "runs"]), ["runs", "data"])
+
+    def test_dedups(self):
+        self.assertEqual(hub._resolve_with_dirs(["runs", "runs"]), ["runs"])
+
+    def test_prompts_never_included(self):
+        self.assertNotIn("prompts", hub._resolve_with_dirs(["all"]))
+
+
+class TestCmdNewTask(unittest.TestCase):
+    def _run(self, slug, with_dirs=None):
+        import tempfile
+        target = Path(tempfile.mkdtemp())
+        hub._cmd_new_task(slug, target, with_dirs)
+        return target / "tasks" / slug
+
+    def test_default_creates_only_manifest(self):
+        d = self._run("feat-default")
+        self.assertTrue((d / "manifest.md").exists())
+        for sub in ("runs", "artifacts", "data", "prompts"):
+            self.assertFalse((d / sub).exists(), f"{sub} should not be created")
+
+    def test_with_all_creates_three_subdirs(self):
+        d = self._run("feat-all", ["all"])
+        for sub in ("runs", "artifacts", "data"):
+            self.assertTrue((d / sub).is_dir())
+        self.assertFalse((d / "prompts").exists())
+
+    def test_with_subset(self):
+        d = self._run("feat-sub", ["runs"])
+        self.assertTrue((d / "runs").is_dir())
+        self.assertFalse((d / "artifacts").exists())
+        self.assertFalse((d / "data").exists())
+
+    def test_rerun_adds_dirs_later(self):
+        import tempfile
+        target = Path(tempfile.mkdtemp())
+        hub._cmd_new_task("feat-late", target)            # bare task
+        d = target / "tasks" / "feat-late"
+        self.assertFalse((d / "data").exists())
+        hub._cmd_new_task("feat-late", target, ["data"])  # add later
+        self.assertTrue((d / "data").is_dir())
+        # manifest untouched on the second run
+        self.assertTrue((d / "manifest.md").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -34,6 +34,7 @@ hub/                          repo root
 ├── pyproject.toml        packaging — dist name `hubspace`, console scripts, hatchling
 ├── LICENSE               MIT
 ├── README.md             stranger-facing docs (images under hubspace/assets/)
+├── docs/                 specs — HUB-LAYOUT.md (the producer/consumer contract)
 ├── hubspace/             the package (importable + pip/pipx installable)
 │   ├── __init__.py
 │   ├── config.py         hub.toml parsing, scan-root/port/view resolution, writable paths
