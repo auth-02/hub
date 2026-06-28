@@ -724,7 +724,10 @@ function renderActivityView(){
   const pills=[...document.querySelectorAll('.view-pill')];
   const hasWork=TASKS_DATA.length>0;
   const savedView=sessionStorage.getItem('docs_hub_view');
-  let view=savedView||(hasWork?'work':'list');
+  // Configured default_view (hub.toml) wins over the heuristic, but never lands
+  // on an empty work view; sessionStorage (last manual choice) still wins overall.
+  const cfgView=(typeof DEFAULT_VIEW!=='undefined'&&DEFAULT_VIEW&&(DEFAULT_VIEW!=='work'||hasWork))?DEFAULT_VIEW:'';
+  let view=savedView||cfgView||(hasWork?'work':'list');
 
   function setView(v){
     view=v;sessionStorage.setItem('docs_hub_view',v);

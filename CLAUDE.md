@@ -5,54 +5,62 @@ SQLite, and serves a browsable index via a local HTTP server.
 
 ## Run
 
+Code lives in the `hubspace/` package. Run via `-m` (no install needed) or the
+console scripts (`hub`, `hub-server`) after `pip install .` / `pipx install .`.
+
 ```bash
-python3 server.py                      # start server (port 8787, file watcher included)
-HUB_SERVER_PORT=8787 python3 hub.py   # rebuild index
-open http://localhost:8787/            # open hub
+python3 -m hubspace.server                    # start server (port 8787, watcher included)
+HUB_SERVER_PORT=8787 python3 -m hubspace.hub  # rebuild index
+open http://localhost:8787/                   # open hub
+
+# After install, equivalently:
+hub-server --port 8787
+hub
 ```
 
-Second `hub.py` run is ~300 ms — mtime-gated, skips unchanged files.
+Second `hub` run is ~300 ms — mtime-gated, skips unchanged files.
 
 ## Run tests
 
 ```bash
-python3 tests/run_tests.py       # all 128 tests
+python3 tests/run_tests.py       # all 240 tests
 python3 tests/run_tests.py -v    # verbose output
 ```
 
 ## File map
 
 ```
-hub/
-├── hub.py              entry point — scan, DB update, render
-├── server.py           HTTP server — serves index, renders .md, file watcher,
-│                       /_rebuild and /_set-root endpoints
-├── db.py               SQLite layer — migrations, upsert, lineage, FTS export
-├── metadata.py         metadata extraction — title + body from markdown/html
-├── migrations/         schema as ordered *.sql files, applied by user_version
-│   ├── 001_initial_schema.sql
-│   └── 002_skill_columns.sql
+hub/                          repo root
+├── pyproject.toml        packaging — dist name `hubspace`, console scripts, hatchling
+├── LICENSE               MIT
+├── README.md             stranger-facing docs (images under hubspace/assets/)
+├── hubspace/             the package (importable + pip/pipx installable)
+│   ├── __init__.py
+│   ├── config.py         hub.toml parsing, scan-root/port/view resolution, writable paths
+│   ├── hub.py            entry point — scan, DB update, render  (hub = hubspace.hub:main)
+│   ├── server.py         HTTP server (hub-server = hubspace.server:main)
+│   ├── db.py             SQLite layer — migrations, upsert, lineage, FTS export
+│   ├── metadata.py       metadata extraction — title + body from markdown/html
+│   ├── migrations/       schema as ordered *.sql files, applied by user_version
+│   ├── assets/           favicon.svg, hub.css, hub.js  (screenshots/ excluded from wheel)
+│   ├── templates/        template.html  (str.format()-based)
+│   └── example/          fixture repos for dev + `hub --demo`
 ├── tests/
-│   ├── run_tests.py    test runner entry point
-│   ├── test_metadata.py
-│   ├── test_db.py
-│   ├── test_migrations.py
-│   ├── test_hub_helpers.py
-│   ├── test_server_helpers.py
-│   └── test_server_http.py     integration — spins up real server
-├── assets/
-│   └── favicon.svg     tab icon
-├── templates/
-│   └── template.html   HTML/CSS/JS template (str.format()-based)
-├── build/               generated — never edit directly
-│   └── docs-index.html generated hub page, served at /
-~/.hub-state/           persistent state — never delete
-│   ├── hub.db          SQLite: files, lineage, fts, activity_log, task_status
-│   └── task-status.json sidecar backup of task statuses
-├── example/            fixture repos for dev/screenshots
-├── .scan_root          active scan root (written by /_set-root)
-└── .hub.log            debug log (only when HUB_DEBUG=1)
+│   ├── run_tests.py      test runner (adds repo root → `from hubspace import …`)
+│   ├── test_config.py    hub.toml + path resolution
+│   └── …                 test_metadata / _db / _migrations / _hub_helpers / _server_*
+~/.local/state/hub/      persistent + generated state — never delete
+│   ├── build/docs-index.html   generated hub page, served at /  (was repo build/)
+│   ├── hub.db            SQLite: files, lineage, fts, activity_log, task_status
+│   ├── task-status.json  sidecar backup of task statuses
+│   ├── .scan_root        active scan root (written by /_set-root)
+│   └── hub.log           debug log (only when HUB_DEBUG=1)
 ```
+
+**Layout note:** all runtime-writable output (generated index, log, DB) lives
+under `state_dir()` (`$XDG_STATE_HOME/hub` or `~/.local/state/hub`), *not* the
+package dir — so an installed (read-only) `hubspace` can still rebuild. Paths
+are owned by `config.py` (`output_path()`, `log_path()`, `build_dir()`).
 
 ## Architecture
 
@@ -87,7 +95,7 @@ hub.py:main()
 | `/_rebuild` | GET | Rebuild index, return `ok` |
 | `/_set-root` | POST | Body = new path. Write `.scan_root`, rebuild, return `ok` |
 
-## SQLite schema (`build/hub.db`)
+## SQLite schema (`~/.local/state/hub/hub.db`)
 
 ```sql
 files     -- abs, repo, rel, ext, kind, mtime, title, body (2000-char), task_slug, task_repo
@@ -114,20 +122,24 @@ Uses Python's `str.format()`:
 
 Placeholders: `{favicon}`, `{scan_root}`, `{scan_root_json}`, `{sidecar_json}`,
 `{hubpy_json}`, `{server_origin_json}`, `{total}`, `{md_total}`, `{html_total}`,
-`{repo_count}`, `{built}`, `{body}`, `{repo_chips}`, `{fts_json}`, `{lineage_json}`.
+`{repo_count}`, `{built}`, `{body}`, `{repo_chips}`, `{fts_json}`, `{lineage_json}`,
+`{default_view_json}`.
 
-After any template change: `HUB_SERVER_PORT=8787 python3 hub.py` to catch format errors.
+After any template change: `HUB_SERVER_PORT=8787 python3 -m hubspace.hub` to catch format errors.
 
 ## Environment variables
 
 | Var | Default | Purpose |
 |-----|---------|---------|
-| `HUB_SCAN_ROOT` | `~/tifin` | Root directory to scan |
-| `HUB_SERVER_PORT` | *(unset)* | When set, links use `http://localhost:PORT/` |
-| `HUB_OUTPUT` | `build/docs-index.html` | Output HTML path |
-| `HUB_DB` | `build/hub.db` | SQLite database path |
-| `HUB_FAVICON` | `assets/favicon.svg` | Tab icon |
-| `HUB_DEBUG` | off | `1` enables logging to `.hub.log` |
+| `HUB_SCAN_ROOT` | *(CWD)* | Root to scan. Priority: env > `hub.toml` > `.scan_root` sidecar > CWD |
+| `HUB_SERVER_PORT` | *(unset)* | When set, links use `http://localhost:PORT/`. Falls back to `hub.toml` `port` |
+| `HUB_OUTPUT` | `~/.local/state/hub/build/docs-index.html` | Output HTML path |
+| `HUB_DB` | `~/.local/state/hub/hub.db` | SQLite database path |
+| `HUB_FAVICON` | bundled `hubspace/assets/favicon.svg` | Tab icon |
+| `HUB_DEBUG` | off | `1` enables logging to `~/.local/state/hub/hub.log` |
+
+Config file: `hub.toml` in the run directory — keys `scan_root`, `port`,
+`exclude_dirs`, `default_view` (env vars override). `hub init` writes a stub.
 
 ## launchd agents
 
@@ -151,28 +163,28 @@ launchctl kickstart -k gui/$(id -u)/com.user.hub-server
 ## Changing the scan root
 
 - **In browser**: click scan-root path in header → edit → **Save & Rebuild**
-- **Via env**: `HUB_SCAN_ROOT=/path HUB_SERVER_PORT=8787 python3 hub.py`
+- **Via env**: `HUB_SCAN_ROOT=/path HUB_SERVER_PORT=8787 python3 -m hubspace.hub`
 - **Via sidecar**: `echo /path > ~/agents/hub/.scan_root`
 
-Priority: `HUB_SCAN_ROOT` env > `.scan_root` sidecar > `~/tifin` default.
+Priority: `HUB_SCAN_ROOT` env > `hub.toml` `scan_root` > `.scan_root` sidecar > CWD.
 
 ## Common tasks
 
 **Re-index from scratch:**
 ```bash
-rm build/hub.db && HUB_SERVER_PORT=8787 python3 hub.py
+rm ~/.local/state/hub/hub.db && HUB_SERVER_PORT=8787 python3 -m hubspace.hub
 ```
 
 **Add a new badge/kind:**
-1. Add to `KIND_DIRS` in `hub.py`
-2. Add `.badge.{kind}` CSS and filter chip in `templates/template.html`
+1. Add to `KIND_DIRS` in `hubspace/hub.py`
+2. Add `.badge.{kind}` CSS and filter chip in `hubspace/templates/template.html`
 3. Add to `KIND_REL` in `db.build_lineage()` and JS `buildLineage()`
 
 **Add an excluded directory:**
-Add to `EXCLUDE_DIRS` in `hub.py` and `_WATCH_EXCLUDE` in `server.py`.
+Add to `EXCLUDE_DIRS` in `hubspace/hub.py` and `_WATCH_EXCLUDE` in `hubspace/server.py`.
 
 **Add a new indexed extension:**
-Add to `EXTS` (always) or `PROMPT_EXTS` (prompts/ only) in `hub.py`.
+Add to `EXTS` (always) or `PROMPT_EXTS` (prompts/ only) in `hubspace/hub.py`.
 Update `metadata.extract_body()` if the format needs special stripping.
 
 ## Git / PR workflow
@@ -200,7 +212,7 @@ git checkout main   # switch back when done
 
 **After switching to the orphan branch and back, rebuild the index:**
 ```bash
-mkdir -p data && HUB_SERVER_PORT=8787 python3 hub.py
+mkdir -p data && HUB_SERVER_PORT=8787 python3 -m hubspace.hub
 ```
 The orphan branch wipes the working tree; `build/` is gitignored and gets deleted.
 
