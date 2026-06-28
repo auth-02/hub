@@ -26,6 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
+from . import __version__
 from . import config
 from . import db
 from . import metadata
@@ -467,6 +468,7 @@ def main() -> None:
             "  hub-server --port 8787\n"
         ),
     )
+    ap.add_argument("--version", action="version", version=f"hub {__version__}")
     ap.add_argument("--demo", action="store_true", help="Use bundled example fixture")
     ap.add_argument("--root", help="Scan root (overrides HUB_SCAN_ROOT, hub.toml, sidecar)")
 
