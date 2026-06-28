@@ -1,0 +1,11 @@
+{
+  "name": "hub",
+  "owner": { "name": "Atharva", "url": "https://github.com/auth-02" },
+  "plugins": [
+    {
+      "name": "hub-agent",
+      "source": "./plugin/hub-agent",
+      "description": "Bundles the `manifest` skill — the agentic producer of the task manifests Hub indexes and traces. Opt-in; hub-core needs no plugin."
+    }
+  ]
+}

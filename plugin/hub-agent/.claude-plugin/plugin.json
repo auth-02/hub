@@ -1,0 +1,8 @@
+{
+  "name": "hub-agent",
+  "version": "0.1.0",
+  "description": "Agentic producer for Hub: bundles the `manifest` skill that creates and maintains per-task manifests (tasks/<slug>/manifest.md) Hub then indexes and traces. Opt-in; hub-core works without it.",
+  "author": { "name": "Atharva" },
+  "homepage": "https://github.com/auth-02/hub",
+  "keywords": ["hub", "manifest", "tasks", "agent", "workflow"]
+}
