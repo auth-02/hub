@@ -48,8 +48,7 @@ hub/                          repo root
 │   │   ├── hub.py        scan, DB update, render  (hub = hubspace.cli.hub:main)
 │   │   └── server.py     HTTP server (hub-server = hubspace.cli.server:main)
 │   ├── utils/            generic helpers — text.py (slug/escape/time), paths.py
-│   ├── static/          runtime served web assets — favicon.svg, hub.css, hub.js (URL /static/)
-│   ├── templates/        template.html  (str.format()-based)
+│   ├── static/          served web assets + str.format template — favicon.svg, hub.css, hub.js, hub.html
 │   └── plugin/           hub-agent Claude plugin (manifest skill; excluded from wheel)
 ├── tests/
 │   ├── run_tests.py      test runner (adds repo root → `from hubspace import …`)
@@ -86,7 +85,7 @@ cli/hub.py:main()
   metadata.read_safe/extract_title/extract_body()
   db.upsert/prune/build_lineage/export_html_data()
   render(groups, fts_json, lineage_json)
-    reads templates/template.html
+    reads static/hub.html
     str.format() with all placeholders
     writes build/docs-index.html
 ```
@@ -120,7 +119,7 @@ current) is detected and stamped to the latest version without re-running.
 **Add a schema change:** drop a new `migrations/NNN_*.sql` (next number) — no
 `db.py` edit needed. Never edit an already-applied migration; add a new one.
 
-## Template system (`templates/template.html`)
+## Template system (`static/hub.html`)
 
 Uses Python's `str.format()`:
 - `{name}` → substituted by `render()`
@@ -183,7 +182,7 @@ rm ~/.local/state/hub/hub.db && HUB_SERVER_PORT=8787 python3 -m hubspace.cli.hub
 
 **Add a new badge/kind:**
 1. Add to `KIND_DIRS` in `hubspace/cli/hub.py`
-2. Add `.badge.{kind}` CSS and filter chip in `hubspace/templates/template.html`
+2. Add `.badge.{kind}` CSS and filter chip in `hubspace/static/hub.html`
 3. Add to `KIND_REL` in `db.build_lineage()` and JS `buildLineage()`
 
 **Add an excluded directory:**

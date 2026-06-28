@@ -32,7 +32,7 @@ from urllib.parse import quote, unquote
 
 # ── Scan root resolution (shared with hub.py via config.py) ─────────────────
 _HERE = Path(__file__).resolve().parent
-_PKG_ROOT = _HERE.parent  # hubspace/ — holds assets/, templates/
+_PKG_ROOT = _HERE.parent  # hubspace/ (package root)
 from .. import __version__
 from ..core import config
 from ..utils.paths import is_within

@@ -33,7 +33,6 @@ from ..utils.paths import env_path
 from ..utils.text import relative_time
 
 _HERE = Path(__file__).resolve().parent
-_PKG_ROOT = _HERE.parent  # hubspace/ — holds assets/, templates/
 
 
 def _state_dir() -> Path:
@@ -61,7 +60,7 @@ DB     = env_path("HUB_DB",    _state_dir() / "hub.db")
 _SERVER_PORT   = config.resolve_port(CONFIG)
 _SERVER_ORIGIN = f"http://localhost:{_SERVER_PORT}" if _SERVER_PORT else ""
 
-_TEMPLATE_PATH = _PKG_ROOT / "templates" / "template.html"
+_TEMPLATE_PATH = config.static_dir() / "hub.html"
 
 EXCLUDE_DIRS = {
     ".claude", ".git", "node_modules", ".venv", "venv", "env", "__pycache__",
