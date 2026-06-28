@@ -1,9 +1,10 @@
 name: publish
 
-# Trusted publishing (OIDC) — no stored tokens. Configure matching publishers:
-#   TestPyPI: project `hubspace`, owner auth-02, repo hub, workflow `publish.yml`,
-#             environment `testpypi`.
-#   PyPI:     same, environment `pypi`.
+# Trusted publishing (OIDC) — no stored tokens. Configure matching publishers
+# (PyPI dist name is `hubspaces`; `hub`/`hubspace` were taken):
+#   PyPI:     project `hubspaces`, owner auth-02, repo hub, workflow `publish.yml`,
+#             environment `pypi`.
+#   TestPyPI: project `hubspace` (dry-run), environment `testpypi`.
 # TestPyPI:  Actions tab → this workflow → "Run workflow" (dry-run from any branch).
 # PyPI:      publish a GitHub Release (tag) — runs automatically.
 

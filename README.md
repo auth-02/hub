@@ -15,9 +15,9 @@ Hub scans a directory tree, indexes every document into SQLite with full-text se
 ## Install
 
 ```bash
-pipx install hubspace        # isolated, recommended
+pipx install hubspaces       # isolated, recommended
 # or
-pip install hubspace
+pip install hubspaces
 ```
 
 From a clone (no publish needed):
