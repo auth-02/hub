@@ -7,6 +7,13 @@ from urllib.parse import quote
 
 from ..core import config
 from .markdown import _add_outline
+from functools import lru_cache
+
+
+@lru_cache(maxsize=None)
+def _css_asset(name: str) -> str:
+    """Read a stylesheet from hubspace/static (cached)."""
+    return (config.static_dir() / name).read_text(encoding="utf-8")
 
 
 _LINEAGE_ORDER = [
@@ -27,56 +34,11 @@ _LINEAGE_LABELS = {
 }
 
 
-_BACKLINKS_CSS = (
-    ":root{--bg:#F4EFE4;--alt:#ECE5D2;--line:#D9D1BC;--accent:#7A2828;--accent2:#1E5A6B;"
-    "--mute:#8A8377;--mono:'SF Mono',Menlo,'Cascadia Code',monospace;}"
-    ".backlinks{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:10px 0;"
-    "border-bottom:1px solid var(--line);margin-bottom:1.5rem;}"
-    ".backlinks-label{font-family:var(--mono);font-size:9px;letter-spacing:.18em;"
-    "text-transform:uppercase;color:var(--accent);flex-shrink:0;}"
-    ".backlinks-group{display:flex;align-items:center;gap:6px;flex-shrink:0;}"
-    ".backlinks-type{font-family:var(--mono);font-size:9px;color:var(--mute);}"
-    ".backlinks-item{font-family:var(--mono);font-size:10px;padding:3px 8px;"
-    "border:1px solid var(--line);color:var(--mute);background:var(--alt);"
-    "white-space:nowrap;text-decoration:none;display:inline-block;}"
-    ".backlinks-item:hover{border-color:var(--accent2);color:var(--accent2);}"
-    "html{scroll-behavior:smooth;}"
-    "h1,h2,h3{scroll-margin-top:90px;}"
-    ".outline{position:fixed;top:80px;left:32px;width:200px;word-break:break-word;"
-    "max-height:calc(100vh - 120px);overflow-y:auto;font-family:var(--mono);"
-    "font-size:11px;line-height:1.5;z-index:50;}"
-    ".outline-label{font-size:9px;letter-spacing:.18em;text-transform:uppercase;"
-    "color:var(--accent);margin-bottom:8px;}"
-    ".outline a{display:block;color:var(--mute);text-decoration:none;padding:2px 0;"
-    "border-left:1px solid var(--line);padding-left:10px;}"
-    ".outline a:hover{color:var(--accent2);border-left-color:var(--accent2);}"
-    ".outline a.lvl2{padding-left:22px;}"
-    ".outline a.lvl3{padding-left:34px;}"
-    ".outline-label{cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;}"
-    ".outline-caret{font-size:8px;display:inline-block;transition:transform .15s;}"
-    ".outline.collapsed .outline-caret{transform:rotate(-90deg);}"
-    ".outline.collapsed .outline-links{display:none;}"
-    ".outline.collapsed{width:auto;}"
-    "@media (max-width:1340px){.outline{display:none;}}"
-    "@media print{.outline{display:none;}}"
-)
+_BACKLINKS_CSS = _css_asset("backlinks.css")
 
 # Shared doc chrome: the "⤓ PDF" print button + print stylesheet. Reused by both
 # the markdown page wrapper (_CSS/_PAGE) and injected HTML docs (_inject_into_html).
-_DOC_CHROME_CSS = (
-    ".doc-print{position:fixed;top:18px;right:18px;z-index:40;font-family:var(--mono);"
-    "font-size:10px;letter-spacing:.12em;text-transform:uppercase;padding:7px 12px;"
-    "border:1px solid var(--line);background:var(--alt);color:var(--accent);cursor:pointer;}"
-    ".doc-print:hover{border-color:var(--accent);background:var(--accent);color:#fff;}"
-    "@media print{"
-    ".doc-print,nav,.backlinks,.outline{display:none!important;}"
-    "body{padding:0!important;background:#fff!important;background-image:none!important;"
-    "-webkit-print-color-adjust:exact;print-color-adjust:exact;}"
-    ".page{max-width:100%!important;margin:0!important;}"
-    "pre,code,th,blockquote,td{-webkit-print-color-adjust:exact;print-color-adjust:exact;}"
-    "a{color:var(--ink)!important;text-decoration:none!important;}"
-    "}"
-)
+_DOC_CHROME_CSS = _css_asset("chrome.css")
 _DOC_PRINT_BTN = (
     '<button class="doc-print" onclick="window.print()" '
     'title="Save as PDF (Cmd/Ctrl+P)">⤓ PDF</button>'
@@ -137,112 +99,7 @@ def _render_lineage_html(links: list, port: int) -> str:
     return "".join(parts)
 
 
-_CSS = """
-:root{
-  --bg:#F4EFE4;--alt:#ECE5D2;--deep:#E4DCC4;
-  --ink:#1A1A1A;--mute:#8A8377;--line:#D9D1BC;
-  --accent:#7A2828;--accent2:#1E5A6B;
-  --disp:Georgia,'Times New Roman',serif;
-  --body:system-ui,-apple-system,sans-serif;
-  --mono:'SF Mono',Menlo,'Cascadia Code',monospace;
-}
-*{box-sizing:border-box;margin:0;padding:0;}
-body{
-  background:var(--bg);color:var(--ink);
-  font-family:var(--body);font-size:15px;line-height:1.75;
-  padding:2.5rem 1.5rem 5rem;
-  background-image:radial-gradient(circle,#C9BFA3 .7px,transparent .7px);
-  background-size:22px 22px;
-}
-.page{max-width:860px;margin:0 auto;}
-nav{
-  font-family:var(--mono);font-size:10px;letter-spacing:.14em;
-  text-transform:uppercase;color:var(--mute);
-  margin-bottom:2rem;padding-bottom:1rem;border-bottom:1px solid var(--line);
-}
-nav a{color:var(--accent);text-decoration:none;}
-nav a:hover{text-decoration:underline;}
-
-/* Headings */
-h1{font-family:var(--disp);font-weight:500;font-style:italic;font-size:2rem;
-   color:var(--accent);margin:0 0 1.25rem;letter-spacing:-.01em;line-height:1.25;}
-h2{font-family:var(--disp);font-style:italic;font-size:1.4rem;
-   color:var(--ink);margin:2rem 0 .6rem;font-weight:500;}
-h3{font-family:var(--mono);font-size:.8rem;letter-spacing:.14em;
-   text-transform:uppercase;color:var(--mute);margin:1.5rem 0 .4rem;}
-h4,h5,h6{font-size:.9375rem;color:var(--ink);margin:1.25rem 0 .4rem;}
-p{margin:.75rem 0;}
-a{color:var(--accent2);}
-
-/* Code */
-code{font-family:var(--mono);font-size:.84em;background:var(--deep);
-     border:1px solid var(--line);padding:.12em .4em;border-radius:3px;}
-pre{background:var(--deep);border:1px solid var(--line);
-    padding:1rem 1.1rem;overflow-x:auto;margin:1rem 0;border-radius:4px;}
-pre code{background:none;border:none;padding:0;font-size:.84rem;line-height:1.55;}
-
-/* Block elements */
-blockquote{border-left:3px solid var(--accent);padding:.3rem 0 .3rem 1rem;
-           color:var(--mute);margin:1rem 0;}
-blockquote p{margin:.2rem 0;}
-table{border-collapse:collapse;width:100%;margin:1rem 0;font-size:.9rem;}
-th,td{border:1px solid var(--line);padding:.45rem .75rem;text-align:left;}
-th{background:var(--deep);font-family:var(--mono);font-size:.8rem;
-   letter-spacing:.06em;text-transform:uppercase;}
-tr:nth-child(even) td{background:rgba(0,0,0,.02);}
-td.col-num,td.col-sci,td.col-currency,td.col-pct{text-align:right;font-family:var(--mono);font-size:.85rem;}
-th.col-num,th.col-sci,th.col-currency,th.col-pct{text-align:right;}
-hr{border:none;border-top:1px solid var(--line);margin:2rem 0;}
-ul,ol{margin:.75rem 0 .75rem 1.75rem;}
-li{margin:.25rem 0;}
-img{max-width:100%;border-radius:4px;display:block;margin:1rem 0;}
-
-/* Backlinks / trace */
-.backlinks{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:10px 0;border-bottom:1px solid var(--line);margin-bottom:1.5rem;}
-.backlinks-label{font-family:var(--mono);font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);flex-shrink:0;}
-.backlinks-group{display:flex;align-items:center;gap:6px;flex-shrink:0;}
-.backlinks-type{font-family:var(--mono);font-size:9px;color:var(--mute);}
-.backlinks-item{font-family:var(--mono);font-size:10px;padding:3px 8px;border:1px solid var(--line);color:var(--mute);background:var(--alt);white-space:nowrap;text-decoration:none;display:inline-block;}
-.backlinks-item:hover{border-color:var(--accent2);color:var(--accent2);}
-
-/* Document outline / TOC */
-html{scroll-behavior:smooth;}
-h1,h2,h3{scroll-margin-top:90px;}
-.outline{position:fixed;top:80px;left:32px;width:200px;word-break:break-word;
-  max-height:calc(100vh - 120px);overflow-y:auto;font-family:var(--mono);
-  font-size:11px;line-height:1.5;z-index:50;}
-.outline-label{font-size:9px;letter-spacing:.18em;text-transform:uppercase;
-  color:var(--accent);margin-bottom:8px;}
-.outline a{display:block;color:var(--mute);text-decoration:none;padding:2px 0;
-  border-left:1px solid var(--line);padding-left:10px;}
-.outline a:hover{color:var(--accent2);border-left-color:var(--accent2);}
-.outline a.lvl2{padding-left:22px;}
-.outline a.lvl3{padding-left:34px;}
-.outline-label{cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px;}
-.outline-caret{font-size:8px;display:inline-block;transition:transform .15s;}
-.outline.collapsed .outline-caret{transform:rotate(-90deg);}
-.outline.collapsed .outline-links{display:none;}
-.outline.collapsed{width:auto;}
-@media (max-width:1340px){.outline{display:none;}}
-@media print{.outline{display:none;}}
-@media (min-width:1340px){
-  body.with-outline{display:grid;grid-template-columns:220px minmax(0,1fr);gap:0 24px;padding-left:24px;}
-  body.with-outline .outline{position:sticky;top:80px;width:auto;left:auto;max-width:200px;align-self:start;}
-  body.with-outline .page{max-width:860px;margin:0;}
-}
-
-/* Directory listing */
-.dir-list{list-style:none;margin:0;padding:0;}
-.dir-list li{border-bottom:1px solid var(--line);}
-.dir-list li:last-child{border-bottom:none;}
-.dir-list a{
-  display:flex;align-items:center;gap:.75rem;
-  padding:.6rem .25rem;text-decoration:none;color:var(--ink);
-  font-family:var(--mono);font-size:.8125rem;
-}
-.dir-list a:hover{background:var(--alt);}
-.dir-list .ext{margin-left:auto;color:var(--mute);font-size:.75rem;}
-"""
+_CSS = _css_asset("page.css")
 
 _PAGE = """\
 <!DOCTYPE html>

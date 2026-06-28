@@ -49,7 +49,8 @@ hub/                          repo root
 │   │   └── server.py     HTTP server, watcher (hub-server = hubspace.cli.server:main)
 │   ├── render/           file → HTML: columns.py, markdown.py, tabular.py, page.py
 │   ├── utils/            generic helpers — text.py (slug/escape/time), paths.py
-│   ├── static/          served web assets + str.format template — favicon.svg, hub.css, hub.js, hub.html
+│   ├── static/          served assets + str.format template: favicon.svg, hub.css/js,
+│   │                     hub.html, doc-page CSS (page/backlinks/chrome.css, loaded by render/page.py)
 │   └── plugin/           hub-agent Claude plugin (manifest skill; excluded from wheel)
 ├── tests/
 │   ├── run_tests.py      test runner (adds repo root → `from hubspace import …`)
