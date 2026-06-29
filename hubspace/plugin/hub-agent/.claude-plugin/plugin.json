@@ -1,8 +1,8 @@
 {
   "name": "hub-agent",
-  "version": "0.1.0",
-  "description": "Agentic producer for Hub: bundles the `manifest` skill that creates and maintains per-task manifests (tasks/<slug>/manifest.md) Hub then indexes and traces. Opt-in; hub-core works without it.",
+  "version": "0.2.0",
+  "description": "Self-sufficient Hub agent: bundles the producer skills (manifest, stacked, kagaz, dak) plus the `/hub` command that builds and serves the browsable Hub index. One install gives both the agentic producers and the consumer dashboard.",
   "author": { "name": "Atharva" },
   "homepage": "https://github.com/auth-02/hub",
-  "keywords": ["hub", "manifest", "tasks", "agent", "workflow"]
+  "keywords": ["hub", "manifest", "stacked", "kagaz", "dak", "tasks", "agent", "workflow", "dashboard"]
 }
