@@ -1,4 +1,4 @@
-"""Tests for pure helper functions in server.py."""
+"""Tests for render/utils helper functions."""
 import csv
 import io
 import os
@@ -8,63 +8,65 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from hubspace import server
+from hubspace import render
+from hubspace.utils.paths import is_within
+from hubspace.utils.text import esc_html, slugify
 
 
 class TestSlugify(unittest.TestCase):
     def test_basic(self):
-        self.assertEqual(server._slugify("Hello World"), "hello-world")
+        self.assertEqual(slugify("Hello World"), "hello-world")
 
     def test_punctuation_collapsed(self):
-        self.assertEqual(server._slugify("Foo: Bar & Baz!"), "foo-bar-baz")
+        self.assertEqual(slugify("Foo: Bar & Baz!"), "foo-bar-baz")
 
     def test_html_stripped(self):
-        self.assertEqual(server._slugify("<strong>Title</strong>"), "title")
+        self.assertEqual(slugify("<strong>Title</strong>"), "title")
 
     def test_leading_trailing_trimmed(self):
-        self.assertEqual(server._slugify("  hello  "), "hello")
+        self.assertEqual(slugify("  hello  "), "hello")
 
     def test_numbers_kept(self):
-        self.assertEqual(server._slugify("Step 2: Install"), "step-2-install")
+        self.assertEqual(slugify("Step 2: Install"), "step-2-install")
 
     def test_empty_string(self):
-        self.assertEqual(server._slugify(""), "")
+        self.assertEqual(slugify(""), "")
 
 
 class TestAddOutline(unittest.TestCase):
     def test_no_headings_returns_empty_outline(self):
         html = "<p>No headings here</p>"
-        body, outline = server._add_outline(html)
+        body, outline = render._add_outline(html)
         self.assertEqual(outline, "")
         self.assertEqual(body, html)
 
     def test_single_heading_returns_empty_outline(self):
         html = "<h2>Only One</h2><p>text</p>"
-        body, outline = server._add_outline(html)
+        body, outline = render._add_outline(html)
         self.assertEqual(outline, "")
 
     def test_two_headings_returns_outline(self):
         html = "<h2>First</h2><h2>Second</h2>"
-        body, outline = server._add_outline(html)
+        body, outline = render._add_outline(html)
         self.assertIn("First", outline)
         self.assertIn("Second", outline)
         self.assertIn('href="#first"', outline)
 
     def test_ids_injected_into_headings(self):
         html = "<h2>My Section</h2><h3>Sub</h3>"
-        body, outline = server._add_outline(html)
+        body, outline = render._add_outline(html)
         self.assertIn('id="my-section"', body)
         self.assertIn('id="sub"', body)
 
     def test_duplicate_heading_slugs_get_suffix(self):
         html = "<h2>Item</h2><h2>Item</h2>"
-        body, outline = server._add_outline(html)
+        body, outline = render._add_outline(html)
         self.assertIn('id="item"', body)
         self.assertIn('id="item-2"', body)
 
     def test_h1_through_h3_included(self):
         html = "<h1>Title</h1><h2>Section</h2><h3>Sub</h3>"
-        body, outline = server._add_outline(html)
+        body, outline = render._add_outline(html)
         self.assertIn("Title", outline)
         self.assertIn("Section", outline)
         self.assertIn("Sub", outline)
@@ -72,43 +74,43 @@ class TestAddOutline(unittest.TestCase):
 
 class TestEscCell(unittest.TestCase):
     def test_ampersand(self):
-        self.assertEqual(server._esc_cell("a&b"), "a&amp;b")
+        self.assertEqual(esc_html("a&b"), "a&amp;b")
 
     def test_less_than(self):
-        self.assertEqual(server._esc_cell("<script>"), "&lt;script&gt;")
+        self.assertEqual(esc_html("<script>"), "&lt;script&gt;")
 
     def test_quote(self):
-        self.assertIn("&quot;", server._esc_cell('"hello"'))
+        self.assertIn("&quot;", esc_html('"hello"'))
 
     def test_plain_string_unchanged(self):
-        self.assertEqual(server._esc_cell("hello"), "hello")
+        self.assertEqual(esc_html("hello"), "hello")
 
     def test_non_string_coerced(self):
-        self.assertEqual(server._esc_cell(42), "42")
+        self.assertEqual(esc_html(42), "42")
 
 
 class TestRowsToTable(unittest.TestCase):
     def test_empty_returns_paragraph(self):
-        result = server._rows_to_table([])
+        result = render._rows_to_table([])
         self.assertIn("Empty", result)
 
     def test_header_row_in_thead(self):
-        result = server._rows_to_table([["Name", "Age"], ["Alice", "30"]])
+        result = render._rows_to_table([["Name", "Age"], ["Alice", "30"]])
         self.assertIn("<thead>", result)
         self.assertIn("<th>Name</th>", result)
 
     def test_data_row_in_tbody(self):
-        result = server._rows_to_table([["Name", "Age"], ["Alice", "30"]])
+        result = render._rows_to_table([["Name", "Age"], ["Alice", "30"]])
         self.assertIn("<tbody>", result)
         self.assertIn("<td>Alice</td>", result)
 
     def test_xss_escaped_in_cell(self):
-        result = server._rows_to_table([["H"], ["<script>alert(1)</script>"]])
+        result = render._rows_to_table([["H"], ["<script>alert(1)</script>"]])
         self.assertNotIn("<script>", result)
         self.assertIn("&lt;script&gt;", result)
 
     def test_single_header_row(self):
-        result = server._rows_to_table([["Col"]])
+        result = render._rows_to_table([["Col"]])
         self.assertIn("<th>Col</th>", result)
         self.assertIn("<tbody></tbody>", result)
 
@@ -116,83 +118,83 @@ class TestRowsToTable(unittest.TestCase):
 class TestInjectIntoHtml(unittest.TestCase):
     def test_backlinks_css_added_to_head(self):
         src = "<html><head></head><body><h1>Title</h1></body></html>"
-        result = server._inject_into_html(src, "<div>links</div>")
+        result = render._inject_into_html(src, "<div>links</div>")
         self.assertIn("<style>", result)
 
     def test_lineage_injected_after_h1(self):
         src = "<html><head></head><body><h1>Title</h1><p>body</p></body></html>"
         marker = "INJECTED_MARKER_XYZ"
-        result = server._inject_into_html(src, f"<div>{marker}</div>")
+        result = render._inject_into_html(src, f"<div>{marker}</div>")
         h1_pos = result.find("</h1>")
         marker_pos = result.find(marker)
         self.assertGreater(marker_pos, h1_pos)
 
     def test_lineage_injected_at_body_if_no_h1(self):
         src = "<html><head></head><body><p>no heading</p></body></html>"
-        result = server._inject_into_html(src, "<div>trace</div>")
+        result = render._inject_into_html(src, "<div>trace</div>")
         self.assertIn("trace", result)
 
     def test_favicon_link_added_when_provided(self):
         src = "<html><head></head><body></body></html>"
-        result = server._inject_into_html(src, "", favicon="http://localhost:8787/favicon.svg")
+        result = render._inject_into_html(src, "", favicon="http://localhost:8787/favicon.svg")
         self.assertIn('rel="icon"', result)
 
     def test_print_button_injected(self):
         src = "<html><head></head><body></body></html>"
-        result = server._inject_into_html(src, "")
+        result = render._inject_into_html(src, "")
         self.assertIn("doc-print", result)
 
 
 class TestRenderMd(unittest.TestCase):
     def test_heading(self):
-        result = server._render_md("# Hello")
+        result = render._render_md("# Hello")
         self.assertIn("<h1>", result)
         self.assertIn("Hello", result)
 
     def test_bold(self):
-        result = server._render_md("**bold text**")
+        result = render._render_md("**bold text**")
         self.assertIn("<strong>bold text</strong>", result)
 
     def test_italic(self):
-        result = server._render_md("*italic*")
+        result = render._render_md("*italic*")
         self.assertIn("<em>italic</em>", result)
 
     def test_code_fence(self):
-        result = server._render_md("```python\nprint('hi')\n```")
+        result = render._render_md("```python\nprint('hi')\n```")
         self.assertIn("<pre>", result)
         self.assertIn("<code", result)
 
     def test_unordered_list(self):
-        result = server._render_md("- item one\n- item two")
+        result = render._render_md("- item one\n- item two")
         self.assertIn("<ul>", result)
         self.assertIn("<li>", result)
 
     def test_ordered_list(self):
-        result = server._render_md("1. first\n2. second")
+        result = render._render_md("1. first\n2. second")
         self.assertIn("<ol>", result)
 
     def test_link(self):
-        result = server._render_md("[click](http://example.com)")
+        result = render._render_md("[click](http://example.com)")
         self.assertIn('<a href="http://example.com">', result)
 
     def test_frontmatter_stripped(self):
         src = "---\ntitle: T\n---\n# Heading"
-        result = server._render_md(src)
+        result = render._render_md(src)
         self.assertNotIn("title:", result)
         self.assertIn("<h1>", result)
 
     def test_inline_code(self):
-        result = server._render_md("use `foo()` here")
+        result = render._render_md("use `foo()` here")
         self.assertIn("<code>foo()</code>", result)
 
     def test_table(self):
         src = "| A | B |\n|---|---|\n| 1 | 2 |"
-        result = server._render_md(src)
+        result = render._render_md(src)
         self.assertIn("<table>", result)
         self.assertIn("<th ", result)  # class attribute added by typed-column renderer
 
     def test_blockquote(self):
-        result = server._render_md("> quoted text")
+        result = render._render_md("> quoted text")
         self.assertIn("<blockquote>", result)
 
 
@@ -208,7 +210,7 @@ class TestRenderCsv(unittest.TestCase):
     def test_csv_renders_table(self):
         name = self._write_csv("Name,Age\nAlice,30\nBob,25")
         try:
-            result = server._render_csv(__import__("pathlib").Path(name))
+            result = render._render_csv(__import__("pathlib").Path(name))
             self.assertIn("<table>", result)
             self.assertIn("Alice", result)
             self.assertIn("Name", result)
@@ -218,7 +220,7 @@ class TestRenderCsv(unittest.TestCase):
     def test_tsv_renders_table(self):
         name = self._write_csv("Name\tScore\nAlice\t100", suffix=".tsv")
         try:
-            result = server._render_csv(__import__("pathlib").Path(name))
+            result = render._render_csv(__import__("pathlib").Path(name))
             self.assertIn("<table>", result)
             self.assertIn("Score", result)
         finally:
@@ -227,7 +229,7 @@ class TestRenderCsv(unittest.TestCase):
     def test_empty_csv(self):
         name = self._write_csv("")
         try:
-            result = server._render_csv(__import__("pathlib").Path(name))
+            result = render._render_csv(__import__("pathlib").Path(name))
             self.assertIn("Empty", result)
         finally:
             os.unlink(name)
@@ -235,7 +237,7 @@ class TestRenderCsv(unittest.TestCase):
     def test_xss_in_csv(self):
         name = self._write_csv("Col\n<script>evil</script>")
         try:
-            result = server._render_csv(__import__("pathlib").Path(name))
+            result = render._render_csv(__import__("pathlib").Path(name))
             self.assertNotIn("<script>", result)
         finally:
             os.unlink(name)
@@ -244,121 +246,121 @@ class TestRenderCsv(unittest.TestCase):
 class TestDetectColTypes(unittest.TestCase):
     def test_text_column(self):
         rows = [["Alice"], ["Bob"], ["Carol"]]
-        types = server._detect_col_types(rows, 1)
+        types = render._detect_col_types(rows, 1)
         self.assertEqual(types, ["text"])
 
     def test_numeric_column(self):
         rows = [["100"], ["200"], ["300"]]
-        types = server._detect_col_types(rows, 1)
+        types = render._detect_col_types(rows, 1)
         self.assertEqual(types, ["num"])
 
     def test_currency_column(self):
         rows = [["$1,234.56"], ["$200.00"], ["$99.99"]]
-        types = server._detect_col_types(rows, 1)
+        types = render._detect_col_types(rows, 1)
         self.assertEqual(types, ["currency"])
 
     def test_percentage_column(self):
         rows = [["12.5%"], ["30%"], ["100%"]]
-        types = server._detect_col_types(rows, 1)
+        types = render._detect_col_types(rows, 1)
         self.assertEqual(types, ["pct"])
 
     def test_empty_column_defaults_to_text(self):
         rows = [[""], [""], [""]]
-        types = server._detect_col_types(rows, 1)
+        types = render._detect_col_types(rows, 1)
         self.assertEqual(types, ["text"])
 
     def test_mixed_col_falls_back_to_text(self):
         # Less than 60% numeric → text
         rows = [["100"], ["abc"], ["200"], ["def"], ["xyz"]]
-        types = server._detect_col_types(rows, 1)
+        types = render._detect_col_types(rows, 1)
         self.assertEqual(types, ["text"])
 
     def test_multi_col_detection(self):
         rows = [["Alice", "100"], ["Bob", "200"], ["Carol", "300"]]
-        types = server._detect_col_types(rows, 2)
+        types = render._detect_col_types(rows, 2)
         self.assertEqual(types[0], "text")
         self.assertEqual(types[1], "num")
 
 
 class TestFmtCell(unittest.TestCase):
     def test_text_unchanged(self):
-        self.assertEqual(server._fmt_cell("hello", "text"), "hello")
+        self.assertEqual(render._fmt_cell("hello", "text"), "hello")
 
     def test_empty_value_returned_as_is(self):
-        self.assertEqual(server._fmt_cell("", "num"), "")
+        self.assertEqual(render._fmt_cell("", "num"), "")
 
     def test_dash_returned_as_is(self):
-        self.assertEqual(server._fmt_cell("-", "num"), "-")
+        self.assertEqual(render._fmt_cell("-", "num"), "-")
 
     def test_na_returned_as_is(self):
-        self.assertEqual(server._fmt_cell("N/A", "num"), "N/A")
+        self.assertEqual(render._fmt_cell("N/A", "num"), "N/A")
 
     def test_num_integer_formatted(self):
-        self.assertEqual(server._fmt_cell("1000", "num"), "1,000")
+        self.assertEqual(render._fmt_cell("1000", "num"), "1,000")
 
     def test_num_with_comma_formatted(self):
-        self.assertEqual(server._fmt_cell("1,000,000", "num"), "1,000,000")
+        self.assertEqual(render._fmt_cell("1,000,000", "num"), "1,000,000")
 
     def test_num_float_formatted(self):
-        result = server._fmt_cell("1234.56", "num")
+        result = render._fmt_cell("1234.56", "num")
         self.assertIn(",", result)
         self.assertIn("1,234", result)
 
     def test_currency_formatted(self):
-        self.assertEqual(server._fmt_cell("$1234", "currency"), "$1,234.00")
+        self.assertEqual(render._fmt_cell("$1234", "currency"), "$1,234.00")
 
     def test_pct_returned_unchanged(self):
-        self.assertEqual(server._fmt_cell("45.5%", "pct"), "45.5%")
+        self.assertEqual(render._fmt_cell("45.5%", "pct"), "45.5%")
 
     def test_date_returned_unchanged(self):
-        self.assertEqual(server._fmt_cell("2024-01-15", "date"), "2024-01-15")
+        self.assertEqual(render._fmt_cell("2024-01-15", "date"), "2024-01-15")
 
 
 class TestIsWithin(unittest.TestCase):
     def test_child_inside_parent(self):
-        self.assertTrue(server._is_within(Path("/a/b/c.md"), Path("/a/b")))
+        self.assertTrue(is_within(Path("/a/b/c.md"), Path("/a/b")))
 
     def test_child_is_parent(self):
-        self.assertTrue(server._is_within(Path("/a/b"), Path("/a/b")))
+        self.assertTrue(is_within(Path("/a/b"), Path("/a/b")))
 
     def test_child_outside_parent(self):
-        self.assertFalse(server._is_within(Path("/etc/passwd"), Path("/a/b")))
+        self.assertFalse(is_within(Path("/etc/passwd"), Path("/a/b")))
 
     def test_prefix_not_enough(self):
         # /a/bc should not be within /a/b
-        self.assertFalse(server._is_within(Path("/a/bc/file.md"), Path("/a/b")))
+        self.assertFalse(is_within(Path("/a/bc/file.md"), Path("/a/b")))
 
 
 class TestRenderMdExtended(unittest.TestCase):
     def test_horizontal_rule(self):
-        result = server._render_md("---")
+        result = render._render_md("---")
         self.assertIn("<hr", result)
 
     def test_strikethrough(self):
-        result = server._render_md("~~deleted~~")
+        result = render._render_md("~~deleted~~")
         self.assertIn("<del>deleted</del>", result)
 
     def test_nested_list_items(self):
         src = "- parent\n  - child"
-        result = server._render_md(src)
+        result = render._render_md(src)
         self.assertIn("<ul>", result)
 
     def test_xss_in_code_fence_escaped(self):
         src = "```\n<script>alert(1)</script>\n```"
-        result = server._render_md(src)
+        result = render._render_md(src)
         self.assertNotIn("<script>", result)
         self.assertIn("&lt;script&gt;", result)
 
     def test_blank_input_returns_empty_or_whitespace(self):
-        result = server._render_md("")
+        result = render._render_md("")
         self.assertIsInstance(result, str)
 
     def test_task_checkbox_unchecked(self):
-        result = server._render_md("- [ ] Todo item")
+        result = render._render_md("- [ ] Todo item")
         self.assertIn("Todo item", result)
 
     def test_task_checkbox_checked(self):
-        result = server._render_md("- [x] Done item")
+        result = render._render_md("- [x] Done item")
         self.assertIn("Done item", result)
 
 

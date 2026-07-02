@@ -6,15 +6,15 @@ SQLite, and serves a browsable index via a local HTTP server.
 ## Run
 
 Code lives in the `hubspace/` package. Run via `-m` (no install needed) or the
-console scripts (`hub`, `hub-server`) after `pip install .` / `pipx install .`.
+single `hub` console script after `pip install .` / `pipx install .`.
 
 ```bash
-python3 -m hubspace.server                    # start server (port 8787, watcher included)
-HUB_SERVER_PORT=8787 python3 -m hubspace.hub  # rebuild index
+python3 -m hubspace.cli.hub serve                 # start server (port 8787, watcher included)
+HUB_SERVER_PORT=8787 python3 -m hubspace.cli.hub  # rebuild index
 open http://localhost:8787/                   # open hub
 
 # After install, equivalently:
-hub-server --port 8787
+hub serve --port 8787
 hub
 ```
 
@@ -35,17 +35,24 @@ hub/                          repo root
 ├── LICENSE               MIT
 ├── README.md             stranger-facing docs (images under hubspace/assets/)
 ├── docs/                 specs — HUB-LAYOUT.md (the producer/consumer contract)
+├── example/              demo fixture repos — `hub --demo` (force-included in wheel)
+├── assets/               docs-only: screenshots/ + hub-illustrations/ (never packaged)
 ├── hubspace/             the package (importable + pip/pipx installable)
-│   ├── __init__.py
-│   ├── config.py         hub.toml parsing, scan-root/port/view resolution, writable paths
-│   ├── hub.py            entry point — scan, DB update, render  (hub = hubspace.hub:main)
-│   ├── server.py         HTTP server (hub-server = hubspace.server:main)
-│   ├── db.py             SQLite layer — migrations, upsert, lineage, FTS export
-│   ├── metadata.py       metadata extraction — title + body from markdown/html
-│   ├── migrations/       schema as ordered *.sql files, applied by user_version
-│   ├── assets/           favicon.svg, hub.css, hub.js  (screenshots/ excluded from wheel)
-│   ├── templates/        template.html  (str.format()-based)
-│   └── example/          fixture repos for dev + `hub --demo`
+│   ├── __init__.py       __version__ (single source; pyproject reads it)
+│   ├── core/             core logic — no CLI/HTTP concerns
+│   │   ├── config.py     hub.toml parsing; example_dir()/static_dir() resolvers
+│   │   ├── db.py         SQLite layer — migrations, upsert, lineage, FTS export
+│   │   ├── metadata.py   metadata extraction — title + body from markdown/html
+│   │   ├── scan.py       pure path → kind/metadata classification (_classify, _meta)
+│   │   └── migrations/   schema as ordered *.sql files, applied by user_version
+│   ├── cli/              the `hub` command (hub = hubspace.cli.hub:main)
+│   │   ├── hub.py        scan, DB update, index render; subcommands init/new/serve
+│   │   └── server.py     HTTP server + watcher; `hub serve` calls server.serve()
+│   ├── render/           file → HTML: columns.py, markdown.py, tabular.py, page.py
+│   ├── utils/            generic helpers — text.py (slug/escape/time), paths.py
+│   ├── static/          served assets + str.format template: favicon.svg, hub.css/js,
+│   │                     hub.html, doc-page CSS (page/backlinks/chrome.css, loaded by render/page.py)
+│   └── plugin/           hub-agent Claude plugin (manifest skill; excluded from wheel)
 ├── tests/
 │   ├── run_tests.py      test runner (adds repo root → `from hubspace import …`)
 │   ├── test_config.py    hub.toml + path resolution
@@ -66,7 +73,7 @@ are owned by `config.py` (`output_path()`, `log_path()`, `build_dir()`).
 ## Architecture
 
 ```
-server.py
+cli/server.py
   _HubServer (ThreadingMixIn + TCPServer, dual-stack IPv4+IPv6)
   _watcher() thread        polls scan root every 3 s, triggers hub.py on change
   HubHandler.do_GET()      / → build/docs-index.html
@@ -75,13 +82,13 @@ server.py
                            /_rebuild   → run hub.py subprocess
   HubHandler.do_POST()     /_set-root  → write .scan_root, run hub.py
 
-hub.py:main()
+cli/hub.py:main()
   discover()               → dict[repo_name, list[file_meta]]
   db.open_db()             → sqlite3.Connection
   metadata.read_safe/extract_title/extract_body()
   db.upsert/prune/build_lineage/export_html_data()
   render(groups, fts_json, lineage_json)
-    reads templates/template.html
+    reads static/hub.html
     str.format() with all placeholders
     writes build/docs-index.html
 ```
@@ -115,7 +122,7 @@ current) is detected and stamped to the latest version without re-running.
 **Add a schema change:** drop a new `migrations/NNN_*.sql` (next number) — no
 `db.py` edit needed. Never edit an already-applied migration; add a new one.
 
-## Template system (`templates/template.html`)
+## Template system (`static/hub.html`)
 
 Uses Python's `str.format()`:
 - `{name}` → substituted by `render()`
@@ -126,7 +133,7 @@ Placeholders: `{favicon}`, `{scan_root}`, `{scan_root_json}`, `{sidecar_json}`,
 `{repo_count}`, `{built}`, `{body}`, `{repo_chips}`, `{fts_json}`, `{lineage_json}`,
 `{default_view_json}`.
 
-After any template change: `HUB_SERVER_PORT=8787 python3 -m hubspace.hub` to catch format errors.
+After any template change: `HUB_SERVER_PORT=8787 python3 -m hubspace.cli.hub` to catch format errors.
 
 ## Environment variables
 
@@ -164,7 +171,7 @@ launchctl kickstart -k gui/$(id -u)/com.user.hub-server
 ## Changing the scan root
 
 - **In browser**: click scan-root path in header → edit → **Save & Rebuild**
-- **Via env**: `HUB_SCAN_ROOT=/path HUB_SERVER_PORT=8787 python3 -m hubspace.hub`
+- **Via env**: `HUB_SCAN_ROOT=/path HUB_SERVER_PORT=8787 python3 -m hubspace.cli.hub`
 - **Via sidecar**: `echo /path > ~/agents/hub/.scan_root`
 
 Priority: `HUB_SCAN_ROOT` env > `hub.toml` `scan_root` > `.scan_root` sidecar > CWD.
@@ -173,19 +180,19 @@ Priority: `HUB_SCAN_ROOT` env > `hub.toml` `scan_root` > `.scan_root` sidecar > 
 
 **Re-index from scratch:**
 ```bash
-rm ~/.local/state/hub/hub.db && HUB_SERVER_PORT=8787 python3 -m hubspace.hub
+rm ~/.local/state/hub/hub.db && HUB_SERVER_PORT=8787 python3 -m hubspace.cli.hub
 ```
 
 **Add a new badge/kind:**
-1. Add to `KIND_DIRS` in `hubspace/hub.py`
-2. Add `.badge.{kind}` CSS and filter chip in `hubspace/templates/template.html`
+1. Add the path rule to `_classify()` in `hubspace/core/scan.py`
+2. Add `.badge.{kind}` CSS and filter chip in `hubspace/static/hub.html`
 3. Add to `KIND_REL` in `db.build_lineage()` and JS `buildLineage()`
 
 **Add an excluded directory:**
-Add to `EXCLUDE_DIRS` in `hubspace/hub.py` and `_WATCH_EXCLUDE` in `hubspace/server.py`.
+Add to `EXCLUDE_DIRS` in `hubspace/cli/hub.py` and `_WATCH_EXCLUDE` in `hubspace/cli/server.py`.
 
 **Add a new indexed extension:**
-Add to `EXTS` (always) or `PROMPT_EXTS` (prompts/ only) in `hubspace/hub.py`.
+Add to `EXTS` (always) or `PROMPT_EXTS` (prompts/ only) in `hubspace/core/scan.py`.
 Update `metadata.extract_body()` if the format needs special stripping.
 
 ## Git / PR workflow
@@ -213,7 +220,7 @@ git checkout main   # switch back when done
 
 **After switching to the orphan branch and back, rebuild the index:**
 ```bash
-mkdir -p data && HUB_SERVER_PORT=8787 python3 -m hubspace.hub
+mkdir -p data && HUB_SERVER_PORT=8787 python3 -m hubspace.cli.hub
 ```
 The orphan branch wipes the working tree; `build/` is gitignored and gets deleted.
 

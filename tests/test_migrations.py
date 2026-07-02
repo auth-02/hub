@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from hubspace import db
+from hubspace.core import db
 
 
 def _cols(conn, table):

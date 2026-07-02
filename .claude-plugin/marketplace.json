@@ -4,7 +4,7 @@
   "plugins": [
     {
       "name": "hub-agent",
-      "source": "./plugin/hub-agent",
+      "source": "./hubspace/plugin/hub-agent",
       "description": "Bundles the `manifest` skill — the agentic producer of the task manifests Hub indexes and traces. Opt-in; hub-core needs no plugin."
     }
   ]

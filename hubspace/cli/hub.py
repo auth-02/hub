@@ -21,22 +21,19 @@ import json
 import os
 import subprocess
 import sys
-import time
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
-from . import __version__
-from . import config
-from . import db
-from . import metadata
+from .. import __version__
+from ..core import config
+from ..core import db
+from ..core import metadata
+from ..core.scan import _included, _meta
+from ..utils.paths import env_path
+from ..utils.text import relative_time
 
 _HERE = Path(__file__).resolve().parent
-
-
-def _env_path(var: str, default: Path) -> Path:
-    val = os.environ.get(var)
-    return Path(val).expanduser() if val else default
 
 
 def _state_dir() -> Path:
@@ -58,13 +55,13 @@ ROOT   = _resolve_scan_root()
 OUTPUT = config.output_path()
 DEBUG  = os.environ.get("HUB_DEBUG", "").strip().lower() in ("1", "true", "yes", "on")
 LOG    = config.log_path()
-FAVICON = _env_path("HUB_FAVICON", _HERE / "assets" / "favicon.svg")
-DB     = _env_path("HUB_DB",    _state_dir() / "hub.db")
+FAVICON = env_path("HUB_FAVICON", config.static_dir() / "favicon.svg")
+DB     = env_path("HUB_DB",    _state_dir() / "hub.db")
 
 _SERVER_PORT   = config.resolve_port(CONFIG)
 _SERVER_ORIGIN = f"http://localhost:{_SERVER_PORT}" if _SERVER_PORT else ""
 
-_TEMPLATE_PATH = _HERE / "templates" / "template.html"
+_TEMPLATE_PATH = config.static_dir() / "hub.html"
 
 EXCLUDE_DIRS = {
     ".claude", ".git", "node_modules", ".venv", "venv", "env", "__pycache__",
@@ -75,20 +72,6 @@ EXCLUDE_DIRS = {
 }
 EXCLUDE_DIRS |= config.config_exclude_dirs(CONFIG)
 DEFAULT_VIEW = config.resolve_default_view(CONFIG)
-EXTS = {".md", ".html", ".htm"}
-PROMPT_EXTS = {".txt"}
-DATA_EXTS = {".pdf", ".xlsx", ".xls", ".csv", ".tsv"}
-
-def _included(path: Path) -> bool:
-    ext = path.suffix.lower()
-    if ext in EXTS:
-        return True
-    if ext in PROMPT_EXTS and "/prompts/" in path.as_posix():
-        return True
-    if ext in DATA_EXTS and "/data/" in path.as_posix():
-        return True
-    return False
-
 
 def log(msg: str) -> None:
     print(msg)
@@ -121,118 +104,10 @@ def discover() -> dict[str, list[dict]]:
     return groups
 
 
-def _classify(path: Path, rel: str, repo_name: str = "") -> str | None:
-    """Kind resolution per HUB-LAYOUT.md §3. First match wins.
-
-    repo_name is the immediate parent directory name (the "repo"). When the repo
-    dir is itself named "tasks", the rel is already one level inside tasks/, so
-    we prefix it so the structural patterns still fire correctly.
-    """
-    stem = path.stem.lower()
-    # When the containing repo is named "tasks", the file is already inside
-    # tasks/<slug>/... — prepend so classification patterns match.
-    effective_rel = f"tasks/{rel}" if repo_name.lower() == "tasks" else rel
-    parts = effective_rel.split("/")
-
-    if stem == "claude":
-        return "claude"
-    if stem == "readme":
-        return "readme"
-
-    # Task family — tasks/ at repo root; order matters: sub-dirs before task itself
-    if parts[0] == "tasks" and len(parts) >= 3:
-        sub = parts[2]
-        if sub == "runs":        return "run"
-        if sub == "artifacts":   return "artifact"
-        if sub == "prompts":     return "prompt"
-        if sub == "data":        return "data"
-        if len(parts) == 3 and stem == "manifest":
-            return "task"
-
-    if parts[0] == "docs":
-        return "doc"
-
-    # Skills — hub extension; skills/ may be nested at any depth
-    if stem == "skill" and "/skills/" in path.as_posix():
-        return "skill"
-
-    # MD catch-all per spec §3 — any .md/.html that didn't match above
-    if path.suffix.lower() in (".md", ".html", ".htm"):
-        return "md"
-    return None
-
-
-def _task_slug(path: Path) -> str | None:
-    parts = path.parts
-    for i, part in enumerate(parts):
-        if part == "tasks" and i + 1 < len(parts):
-            return parts[i + 1]
-    return None
-
-
-def _task_repo(path: Path, repo_root: Path) -> str:
-    """Return the directory that owns the tasks/ folder, regardless of scan root depth.
-
-    ~/tifin/cortex/tasks/slug/...  →  cortex   (scan root ~/tifin OR ~/tifin/cortex)
-    """
-    parts = path.parts
-    for i, part in enumerate(parts):
-        if part == "tasks" and i > 0:
-            return parts[i - 1]
-    return repo_root.name
-
-
-def _skill_slug(path: Path) -> str | None:
-    parts = path.parts
-    for i, part in enumerate(parts):
-        if part == "skills" and i + 1 < len(parts):
-            return parts[i + 1]
-    return None
-
-
-def _skill_repo(path: Path, repo_root: Path) -> str:
-    parts = path.parts
-    for i, part in enumerate(parts):
-        if part == "skills" and i > 0:
-            return parts[i - 1]
-    return repo_root.name
-
-
-def _meta(path: Path, repo_root: Path) -> dict:
-    try:
-        mtime = path.stat().st_mtime
-    except OSError:
-        mtime = 0.0
-    rel = path.relative_to(repo_root).as_posix()
-    return {
-        "abs":        str(path),
-        "rel":        rel,
-        "mtime":      mtime,
-        "ext":        path.suffix.lower().lstrip("."),
-        "kind":       _classify(path, rel, repo_root.name),
-        "task_slug":  _task_slug(path),
-        "task_repo":  _task_repo(path, repo_root),
-        "skill_slug": _skill_slug(path),
-        "skill_repo": _skill_repo(path, repo_root),
-    }
-
-
 def _href(abs_path: str) -> str:
     if _SERVER_PORT:
         return f"http://localhost:{_SERVER_PORT}" + quote(abs_path)
     return "file://" + quote(abs_path)
-
-
-def _ago(mtime: float) -> str:
-    if not mtime:
-        return "—"
-    delta = time.time() - mtime
-    if delta < 90:
-        return "just now"
-    for unit, secs in (("d", 86400), ("h", 3600), ("m", 60)):
-        if delta >= secs:
-            return f"{int(delta // secs)}{unit} ago"
-    return "just now"
 
 
 def _collect_git(scan_root: Path, since_days: int = 7) -> list[dict]:
@@ -322,7 +197,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
                 f'data-abs="{html.escape(f["abs"])}"{task_attrs}>'
                 f'<span class="badge {badge_cls}">{badge}</span>'
                 f'<span class="path">{html.escape(f["rel"])}</span>'
-                f'<span class="ago">{_ago(f["mtime"])}</span>'
+                f'<span class="ago">{relative_time(f["mtime"])}</span>'
                 f"</a>"
             )
         rows_html.append(
@@ -463,9 +338,7 @@ def main() -> None:
             "  hub init                           scaffold tasks/ in the current directory\n"
             "  hub new task add-sso-login         create a task (manifest.md only)\n"
             "  hub new task add-sso-login --with all   ...and pre-create runs/ artifacts/ data/\n"
-            "\n"
-            "serve the hub locally with the companion command:\n"
-            "  hub-server --port 8787\n"
+            "  hub serve --port 8787              serve the hub over HTTP (watches + rebuilds)\n"
         ),
     )
     ap.add_argument("--version", action="version", version=f"hub {__version__}")
@@ -475,6 +348,10 @@ def main() -> None:
     # Subcommands: hub init, hub new task <slug>
     sub = ap.add_subparsers(dest="cmd", title="commands", metavar="<command>")
     sub.add_parser("init", help="Scaffold tasks/ in the current directory")
+    serve_p = sub.add_parser("serve", help="Serve the hub over HTTP (watches + rebuilds)")
+    serve_p.add_argument("--port", "-p", type=int, default=None, metavar="PORT",
+                         help="Port to listen on (default: hub.toml port or 8787)")
+    serve_p.add_argument("--demo", action="store_true", help="Use bundled example fixture")
     new_p = sub.add_parser("new", help="Scaffold a new task (hub new task <slug>)")
     new_p.add_argument("kind", choices=["task"], help="Object kind to create")
     new_p.add_argument("slug", help="Task slug (lowercase-hyphenated)")
@@ -490,6 +367,10 @@ def main() -> None:
     if args.cmd == "init":
         _cmd_init(Path.cwd())
         return
+    if args.cmd == "serve":
+        from .server import serve, default_port
+        serve(args.port if args.port is not None else default_port(), args.demo)
+        return
     if args.cmd == "new" and getattr(args, "kind", None) == "task":
         _cmd_new_task(args.slug, Path.cwd(), getattr(args, "with_dirs", None))
         return
@@ -497,7 +378,7 @@ def main() -> None:
     if args.root:
         ROOT = config.resolve_scan_root(CONFIG, SCAN_ROOT_FILE, flag=args.root)
     if args.demo:
-        ROOT = _HERE / "example"
+        ROOT = config.example_dir()
 
     groups = discover()
 

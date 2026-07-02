@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from hubspace import server
+from hubspace.cli import server
 
 
 def _free_port() -> int:
