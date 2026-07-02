@@ -53,25 +53,21 @@ hub serve --demo
 
 ---
 
-### Index — grouped by repo, filtered by kind, sorted by recency
-Status badges on every task manifest. Click to cycle `ongoing → completed → paused`, saved instantly.
+## See it in action
 
-![Hub index](https://raw.githubusercontent.com/auth-02/hub/main/assets/screenshots/index.png)
+The fastest way to see Hub is to run it — the bundled demo shows the real,
+current UI in one command, no install required:
 
-### Split-pane preview with task trace
-Click any row to open a live preview. The `// trace` panel links to related runs, artifacts, and the parent task.
+```bash
+uvx --from hubspaces hub serve --demo    # demo hub on http://localhost:8787
+```
 
-![Split-pane preview](https://raw.githubusercontent.com/auth-02/hub/main/assets/screenshots/preview.png)
+What you'll see:
 
-### Hub Timeline — daily work summary
-Press `Ctrl+T` or click the `// timeline` tab. Answers *What have I been working on? / yesterday? / this week?* — grouped by task, with git commits, runs logged, artifacts generated, and task status inline.
-
-![Hub timeline drawer](https://raw.githubusercontent.com/auth-02/hub/main/assets/screenshots/timeline.png)
-
-### Markdown & HTML document pages
-Every file opened in its own tab gets a clean reading view with a `// trace` bar below the heading. HTML artifacts are served with the hub's own CSS injected.
-
-![Markdown document page](https://raw.githubusercontent.com/auth-02/hub/main/assets/screenshots/doc.png)
+- **Index** — grouped by repo, filtered by kind, sorted by recency; every task manifest carries a status badge you click to cycle `ongoing → completed → paused`.
+- **Split-pane preview** — click any row for a live render with a `// trace` panel linking related runs, artifacts, and the parent task.
+- **Timeline** (`Ctrl+T`) — a daily work summary: *what have I worked on today / yesterday / this week*, with git commits, runs, and artifacts inline.
+- **Document pages** — every `.md`/`.html` opens in a clean reading view with a `// trace` bar; HTML artifacts get the hub's own CSS injected.
 
 ---
 
