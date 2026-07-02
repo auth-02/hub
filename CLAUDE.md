@@ -35,6 +35,7 @@ hub/                          repo root
 ├── LICENSE               MIT
 ├── README.md             stranger-facing docs (images under hubspace/assets/)
 ├── docs/                 specs — HUB-LAYOUT.md (the producer/consumer contract)
+├── site/                 GitHub Pages landing page source (deployed to gh-pages on release)
 ├── example/              demo fixture repos — `hub --demo` (force-included in wheel)
 ├── assets/               docs-only: screenshots/ + hub-illustrations/ (never packaged)
 ├── hubspace/             the package (importable + pip/pipx installable)
@@ -194,6 +195,17 @@ Add to `EXCLUDE_DIRS` in `hubspace/cli/hub.py` and `_WATCH_EXCLUDE` in `hubspace
 **Add a new indexed extension:**
 Add to `EXTS` (always) or `PROMPT_EXTS` (prompts/ only) in `hubspace/core/scan.py`.
 Update `metadata.extract_body()` if the format needs special stripping.
+
+## Releases
+
+Version is single-sourced in `hubspace/__init__.py` (`pyproject` reads it dynamically).
+To ship: bump `__version__` (PR to `main`), then publish a GitHub Release with tag
+`v<version>`. Two workflows fire on `release: published`:
+- `publish.yml` → builds + uploads the wheel/sdist to PyPI (`hubspaces`).
+- `pages.yml`  → stamps the tag into `site/index.html` and force-pushes `site/`
+  to the `gh-pages` branch (the landing page at auth-02.github.io/hub). Edit the
+  page by editing `site/`; it redeploys on the next release (or via
+  `workflow_dispatch`).
 
 ## Git / PR workflow
 
