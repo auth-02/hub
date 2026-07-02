@@ -5,7 +5,7 @@
     {
       "name": "hub-agent",
       "source": "./hubspace/plugin/hub-agent",
-      "description": "Bundles the `manifest` skill — the agentic producer of the task manifests Hub indexes and traces. Opt-in; hub-core needs no plugin."
+      "description": "Self-sufficient Hub agent: producer skills (manifest, stacked, kagaz, dak) plus the `/hub` command to build and serve the browsable index. Opt-in; hub-core needs no plugin."
     }
   ]
 }
