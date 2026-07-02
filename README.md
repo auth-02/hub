@@ -1,4 +1,4 @@
-![Hub — Every .md & .html, one page](https://raw.githubusercontent.com/auth-02/hub/main/assets/screenshots/banner.png)
+![Hub — Every .md & .html, one page](https://raw.githubusercontent.com/auth-02/hub/main/assets/screenshots/banner.png?v=0.2.1)
 
 <div align="center">
 
