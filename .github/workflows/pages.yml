@@ -1,0 +1,48 @@
+name: Deploy landing page
+
+# Rebuilds the GitHub Pages landing page (site/ -> gh-pages branch) on every
+# published release, so the page never drifts from what shipped. Also runnable
+# on demand.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version label to stamp (e.g. v0.2.0)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write        # needed to push the gh-pages branch
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stamp release version into the page
+        run: |
+          VER="${{ github.event.release.tag_name }}"
+          [ -z "$VER" ] && VER="${{ github.event.inputs.version }}"
+          [ -z "$VER" ] && VER="dev"
+          sed -i "s/{{VERSION}}/$VER/g" site/index.html
+          echo "Stamped version: $VER"
+
+      - name: Publish site/ to gh-pages
+        run: |
+          cd site
+          git init -q
+          git checkout -q -b gh-pages
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "Deploy landing page (${GITHUB_SHA::7})"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

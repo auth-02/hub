@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hub — every .md & .html, one page</title>
+<meta name="description" content="Point Hub at a folder and get every Markdown and HTML file inside as one searchable, previewable page. Stdlib-only Python.">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;1,9..144,400;1,9..144,500&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  /* Palette + type lifted verbatim from the Hub app (hubspace/assets/hub.css). */
+  :root{
+    --bg:#F4EFE4; --alt:#ECE5D2; --deep:#E4DCC4; --ink:#1A1A1A;
+    --mute:#8A8377; --line:#D9D1BC; --accent:#7A2828; --accent2:#1E5A6B;
+    --disp:'Fraunces',Georgia,serif;
+    --body:'Inter',system-ui,sans-serif;
+    --mono:'JetBrains Mono','SF Mono',Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:var(--body); font-size:15px; line-height:1.6;
+    /* dot-grid texture — same as the app */
+    background-image:radial-gradient(circle,#C9BFA3 .7px,transparent .7px);
+    background-size:22px 22px;
+  }
+  .wrap{max-width:780px; margin:0 auto; padding:64px 24px 90px}
+  .logo{width:52px; height:52px; border-radius:12px; display:block; margin:0 0 22px;
+    border:1px solid var(--line);}
+  .kicker{font-family:var(--mono); font-size:11px; letter-spacing:.18em;
+    text-transform:uppercase; color:var(--accent); margin:0 0 14px}
+  h1{font-family:var(--disp); font-weight:500; font-size:clamp(44px,9vw,76px);
+    line-height:1.0; letter-spacing:-.02em; margin:0 0 22px}
+  h1 em{font-style:italic; color:var(--accent)}
+  .lede{font-size:18px; color:#4a463d; margin:0 0 30px; max-width:62ch}
+  .cta{display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin:0 0 14px}
+  .btn{font-family:var(--mono); font-size:12px; letter-spacing:.1em; text-transform:uppercase;
+    text-decoration:none; padding:13px 20px; border:1px solid var(--line);
+    background:var(--alt); color:var(--ink); transition:border-color .15s,transform .05s}
+  .btn:hover{border-color:var(--accent)}
+  .btn:active{transform:translateY(1px)}
+  .btn.primary{background:var(--accent); border-color:var(--accent); color:#fff}
+  .note{font-family:var(--mono); font-size:12px; color:var(--mute); letter-spacing:.04em; margin:10px 0 0}
+  .note code{color:var(--accent)}
+  .shot{margin:46px 0; border:1px solid var(--line); border-top:3px solid var(--accent2);
+    overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,.04), 0 14px 36px rgba(0,0,0,.08)}
+  .shot img{display:block; width:100%; height:auto}
+  hr{border:0; border-top:1px solid var(--accent); margin:52px 0 30px; opacity:.55}
+  h2{font-family:var(--mono); font-size:11px; font-weight:500; letter-spacing:.18em;
+    text-transform:uppercase; color:var(--accent); margin:0 0 22px}
+  ul.feat{list-style:none; padding:0; margin:0; display:grid; gap:16px}
+  ul.feat li{padding-left:22px; position:relative; color:var(--ink)}
+  ul.feat li::before{content:"→"; position:absolute; left:0; color:var(--accent); font-weight:700}
+  ul.feat b{font-family:var(--disp); font-weight:500; font-style:italic}
+  code{font-family:var(--mono); font-size:.9em}
+  pre{background:var(--alt); border:1px solid var(--line); padding:16px 18px; margin:0;
+    overflow:auto; font-family:var(--mono); font-size:13px; line-height:1.6}
+  pre .c{color:var(--mute)}
+  footer{margin-top:60px; border-top:1px solid var(--line); padding-top:16px;
+    font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase;
+    color:var(--mute); display:flex; gap:18px; flex-wrap:wrap; align-items:center}
+  footer a{color:var(--accent); text-decoration:underline dotted; text-underline-offset:3px}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <img class="logo" src="favicon.svg" alt="Hub logo" width="52" height="52">
+  <p class="kicker">// hub directory</p>
+  <h1><em>Hub:</em> Every <em>.md</em> &amp; <em>.html</em>, one page.</h1>
+  <p class="lede">Point Hub at a folder. It indexes every Markdown and HTML file inside into
+    full-text search with task lineage, and serves a fast local browser — split-pane preview,
+    kind filters, activity view, timeline. No npm. No framework. Pure stdlib Python.</p>
+
+  <div class="cta">
+    <a class="btn primary" href="https://pypi.org/project/hubspaces/" target="_blank" rel="noopener">pip install hubspaces</a>
+    <a class="btn" href="https://github.com/auth-02/hub" target="_blank" rel="noopener">View on GitHub →</a>
+  </div>
+  <p class="note">Then <code>cd</code> into any project and run <code>hub serve</code> — or try it instantly: <code>hub serve --demo</code>.</p>
+
+  <div class="shot"><img src="banner.png" alt="Hub index — every document in one searchable page" loading="lazy"></div>
+
+  <hr>
+
+  <h2>// what it does</h2>
+  <ul class="feat">
+    <li><b>Full-text search</b> across title, body, path, and repo — implicit AND, <code>repo:name</code> prefix.</li>
+    <li><b>Split-pane preview</b> with a <code>// trace</code> panel linking runs, artifacts, and the parent task.</li>
+    <li><b>Task board &amp; status badges</b> — click to cycle <code>ongoing → completed → paused</code>, persisted.</li>
+    <li><b>Timeline drawer &amp; activity view</b> — what changed, which task, when; daily summaries pulled from git.</li>
+    <li><b>Auto-rebuild</b> — a file watcher refreshes the index within ~3 s of any change.</li>
+  </ul>
+
+  <div class="shot"><img src="index-shot.png" alt="Hub grouped by repo with kind filters" loading="lazy"></div>
+
+  <hr>
+
+  <h2>// get started</h2>
+  <pre><span class="c"># install (isolated)</span>
+pipx install hubspaces
+
+<span class="c"># browse any folder</span>
+cd ~/my-project
+hub serve             <span class="c"># http://localhost:8787, rebuilds on change</span></pre>
+  <p class="note">Configure with a <code>hub.toml</code> (<code>hub init</code> scaffolds one): scan root, port, excluded dirs, default view.</p>
+
+  <footer>
+    <img src="favicon.svg" alt="" width="16" height="16" style="vertical-align:middle">
+    <a href="https://github.com/auth-02/hub" target="_blank" rel="noopener">GitHub</a>
+    <a href="https://pypi.org/project/hubspaces/" target="_blank" rel="noopener">PyPI</a>
+    <span>Stdlib-only · Python 3.11+ · MIT · {{VERSION}}</span>
+  </footer>
+</div>
+</body>
+</html>
