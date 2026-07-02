@@ -221,6 +221,12 @@ Edit the landing page by editing `site/`; it redeploys on the next release (or v
 - Bug fixes → `fix/<slug>` branch → PR with proof screenshot.
 - Always use `GH_TOKEN` from `.git/credentials` when running `gh` CLI.
 
+**Local testing, demos & screenshots — dogfood, never the work hub:**
+For any manual run, demo, or screenshot, point hub at **the hub repo itself**
+(`cd ~/agents/hub && hub serve`) or the bundled fixture (`hub serve --demo`).
+**Never** run it against — or capture — the real work hub at `/tifin`: it holds
+private data. The committed `banner.png` is shot from hub's own dogfood hub.
+
 **Screenshot convention:**
 - `assets/screenshots/` — holds **only `banner.png`** (branding, ages slowly). We
   deliberately do *not* keep literal per-feature UI screenshots: they drift as the
