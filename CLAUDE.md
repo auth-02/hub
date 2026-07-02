@@ -222,7 +222,10 @@ Edit the landing page by editing `site/`; it redeploys on the next release (or v
 - Always use `GH_TOKEN` from `.git/credentials` when running `gh` CLI.
 
 **Screenshot convention:**
-- `assets/screenshots/` — feature screenshots used in README (committed to code branch)
+- `assets/screenshots/` — holds **only `banner.png`** (branding, ages slowly). We
+  deliberately do *not* keep literal per-feature UI screenshots: they drift as the
+  UI changes. Feature visuals come from the live demo instead —
+  `uvx --from hubspaces hub serve --demo` — which the README and landing page point to.
 - `screenshots` orphan branch — PR proof images only, never merged to main
 
 **Proof screenshots for PRs — use the `screenshots` branch, not `assets/screenshots/`.**
