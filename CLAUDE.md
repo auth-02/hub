@@ -199,13 +199,19 @@ Update `metadata.extract_body()` if the format needs special stripping.
 ## Releases
 
 Version is single-sourced in `hubspace/__init__.py` (`pyproject` reads it dynamically).
-To ship: bump `__version__` (PR to `main`), then publish a GitHub Release with tag
-`v<version>`. Two workflows fire on `release: published`:
-- `publish.yml` → builds + uploads the wheel/sdist to PyPI (`hubspaces`).
-- `pages.yml`  → stamps the tag into `site/index.html` and force-pushes `site/`
-  to the `gh-pages` branch (the landing page at auth-02.github.io/hub). Edit the
-  page by editing `site/`; it redeploys on the next release (or via
-  `workflow_dispatch`).
+
+**To ship: bump `__version__` and merge to `main` — that's the only manual step.**
+The rest is automated:
+- `release.yml` — on a push to `main` that touches `hubspace/__init__.py`, cuts a
+  GitHub Release `v<version>` (if it doesn't already exist). Uses the `RELEASE_PAT`
+  secret, *not* `GITHUB_TOKEN`, because releases made with `GITHUB_TOKEN` don't
+  trigger other workflows.
+- `publish.yml` (on `release: published`) → builds + uploads wheel/sdist to PyPI (`hubspaces`).
+- `pages.yml`  (on `release: published`) → stamps the tag into `site/index.html` and
+  force-pushes `site/` to `gh-pages` (landing page at auth-02.github.io/hub).
+
+Edit the landing page by editing `site/`; it redeploys on the next release (or via
+`workflow_dispatch`). `RELEASE_PAT` must be a PAT with `repo` + `workflow` scope.
 
 ## Git / PR workflow
 

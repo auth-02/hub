@@ -1,0 +1,53 @@
+name: Auto-release on version bump
+
+# When hubspace/__init__.py changes on main, cut a GitHub Release v<version> if
+# one doesn't already exist. That published release then triggers publish.yml
+# (PyPI) and pages.yml (landing page). So bumping __version__ in a merged PR is
+# the only manual step of a release.
+#
+# The release is created with RELEASE_PAT (a PAT), not GITHUB_TOKEN: releases
+# made with GITHUB_TOKEN do NOT trigger other workflows (`on: release`), which
+# would leave PyPI + Pages un-deployed.
+on:
+  push:
+    branches: [main]
+    paths: ["hubspace/__init__.py"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read version from hubspace/__init__.py
+        id: v
+        run: |
+          VER=$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?' hubspace/__init__.py | head -1)
+          if [ -z "$VER" ]; then echo "No version found"; exit 1; fi
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "Detected version: $VER"
+
+      - name: Create release v<version> if it doesn't exist
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          VER="${{ steps.v.outputs.version }}"
+          if [ -z "${GH_TOKEN}" ]; then
+            echo "::error::RELEASE_PAT secret is not set (needs a PAT with repo + workflow scope)."
+            exit 1
+          fi
+          if gh release view "v$VER" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release v$VER already exists — nothing to do."
+          else
+            gh release create "v$VER" --repo "$GITHUB_REPOSITORY" \
+              --target main --title "v$VER — Hub" --generate-notes
+            echo "Created release v$VER (publish.yml + pages.yml will now run)."
+          fi
