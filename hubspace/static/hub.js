@@ -97,7 +97,7 @@ activeRepos=new Set((sessionStorage.getItem('docs_hub_repos')||'').split(',').fi
 function softReload(){location.reload();}
 setInterval(()=>softReload(),120000);
 
-// ── Hub Feed ──────────────────────────────────────────────────────────────
+// ── Activity helpers (shared by the activity view + timeline) ──────────────
 const FEED_ACTIONS={
   task:    {created:'New task started',    updated:'Task plan updated'},
   run:     {created:'Run logged',          updated:'Run notes updated'},
@@ -114,25 +114,6 @@ function feedAgo(ts){
   if(d<3600) return Math.floor(d/60)+'m ago';
   if(d<86400) return Math.floor(d/3600)+'h ago';
   return Math.floor(d/86400)+'d ago';
-}
-function renderFeed(){
-  const el=document.getElementById('hub-feed');
-  if(!ACTIVITY_DATA.length){el.innerHTML='<div class="feed-empty">No recent activity yet.</div>';return;}
-  let h='';
-  ACTIVITY_DATA.forEach(ev=>{
-    const name=ev.p.split('/').pop().replace(/\.[^.]+$/,'');
-    const actions=FEED_ACTIONS[ev.k]||{created:'File added',updated:'File modified'};
-    const actionText=actions[ev.ev]||'Changed';
-    const subject=ev.sl||name;
-    const detail=(ev.k==='artifact'||ev.k==='run')&&name!==subject?actionText+' · '+name:actionText;
-    h+=`<div class="feed-item">
-      <div class="feed-ago">${feedAgo(ev.ts)}</div>
-      <div class="feed-subject"><a href="${fileHref(ev.a)}" target="_blank" rel="noopener">${esc(subject.replace(/[-_]/g,' ').replace(/^./,c=>c.toUpperCase()))}</a></div>
-      <div class="feed-action">${esc(detail)}</div>
-      ${ev.rp?`<div class="feed-ctx">${esc(ev.rp)}</div>`:''}
-    </div>`;
-  });
-  el.innerHTML=h;
 }
 
 // ── Preview ───────────────────────────────────────────────────────────────
@@ -282,7 +263,6 @@ function buildLineage(links){
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
 function fileHref(abs){return SERVER_ORIGIN?SERVER_ORIGIN+encodeURI(abs):'file://'+encodeURI(abs);}
-renderFeed();
 
 // ── Workspace Timeline ────────────────────────────────────────────────────
 (function(){
@@ -345,29 +325,12 @@ renderFeed();
   el.innerHTML=h;
 })();
 
-// ── Feed drawer ───────────────────────────────────────────────────────────
-(function(){
-  const drawer=document.getElementById('feed-drawer');
-  const tab=document.getElementById('feed-tab');
-  const otherTab=()=>document.getElementById('tl-tab');
-  function openFeed(){window.closeTl&&window.closeTl();drawer.classList.add('open');tab.classList.add('open');tab.textContent='‹';otherTab().style.display='none';}
-  function closeFeed(){drawer.classList.remove('open');tab.classList.remove('open');tab.textContent='// feed';otherTab().style.display='';}
-  tab.addEventListener('click',()=>drawer.classList.contains('open')?closeFeed():openFeed());
-  document.getElementById('feed-close').addEventListener('click',closeFeed);
-  document.addEventListener('keydown',e=>{
-    if((e.ctrlKey||e.metaKey)&&e.key==='f'){e.preventDefault();drawer.classList.contains('open')?closeFeed():openFeed();}
-    else if(e.key==='Escape'&&drawer.classList.contains('open'))closeFeed();
-  });
-  window._closeFeed=closeFeed;
-})();
-
 // ── Timeline drawer ───────────────────────────────────────────────────────
 (function(){
   const drawer=document.getElementById('tl-drawer');
   const tab=document.getElementById('tl-tab');
-  const otherTab=()=>document.getElementById('feed-tab');
-  function openTl(){window._closeFeed&&window._closeFeed();drawer.classList.add('open');tab.classList.add('open');tab.textContent='‹';otherTab().style.display='none';}
-  function closeTl(){drawer.classList.remove('open');tab.classList.remove('open');tab.textContent='// timeline';otherTab().style.display='';}
+  function openTl(){drawer.classList.add('open');tab.classList.add('open');tab.textContent='‹';}
+  function closeTl(){drawer.classList.remove('open');tab.classList.remove('open');tab.textContent='// timeline';}
   window.closeTl=closeTl;
   tab.addEventListener('click',()=>drawer.classList.contains('open')?closeTl():openTl());
   document.getElementById('tl-close').addEventListener('click',closeTl);
