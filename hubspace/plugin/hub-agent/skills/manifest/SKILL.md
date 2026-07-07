@@ -13,7 +13,7 @@ Every feature gets a **manifest** — a living markdown doc that declares the pr
 
 **Never** write to:
 - The workspace root above any repo. Manifest-collection tooling scans each repo's `tasks/`, so a manifest placed above a repo would be invisible.
-- `~/.claude/` or the skill directory itself.
+- The skills directory (`~/skills`) or the skill directory itself.
 - Anywhere outside a repo.
 
 If the current working directory is a multi-repo workspace root (not inside a specific repo) and the user hasn't named a target repo, **ask which repo this work belongs to** before creating the file. Don't guess.
@@ -40,7 +40,7 @@ Rules:
 - **`runs/`** holds time-stamped outputs from actually firing queries or running validation: SSE logs, parsed tables, benchmark results. One subfolder per date (`YYYY-MM-DD/`). Run outputs stay under their dated folder — they are not moved into `data/`.
 - Never put inspection files, data files, or run outputs at the `tasks/<slug>/` root — keep the root clean (just `manifest.md` + the subdirs).
 
-Copy from `~/.claude/skills/manifest/templates/<name>.md` when creating the manifest — fill in the title, ask, and any decisions already captured, then leave the rest as placeholders.
+Copy from `~/skills/manifest/templates/<name>.md` when creating the manifest — fill in the title, ask, and any decisions already captured, then leave the rest as placeholders.
 
 Slug: lowercase, hyphenated, imperative (`ndjson-to-parquet-migration`, `add-sso-login`, `refactor-payment-flow`).
 
@@ -199,7 +199,7 @@ When you can't tell whether something warrants a manifest update, err toward wri
 
 ## Templates
 
-Copy from `~/.claude/skills/manifest/templates/` — but only when each is actually needed (see the lazy-creation rule above), not all upfront:
+Copy from `~/skills/manifest/templates/` — but only when each is actually needed (see the lazy-creation rule above), not all upfront:
 
 - `manifest.md` — the main manifest scaffold (Context, Decisions, Exploration Results, Plan, Open questions, Confirmed findings, Testing plan, Rollout plan, Review). Copied **at init** — lands at `tasks/<slug>/manifest.md`.
 - `inspection.md` — for raw exploration probes. Copied **only when you start probing** — lands at `tasks/<slug>/artifacts/inspection.md` (creating `artifacts/` then).

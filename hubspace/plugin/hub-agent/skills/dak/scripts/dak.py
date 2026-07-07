@@ -187,29 +187,70 @@ def cmd_setup(_args):
 
 
 # ── rendering ─────────────────────────────────────────────────────────────────
+# Kagaz design system — warm paper canvas, rust accent, serif display + mono
+# metadata, hairlines and sharp corners. Fonts load from Google Fonts (dak pages
+# are served on workers.dev with no CSP, so external font links are fine).
+DEFAULT_PAGE_FONTS = (
+    '<link rel="preconnect" href="https://fonts.googleapis.com">'
+    '<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>'
+    '<link href="https://fonts.googleapis.com/css2?'
+    'family=Fraunces:ital,opsz,wght@0,9..144,400..700;1,9..144,400..700&'
+    'family=Inter:wght@400;500;600&'
+    'family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">'
+)
+
 DEFAULT_PAGE_CSS = """
-:root { color-scheme: light dark; }
-body { max-width: 46rem; margin: 4rem auto; padding: 0 1.25rem;
-  font: 17px/1.65 ui-serif, Georgia, 'Times New Roman', serif;
-  color: #1d1b16; background: #fbf9f3; }
-@media (prefers-color-scheme: dark) { body { color:#e7e3d8; background:#1a1916; } }
-h1,h2,h3,h4 { font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; }
-h1 { font-size: 2rem; margin: 0 0 1.5rem; }
-code,pre { font-family: ui-monospace, 'JetBrains Mono', SFMono-Regular, Menlo, monospace; }
-pre { background: rgba(127,127,127,.12); padding: 1rem; border-radius: 6px;
-  overflow:auto; font-size:.9em; }
-code { background: rgba(127,127,127,.14); padding: .1em .35em;
-  border-radius: 4px; font-size:.9em; }
-pre code { background: none; padding: 0; }
-a { color: #c0622a; }
-blockquote { border-left: 3px solid #c0622a; margin: 1rem 0;
-  padding: .2rem 1rem; opacity:.85; }
-hr { border: none; border-top: 1px solid rgba(127,127,127,.3); margin: 2rem 0; }
+:root {
+  --bg:#F4EFE4; --bg-alt:#ECE5D2; --bg-deep:#E4DCC4;
+  --ink:#1A1A1A; --ink-soft:#3A352D; --ink-mute:#8A8377; --line:#D9D1BC;
+  --accent:#C0622A; --accent-soft:#E89A6B; --accent-deep:#8A4218;
+  --font-display:'Fraunces','Times New Roman',serif;
+  --font-body:'Inter',system-ui,sans-serif;
+  --font-mono:'JetBrains Mono','SF Mono',Menlo,monospace;
+}
+* { box-sizing: border-box; }
+body {
+  max-width: 48rem; margin: 0 auto; padding: 4.5rem 1.5rem 3rem;
+  font: 400 15px/1.55 var(--font-body);
+  color: var(--ink); background-color: var(--bg);
+  background-image: radial-gradient(circle, #C9BFA3 0.7px, transparent 0.7px);
+  background-size: 22px 22px;
+  -webkit-font-smoothing: antialiased;
+}
+h1,h2,h3,h4 { font-family: var(--font-display); font-weight: 500;
+  line-height: 1.15; letter-spacing: -0.025em; color: var(--ink); }
+h1 { font-size: 2.4rem; margin: 0 0 1.4rem; }
+h2 { font-size: 1.55rem; margin: 2.8rem 0 1rem; padding-top: 1.4rem;
+  border-top: 1px solid var(--line); }
+h3 { font-size: 1.2rem; margin: 2rem 0 .6rem; }
+h4 { font-size: 1rem; margin: 1.6rem 0 .5rem; }
+p, li { color: var(--ink-soft); }
+strong { font-weight: 600; color: var(--ink); }
+em { font-family: var(--font-display); font-style: italic; color: var(--accent); }
+a { color: var(--accent); text-decoration: none;
+  border-bottom: 1px solid rgba(192,98,42,.35); }
+a:hover { border-bottom-color: var(--accent); }
+code,pre { font-family: var(--font-mono); }
+pre { background: var(--bg-alt); border: 1px solid var(--line);
+  padding: 1rem 1.15rem; border-radius: 3px; overflow: auto; font-size: .82em;
+  line-height: 1.55; }
+code { background: var(--bg-alt); padding: .12em .38em; border-radius: 3px;
+  font-size: .85em; color: var(--accent-deep); }
+pre code { background: none; padding: 0; color: var(--ink-soft); }
+blockquote { border-left: 2px solid var(--accent); margin: 1.2rem 0;
+  padding: .3rem 1.1rem; color: var(--ink-mute); }
+hr { border: none; border-top: 1px solid var(--line); margin: 2.4rem 0; }
 img { max-width: 100%; height: auto; }
-table { border-collapse: collapse; }
-td,th { border:1px solid rgba(127,127,127,.3); padding:.4rem .7rem; }
-footer { margin-top: 4rem; font-size:.8rem; opacity:.5;
-  font-family: ui-monospace, monospace; }
+table { border-collapse: collapse; width: 100%; margin: 1.2rem 0;
+  display: block; overflow-x: auto; font-size: .92em; }
+th, td { border: 1px solid var(--line); padding: .5rem .8rem; text-align: left;
+  vertical-align: top; }
+th { font-family: var(--font-mono); font-weight: 500; font-size: .78em;
+  text-transform: uppercase; letter-spacing: .08em;
+  color: var(--ink-mute); background: var(--bg-alt); }
+footer { margin-top: 4rem; padding-top: 1.2rem; border-top: 1px solid var(--line);
+  font-family: var(--font-mono); font-size: .72rem; text-transform: uppercase;
+  letter-spacing: .12em; color: var(--ink-mute); }
 """
 
 def render_markdown(md_text, title):
@@ -259,6 +300,7 @@ def _html_doc(title, body):
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{_html.escape(title)}</title>
+{DEFAULT_PAGE_FONTS}
 <style>{DEFAULT_PAGE_CSS}</style></head>
 <body>{body}
 <footer>Published {now_iso()} &middot; via dak</footer>
@@ -409,15 +451,35 @@ def cmd_list(_args):
 
 def cmd_unpublish(args):
     wrangler = which_wrangler()
+    if wrangler is None:
+        die("wrangler not found. Install Node, then `npm i -g wrangler` (or rely on npx).")
+
     data = load_manifest()
-    target = next((e for e in data["entries"] if e["worker"] == args.slug), None)
+    target = next((e for e in data["entries"] if e.get("worker") == args.slug), None)
     if not target:
         die(f"no published entry with worker name '{args.slug}'")
-    log(f"To delete '{args.slug}' from Cloudflare:")
-    log(f"  {' '.join(wrangler or ['npx','wrangler'])} delete --name {args.slug}")
-    data["entries"] = [e for e in data["entries"] if e["worker"] != args.slug]
+
+    token      = get_cfg("api_token", "CLOUDFLARE_API_TOKEN")
+    account_id = get_cfg("account_id", "CLOUDFLARE_ACCOUNT_ID")
+    if not token or not account_id:
+        die("Not configured. Run: python3 scripts/dak.py setup")
+
+    env = {**os.environ, "CLOUDFLARE_API_TOKEN": token, "CLOUDFLARE_ACCOUNT_ID": account_id}
+    cmd = wrangler + ["delete", "--name", args.slug, "--force"]
+    res = subprocess.run(cmd, capture_output=True, text=True, env=env)
+    blob = res.stdout + "\n" + res.stderr
+    if res.returncode != 0:
+        if "does not exist" in blob or "10090" in blob:
+            log(f"'{args.slug}' not found on Cloudflare (already deleted?) — cleaning manifest.")
+        else:
+            log(blob)
+            die("wrangler delete failed — manifest left unchanged")
+    else:
+        log(f"✓ deleted '{args.slug}' from Cloudflare")
+
+    data["entries"] = [e for e in data["entries"] if e.get("worker") != args.slug]
     save_manifest(data)
-    log("(removed from local manifest)")
+    log("✓ removed from local manifest")
     return 0
 
 

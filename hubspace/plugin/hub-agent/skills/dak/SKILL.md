@@ -62,7 +62,8 @@ Prints only the URL to stdout. Composes cleanly in agent pipelines.
 ```bash
 python3 scripts/dak.py doctor       # check config + credentials
 python3 scripts/dak.py list         # all published artifacts
-python3 scripts/dak.py unpublish <worker-name>
+python3 scripts/dak.py unpublish <worker-name>   # deletes the worker from Cloudflare
+                                                 # AND removes it from the local manifest
 ```
 
 ## URL format

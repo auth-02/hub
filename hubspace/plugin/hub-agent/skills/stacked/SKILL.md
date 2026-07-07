@@ -1,7 +1,7 @@
 ---
 name: stacked
 description: >
-  Decompose large, complex, or risky changes into a stack of small, dependent, independently reviewable units. Use this skill whenever a user asks to implement a feature, refactor, pipeline, system, or workflow that spans multiple architectural layers — or whenever the resulting change would be hard to review as a single unit. Trigger on requests like "build X", "implement Y", "add Z to my system", "refactor W", especially when the task touches models, storage, business logic, tools, workflows, API, or UI in combination. Also trigger when the user says "stacked", "stacked PRs", "stacked diffs", "stack this", or asks how to break down a large change. If the task is non-trivial and involves more than one concern, use this skill — even if the user didn't explicitly ask for a stack.
+  Decompose LARGE, complex, or risky changes into a stack of small, dependent, independently reviewable units. Use this skill only when the change is genuinely big: it spans multiple architectural layers with functionally distinct concerns (models + storage + logic + API + UI in combination), or the resulting diff would be too large to review as a single unit. Trigger when the user says "stacked", "stacked PRs", "stacked diffs", "stack this", or asks how to break down a large change — or when a "build X" / "implement Y" / "refactor W" request is clearly multi-layer and large in scope. Do NOT use for small or moderate changes: bug fixes, tweaks, config changes, single-file or single-layer changes, or anything reviewable in one sitting belongs on ONE branch as ONE change — creating a stack of tiny branches for these adds overhead without value.
 ---
 
 # Stacked
@@ -12,19 +12,28 @@ Decompose work into a stack of small, dependent, reviewable changes. Each change
 
 ## When to Use
 
-- A feature spans multiple architectural layers
-- The implementation requires several logical steps
-- The resulting change would be difficult to review
-- Multiple concerns are modified simultaneously
-- The implementation can be delivered incrementally
+Stack only when **all** of these hold:
 
-Do not use for trivial or isolated changes.
+- The change is large — too big to review comfortably as a single unit
+- It spans multiple architectural layers with **functionally distinct** concerns
+- Each layer would carry substantial, self-contained work worth its own review
+
+## When NOT to Use
+
+Default to a **single branch, single change** for:
+
+- Bug fixes, tweaks, styling adjustments, config or copy changes
+- Single-file or single-layer changes, however "multi-step" the edit feels
+- Small features a reviewer can absorb in one sitting
+- Related small changes — batch them into one coherent change rather than one branch each
+
+A stack of tiny branches is worse than one clear change: it multiplies review, CI, and merge overhead without improving reviewability. The size of the change decides, not the number of steps it took to write.
 
 ---
 
 ## Core Principle
 
-Prefer a stack of small changes over one massive change.
+Prefer a stack of small changes over one massive change — and prefer one plain change over an unnecessary stack. Stacking is a tool for taming size, not a default workflow.
 
 ```
 Small Change   ← top (depends on everything below)
@@ -146,7 +155,9 @@ If a reviewer must answer multiple unrelated questions, the change is too large.
 6. **Prefer incremental progress** — don't bundle work to seem efficient
 7. **Write into the manifest** — when a manifest exists for this task (`tasks/<slug>/manifest.md`), write the stack into its `## Stack` section rather than presenting it only in chat. The manifest is the canonical record; chat is ephemeral. Update layer `Status` cells as PRs open and merge.
 
-When uncertain whether to split a change: **split it.**
+When uncertain whether the change is big enough to warrant a stack: **don't stack it — ship it as one change.** Only once you're inside a genuinely large stack and uncertain whether a layer is doing two jobs: split that layer.
+
+Sizing floor: never create a layer that a reviewer would read in under a couple of minutes and think "why is this its own PR?" Merge such fragments into the adjacent layer they belong to.
 
 ---
 
