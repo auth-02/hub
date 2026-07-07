@@ -1,6 +1,6 @@
 ---
 name: manifest
-description: Use when starting work on a non-trivial feature, migration, refactor, or multi-step task in ANY repo. Creates and maintains a markdown manifest at `<repo-root>/tasks/<slug>/manifest.md` (inside the repo being worked on — NEVER inside the skill directory or ~/), with sibling `data/` (datasets, PDFs, spreadsheets), `artifacts/` (probes, inspection notes, scripts), and `runs/<date>/` (validation outputs) subfolders created lazily as needed. Captures the problem, decisions, exploration results, plan, open questions, test + rollout plans, and a final review — updating it continuously as the work progresses. Trigger when the user asks to "build X", "add X", "migrate X", "refactor X", when the task needs 3+ steps, or any time an explicit plan-before-code loop would help. Do NOT use for single-line fixes, obvious bugs, or one-shot questions.
+description: Use when starting a non-trivial feature, migration, refactor, or multi-step task in ANY repo. Creates and continuously maintains a living markdown manifest at `<repo-root>/tasks/<slug>/manifest.md` (inside the repo being worked on — NEVER the skill dir or ~/) capturing the problem, decisions, exploration results, plan, open questions, test + rollout plans, and final review. Trigger on "build X", "add X", "migrate X", "refactor X", tasks needing 3+ steps, or whenever a plan-before-code loop would help. NOT for single-line fixes, obvious bugs, or one-shot questions.
 ---
 
 # manifest
@@ -118,7 +118,7 @@ Fill in at the end. Files changed (with one-line per-file summary), how to cut o
 ### 1. Capture the ask (before any tool calls other than creating the manifest)
 
 - Read the user's message carefully. Paraphrase the problem back in one sentence before doing anything.
-- Create `tasks/<slug>/manifest.md` (with `artifacts/` and `runs/` subfolders alongside) populated from the ask. "Exploration Results" and "Confirmed findings" are empty placeholders. "Plan" has rough shape only — don't overcommit before exploring.
+- Create `tasks/<slug>/manifest.md` populated from the ask — and nothing else; `data/`, `artifacts/`, `runs/` come lazily per the rule above. "Exploration Results" and "Confirmed findings" are empty placeholders. "Plan" has rough shape only — don't overcommit before exploring.
 - If the user gave a spec/list/table, paste it verbatim under **Context** so it's not lost.
 - **After creating the manifest**, write the slug to `tasks/.current-task` (one line, no newline padding) so the shell prompt can display it: `echo -n "<slug>" > tasks/.current-task`. This file is the prompt's source of truth — update it whenever the active task changes mid-session (e.g. user switches to a different task on the same branch).
 
@@ -193,9 +193,7 @@ When you can't tell whether something warrants a manifest update, err toward wri
 - Hiding surprises. If exploration invalidates a decision, say so with ⚠️ and update **Decisions** with the revised stance.
 - Committing the manifest without checking gitignore.
 - Narrating every step in chat while the manifest stays sparse. The chat is ephemeral; the manifest is the record.
-- **Waiting to be told.** Never require the user to say "log this" / "note it down" / "update the task file". The manifest is your output as much as the code is. If the user has to prompt an update, the skill has failed — see **Proactive updating** above.
-- **Batching updates.** Don't accumulate decisions across three turns and write them all at the end. Update in the same turn each decision is made; otherwise you forget nuance and miss reversals.
-- **Leaving reversed decisions undocumented.** When a decision flips mid-session, the old line stays (struck through) and the new line goes in with `Superseded (YYYY-MM-DD)` or `Revised (YYYY-MM-DD)`. Future-you will want to know what almost got built.
+- **Waiting to be told, batching updates, or leaving reversed decisions undocumented** — all violations of **Proactive updating** above: update in the same turn, unprompted, keeping superseded decisions struck-through with a date.
 
 ## Templates
 

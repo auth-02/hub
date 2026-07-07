@@ -1,7 +1,7 @@
 ---
 name: stacked
 description: >
-  Decompose LARGE, complex, or risky changes into a stack of small, dependent, independently reviewable units. Use this skill only when the change is genuinely big: it spans multiple architectural layers with functionally distinct concerns (models + storage + logic + API + UI in combination), or the resulting diff would be too large to review as a single unit. Trigger when the user says "stacked", "stacked PRs", "stacked diffs", "stack this", or asks how to break down a large change — or when a "build X" / "implement Y" / "refactor W" request is clearly multi-layer and large in scope. Do NOT use for small or moderate changes: bug fixes, tweaks, config changes, single-file or single-layer changes, or anything reviewable in one sitting belongs on ONE branch as ONE change — creating a stack of tiny branches for these adds overhead without value.
+  Decompose LARGE, complex, or risky changes into a stack of small, dependent, independently reviewable units. Use only when the change is genuinely big: multiple architectural layers with functionally distinct concerns (models + storage + logic + API + UI), or a diff too large to review as one unit. Trigger on "stacked" / "stacked PRs" / "stack this" / how to break down a large change — or when a "build X" / "refactor W" request is clearly multi-layer and large. Do NOT use for small or moderate changes: bug fixes, tweaks, config, single-file or single-layer changes belong on ONE branch as ONE change — a stack of tiny branches adds overhead without value.
 ---
 
 # Stacked
