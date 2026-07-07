@@ -1,6 +1,6 @@
 ---
 name: kagaz
-description: Kagaz (कागज़) — a personal frontend and document design system — an editorial, technical, archival aesthetic combining serif display type, monospace metadata, warm paper-toned palettes, a single rust accent, dot-grid textures, and schematic-style component framing. Use this skill whenever the user asks for any kind of frontend, UI, web page, landing page, dashboard, artifact, component, mockup, poster, slide deck or presentation, report, or PDF/document design, when converting an HTML artifact to a clean PDF, when building a slide deck as a PDF (one slide per page), or for any "make this look good" / "style this" / "design this" / "turn this into a PDF" / "make slides" request — even without explicitly invoking this skill or mention design preferences. The skill defines a specific aesthetic point of view (paper not screen, one accent under five percent of surface, warm neutrals only, mono-as-metadata, italic-not-bold, hairlines and soft depth not hard shadows, number everything, one decoration density), ships a reliable HTML-to-PDF converter with visual QA plus on-brand SVG charts, and should override generic defaults like Inter-on-white, purple gradients, cool grays, or cookie-cutter dashboard layouts.
+description: Kagaz (कागज़) — a personal design system for all frontend and document work — editorial-technical-archival, serif display + mono metadata on warm paper tones with a single rust accent. Use for ANY frontend, UI, web page, landing page, dashboard, artifact, component, mockup, poster, slide deck, report, or PDF/document design, for HTML→PDF conversion, and for any "make this look good" / "style this" / "make slides" / "turn this into a PDF" request — even when no design preference is mentioned. Overrides generic AI defaults (Inter-on-white, purple gradients, cool grays). Ships an HTML-to-PDF converter with visual QA and on-brand SVG charts.
 ---
 
 # Kagaz — Kagaz Design System
@@ -8,16 +8,6 @@ description: Kagaz (कागज़) — a personal frontend and document design
 A reference aesthetic for any frontend work. The look is editorial-technical: warm paper canvas, surgical rust accent, literary serif display paired with mono metadata, hairline-bounded schematic cards. It reads like a well-typeset technical manual or an archival spec sheet, not a SaaS landing page.
 
 This skill describes the **taste**, not a fixed template. Apply it to whatever you're building — a landing page, a dashboard, a docs site, an internal tool, a presentation — and adapt the principles to fit. The example in `examples/kagaz-showcase.html` shows one full execution; reference it for proportions, spacing, and detail handling, but don't copy it wholesale.
-
-## When to use
-
-Apply this skill any time the user asks for:
-- A web page, landing page, marketing site, or portfolio
-- A dashboard, internal tool, or admin interface
-- A React/HTML/CSS component or full artifact
-- A "design", "mockup", "style", "theme", or "look and feel" request
-- Slides or a poster where visual design matters
-- Anything where you'd otherwise reach for generic AI defaults
 
 If the request is purely functional (e.g. "fix this bug in my React state logic") and appearance isn't involved, skip this skill. But if any styling decision is involved, default to this aesthetic.
 

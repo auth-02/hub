@@ -1,6 +1,6 @@
 ---
 name: dak
-description: Turn any local artifact — an HTML report, Markdown notes, an interactive dashboard, a generated PDF, a directory of files — into a shareable https:// URL with one command, using free Cloudflare Workers hosting. Use this skill whenever the user wants to SHARE or SEND a file or generated output rather than hand it over as an attachment. Triggers include "send me a link", "publish this", "share this report/dashboard/page", "host this", "put this online", "give me a URL for this", "make this shareable", or any agent workflow that ends in "...and send me a link". Also use it as the final step after generating a report, dashboard, or visualization when the user expects a link back. Covers two modes — snapshot (frozen, immutable) and live (updates on re-publish). Do NOT use for deploying full applications, CI/CD, or git-based hosting workflows.
+description: Turn any local artifact — HTML report, Markdown notes, dashboard, PDF, or directory — into a shareable https:// URL with one command, via free Cloudflare Workers hosting. Use whenever the user wants to SHARE or SEND generated output rather than attach it — "send me a link", "publish/share/host this", "put this online", "make this shareable" — or as the final step after generating a report/dashboard when a link back is expected. Two modes: snapshot (frozen) and live (updates on re-publish). NOT for deploying full applications, CI/CD, or git-based hosting.
 ---
 
 # Dak — local artifact → shareable URL
@@ -62,7 +62,8 @@ Prints only the URL to stdout. Composes cleanly in agent pipelines.
 ```bash
 python3 scripts/dak.py doctor       # check config + credentials
 python3 scripts/dak.py list         # all published artifacts
-python3 scripts/dak.py unpublish <worker-name>
+python3 scripts/dak.py unpublish <worker-name>   # deletes the worker from Cloudflare
+                                                 # AND removes it from the local manifest
 ```
 
 ## URL format
