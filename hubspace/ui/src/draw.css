@@ -1,0 +1,21 @@
+/* Full-viewport host for the Excalidraw canvas. */
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+#app {
+  position: fixed;
+  inset: 0;
+}
+
+/* Skeleton shown while the Excalidraw chunk loads (deferred until after paint). */
+.draw-skeleton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font: 14px/1.4 system-ui, sans-serif;
+  color: #888;
+}
