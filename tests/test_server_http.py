@@ -175,6 +175,50 @@ class TestServerHttp(unittest.TestCase):
         # 200 if resolved, 404 if not found — both acceptable; must not be 500
         self.assertIn(status, (200, 404))
 
+    # ── Excalidraw routes (Phase 02) ──────────────────────────────────────
+
+    def test_draw_blank_canvas(self):
+        status, body = _get(self._port, "/draw")
+        self.assertEqual(status, 200)
+        self.assertIn(b"window.DRAW_STATE", body)
+        self.assertIn(b"/static/draw.js", body)
+
+    def test_excalidraw_file_served_as_canvas(self):
+        scene = '{"type":"excalidraw","elements":[{"type":"text","text":"hi there"}]}'
+        (Path(self._scan_root) / "diag.excalidraw").write_text(scene, encoding="utf-8")
+        status, body = _get(self._port, "/diag.excalidraw")
+        self.assertEqual(status, 200)
+        self.assertIn(b"window.DRAW_STATE", body)
+        self.assertIn(b"hi there", body)
+
+    def test_draw_save_new_creates_file(self):
+        import json
+        payload = json.dumps({"rel": None, "scene": {"elements": []}}).encode("utf-8")
+        status, body = _post(self._port, "/draw/save", payload)
+        self.assertEqual(status, 200)
+        out = json.loads(body)
+        self.assertTrue(out["ok"])
+        self.assertTrue(out["rel"].endswith(".excalidraw"))
+        self.assertTrue((Path(self._scan_root) / out["rel"]).exists())
+
+    def test_draw_save_rejects_traversal(self):
+        import json
+        payload = json.dumps({"rel": "../evil.excalidraw", "scene": {}}).encode("utf-8")
+        status, _ = _post(self._port, "/draw/save", payload)
+        self.assertEqual(status, 403)
+
+    def test_draw_save_rejects_non_excalidraw_ext(self):
+        import json
+        payload = json.dumps({"rel": "notes.md", "scene": {}}).encode("utf-8")
+        status, _ = _post(self._port, "/draw/save", payload)
+        self.assertEqual(status, 400)
+
+    def test_draw_save_missing_scene(self):
+        import json
+        payload = json.dumps({"rel": None}).encode("utf-8")
+        status, _ = _post(self._port, "/draw/save", payload)
+        self.assertEqual(status, 400)
+
 
 if __name__ == "__main__":
     unittest.main()

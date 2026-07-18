@@ -51,8 +51,10 @@ function App() {
       const out = await res.json();
       if (out.rel) {
         relRef.current = out.rel;
-        // Reflect the new slug in the URL without reloading the canvas.
-        history.replaceState(null, "", "/doc/" + encodeURIComponent(out.rel));
+        // Reflect the saved file's path in the URL without reloading the canvas.
+        // Files are served at /<vault-relative-path> (resolved against scan root).
+        const url = "/" + String(out.rel).split("/").map(encodeURIComponent).join("/");
+        history.replaceState(null, "", url);
       }
       setStatus("saved ✓");
     } catch (e) {

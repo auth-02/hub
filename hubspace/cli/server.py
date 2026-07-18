@@ -37,6 +37,7 @@ from ..utils.text import esc_html, slugify
 from ..render import (
     _render_md, _render_csv, _render_xlsx, _inject_into_html,
     _render_lineage_html, _favicon_href, _CSS, _DOC_CHROME_CSS, _PAGE, _add_outline,
+    draw_page_html,
 )
 
 
@@ -94,6 +95,12 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             self._run_rebuild()
             return
 
+        # Blank Excalidraw canvas (new, unsaved diagram)
+        if url_path == "/draw":
+            html_page = draw_page_html(None, None, self.__class__.server_port)
+            self._send(200, "text/html; charset=utf-8", html_page.encode("utf-8"))
+            return
+
         # Root → hub index
         if url_path in ("/", ""):
             docs = config.output_path()
@@ -144,6 +151,15 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
 
         if fs_path.is_dir():
             self._serve_dir(fs_path, url_path)
+        elif fs_path.suffix.lower() == ".excalidraw":
+            # Open the vault's .excalidraw file in the Excalidraw canvas.
+            try:
+                rel = str(fs_path.resolve().relative_to(_active_root.resolve()).as_posix())
+            except ValueError:
+                rel = str(fs_path)
+            scene_text = fs_path.read_text(encoding="utf-8", errors="replace")
+            html_page = draw_page_html(rel, scene_text, self.__class__.server_port)
+            self._send(200, "text/html; charset=utf-8", html_page.encode("utf-8"))
         elif fs_path.suffix.lower() == ".md":
             self._serve_md(fs_path)
         elif fs_path.suffix.lower() in (".html", ".htm"):
@@ -178,6 +194,13 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
             new_root = self.rfile.read(length).decode("utf-8").strip()
             self._set_root(new_root)
+        elif url_path == "/draw/save":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+                self._save_draw(body.get("rel"), body.get("scene"))
+            except (ValueError, KeyError) as e:
+                self._send(400, "text/plain", str(e).encode())
         elif url_path == "/_task-status":
             length = int(self.headers.get("Content-Length", 0))
             try:
@@ -223,6 +246,41 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             self._send(200, "text/plain", b"ok")
         else:
             self._send(500, "text/plain", result.stderr.encode())
+
+    def _save_draw(self, rel, scene) -> None:
+        """Persist an Excalidraw scene into the vault.
+
+        rel   — vault-relative target path (falsy → a new file at the vault root,
+                slug from the current time). Must stay inside the active scan root
+                and carry the .excalidraw extension.
+        scene — the scene object (JSON-serializable) to write.
+
+        The file lands in the scan root, so the watcher reindexes it on its next
+        tick — no explicit rebuild here (keeps saves snappy under rapid ⌘S).
+        """
+        if scene is None:
+            self._send(400, "text/plain", b"missing scene")
+            return
+        root = _active_root.resolve()
+        if rel:
+            target = (root / rel).resolve()
+            if target.suffix.lower() != ".excalidraw":
+                self._send(400, "text/plain", b"not an .excalidraw path")
+                return
+            if not is_within(target, root):
+                self._send(403, "text/plain", b"Forbidden")
+                return
+        else:
+            slug = "drawing-" + time.strftime("%Y%m%d-%H%M%S")
+            target = (root / f"{slug}.excalidraw").resolve()
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(scene), encoding="utf-8")
+        except OSError as e:
+            self._send(500, "text/plain", str(e).encode())
+            return
+        out_rel = target.relative_to(root).as_posix()
+        self._send(200, "application/json", json.dumps({"ok": True, "rel": out_rel}).encode())
 
     def _run_rebuild(self) -> None:
         result = self._rebuild(_active_root)
