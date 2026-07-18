@@ -37,13 +37,35 @@ _LINEAGE_LABELS = {
 
 _BACKLINKS_CSS = _css_asset("backlinks.css")
 
-# Shared doc chrome: the "⤓ PDF" print button + print stylesheet. Reused by both
-# the markdown page wrapper (_CSS/_PAGE) and injected HTML docs (_inject_into_html).
+# Shared doc chrome: a "⋯" actions dropdown + print stylesheet. Reused by both
+# the markdown page wrapper (_CSS/_PAGE via server._serve_page) and injected HTML
+# docs (_inject_into_html).
 _DOC_CHROME_CSS = _css_asset("chrome.css")
-_DOC_PRINT_BTN = (
-    '<button class="doc-print" onclick="window.print()" '
-    'title="Save as PDF (Cmd/Ctrl+P)">⤓ PDF</button>'
+
+# A ⋯ menu item that prints the page to PDF. Present on every doc page.
+DOC_PDF_ITEM = (
+    '<button class="doc-menu-item" onclick="window.print()" '
+    'title="Save as PDF (Cmd/Ctrl+P)">⤓ Save as PDF</button>'
 )
+
+
+def doc_menu(items: list) -> str:
+    """A floating ⋯ dropdown of document actions (fixed top-right).
+
+    items — inner HTML strings (``<a>``/``<button class="doc-menu-item">``).
+    Uses a native <details> so it needs no JavaScript on the doc page.
+    """
+    inner = "".join(items)
+    return (
+        '<details class="doc-menu">'
+        '<summary class="doc-menu-btn" title="Actions">⋯</summary>'
+        f'<div class="doc-menu-list">{inner}</div>'
+        "</details>"
+    )
+
+
+# Back-compat alias: the PDF-only menu used where no other actions apply.
+_DOC_PRINT_BTN = doc_menu([DOC_PDF_ITEM])
 
 
 def _favicon_href(port: int) -> str:
@@ -112,7 +134,7 @@ _PAGE = """\
 <link rel="icon" type="image/svg+xml" href="{favicon}">
 <style>{css}</style>
 </head>
-<body class="{body_class}"><button class="doc-print" onclick="window.print()" title="Save as PDF (Cmd/Ctrl+P)">⤓ PDF</button>{outline}<div class="page">
+<body class="{body_class}">{outline}<div class="page">
 {nav}
 {body}
 </div></body>
