@@ -1,3 +1,8 @@
+// @ts-nocheck — moved verbatim from static/hub.js. Vanilla DOM script that reads
+// lexical globals (FTS_DATA, _currentRoot, …) injected by hub.html's inline
+// <script>; not type-checked. The CSS import below is bundled to static/hub.css.
+import "./hub.css";
+
 const ftsMap=new Map(FTS_DATA.map(d=>[d.a,d]));
 const STATUS_CYCLE=['ongoing','completed','paused'];
 
