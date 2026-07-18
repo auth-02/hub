@@ -9,9 +9,11 @@ import urllib.request
 import urllib.error
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from hubspace.cli import server
+from hubspace.core import db as _db
 
 
 def _free_port() -> int:
@@ -50,9 +52,31 @@ class TestServerHttp(unittest.TestCase):
     def setUpClass(cls):
         cls._port = _free_port()
         cls._scan_root = tempfile.mkdtemp()
+        # Isolated hub state dir. Without this, endpoints that write persistent
+        # state — /_set-root (writes the .scan_root sidecar) and /_task-status
+        # (writes hub.db + task-status.json) — would clobber the developer's real
+        # ~/.local/state/hub, e.g. repointing their live hub at a temp dir.
+        cls._state = tempfile.mkdtemp()
 
         # Write a minimal markdown file into the scan root
         (Path(cls._scan_root) / "hello.md").write_text("# Hello\nworld", encoding="utf-8")
+
+        # Redirect every writable-state path to the temp state dir. The module-level
+        # constants are already computed, so patch them directly; the rebuild
+        # subprocess reads HUB_DB/HUB_OUTPUT from the environment, so set those too.
+        cls._patchers = [
+            patch.object(server, "_SIDECAR", Path(cls._state) / ".scan_root"),
+            patch.object(server, "_DB_PATH", Path(cls._state) / "hub.db"),
+            patch.object(_db, "_STATUS_SIDECAR", Path(cls._state) / "task-status.json"),
+        ]
+        for p in cls._patchers:
+            p.start()
+        cls._env = {
+            "HUB_DB": str(Path(cls._state) / "hub.db"),
+            "HUB_OUTPUT": str(Path(cls._state) / "docs-index.html"),
+        }
+        cls._env_saved = {k: os.environ.get(k) for k in cls._env}
+        os.environ.update(cls._env)
 
         # Point server at a temp scan root and patch module-level _active_root
         server._active_root = Path(cls._scan_root)
@@ -77,8 +101,16 @@ class TestServerHttp(unittest.TestCase):
     def tearDownClass(cls):
         if cls._server:
             cls._server.shutdown()
+        for p in getattr(cls, "_patchers", []):
+            p.stop()
+        for k, v in getattr(cls, "_env_saved", {}).items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
         import shutil
         shutil.rmtree(cls._scan_root, ignore_errors=True)
+        shutil.rmtree(getattr(cls, "_state", ""), ignore_errors=True)
 
     def test_rebuild_returns_ok(self):
         status, body = _get(self._port, "/_rebuild")
