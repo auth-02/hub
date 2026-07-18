@@ -186,9 +186,25 @@ launchctl kickstart -k gui/$(id -u)/com.user.hub
 
 ```bash
 git clone https://github.com/auth-02/hub && cd hub
-python3 -m hubspace.cli.hub serve   # run from source, no install
-python3 tests/run_tests.py          # stdlib unittest
+make build-ui                       # build the web UI once (needs Node + npm)
+python3 -m hubspace.cli.hub serve   # run from source
+python3 tests/run_tests.py          # stdlib unittest (no Node needed)
 ```
 
 Layout: code is the `hubspace/` package; all generated/writable state (index, DB, log)
 lives under `~/.local/state/hub/`, never the package directory.
+
+### Web UI (`hubspace/ui/`)
+
+The runtime is stdlib-only Python with **no runtime JS dependencies**. The browser
+UI's source (`hub.js`/`hub.css` and the doc-page stylesheets) lives in `hubspace/ui/`
+and is built with Vite into `hubspace/static/`, which ships in the wheel.
+
+- **Build once / on change:** `make build-ui` (or `cd hubspace/ui && npm run dev` to
+  rebuild on save).
+- The built outputs in `hubspace/static/` are **git-ignored** — the source of truth is
+  `hubspace/ui/`. A fresh clone has no `static/hub.js` until you run `make build-ui`,
+  so the page looks unstyled until then.
+- `hubspace/ui/` **never ships** in the wheel; only its built output does. CI runs
+  `make build-ui` before `python -m build`, so published wheels always carry a fresh UI.
+- Installing from PyPI (`pip install hubspaces`) needs no Node — the built UI is bundled.

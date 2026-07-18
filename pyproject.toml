@@ -45,6 +45,23 @@ path = "hubspace/__init__.py"
 packages = ["hubspace"]
 exclude = [
     "hubspace/plugin",
+    "hubspace/ui",
+]
+# The built web assets under hubspace/static/ are .gitignore'd (source of truth is
+# hubspace/ui/, rebuilt by `make build-ui`). Hatchling's VCS file selector would
+# therefore drop them from the wheel — list them as artifacts so the shipped wheel
+# always carries the built UI. CI runs `make build-ui` before `python -m build`.
+artifacts = [
+    "hubspace/static/hub.js",
+    "hubspace/static/hub.css",
+    "hubspace/static/draw.js",
+    "hubspace/static/draw.css",
+    "hubspace/static/chunk-*.js",
+    "hubspace/static/favicon.svg",
+    "hubspace/static/page.css",
+    "hubspace/static/backlinks.css",
+    "hubspace/static/chrome.css",
+    "hubspace/static/fonts/**",
 ]
 
 # Runtime assets (favicon, hub.css, hub.js) live inside hubspace/assets and ship
@@ -56,3 +73,17 @@ exclude = [
 
 [tool.hatch.build.targets.sdist]
 include = ["hubspace", "example", "README.md", "LICENSE"]
+exclude = ["hubspace/ui/node_modules", "hubspace/ui/dist"]
+# Carry the built (gitignored) UI assets so an sdist install works without Node too.
+artifacts = [
+    "hubspace/static/hub.js",
+    "hubspace/static/hub.css",
+    "hubspace/static/draw.js",
+    "hubspace/static/draw.css",
+    "hubspace/static/chunk-*.js",
+    "hubspace/static/favicon.svg",
+    "hubspace/static/page.css",
+    "hubspace/static/backlinks.css",
+    "hubspace/static/chrome.css",
+    "hubspace/static/fonts/**",
+]
