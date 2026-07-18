@@ -18,7 +18,7 @@ def _css_asset(name: str) -> str:
 
 _LINEAGE_ORDER = [
     "belongs_to_task", "belongs_to_skill",
-    "task_has_run", "task_has_artifact", "task_has_data",
+    "task_has_run", "task_has_artifact", "task_has_draw", "task_has_data",
     "task_has_prompt", "task_has_doc",
     "skill_has_ref",
 ]
@@ -27,6 +27,7 @@ _LINEAGE_LABELS = {
     "belongs_to_skill": "↑ skill",
     "task_has_run": "runs",
     "task_has_artifact": "artifacts",
+    "task_has_draw": "draws",
     "task_has_data": "data",
     "task_has_prompt": "prompts",
     "task_has_doc": "docs",

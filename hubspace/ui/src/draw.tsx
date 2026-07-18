@@ -20,6 +20,10 @@ import { createRoot } from "react-dom/client";
 type DrawState = { rel: string | null; data: any | null };
 const STATE: DrawState = (window as any).DRAW_STATE || { rel: null, data: null };
 
+// Optional target directory for a NEW diagram (e.g. a task's tasks/<slug>/draws),
+// passed as /draw?dir=... by the manifest page's "New draw" button.
+const DIR: string | null = new URLSearchParams(window.location.search).get("dir");
+
 // Lazy so the ~1 MB Excalidraw bundle is a separate chunk, deferred until paint.
 const Excalidraw = lazy(() =>
   import("@excalidraw/excalidraw").then((m) => ({ default: m.Excalidraw })),
@@ -45,7 +49,11 @@ function App() {
       const res = await fetch("/draw/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rel: relRef.current, scene: JSON.parse(scene) }),
+        body: JSON.stringify({
+          rel: relRef.current,
+          dir: relRef.current ? null : DIR, // only for a brand-new diagram
+          scene: JSON.parse(scene),
+        }),
       });
       if (!res.ok) throw new Error(String(res.status));
       const out = await res.json();

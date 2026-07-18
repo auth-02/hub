@@ -198,7 +198,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
             try:
                 body = json.loads(self.rfile.read(length).decode("utf-8"))
-                self._save_draw(body.get("rel"), body.get("scene"))
+                self._save_draw(body.get("rel"), body.get("scene"), body.get("dir"))
             except (ValueError, KeyError) as e:
                 self._send(400, "text/plain", str(e).encode())
         elif url_path == "/_task-status":
@@ -247,16 +247,18 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         else:
             self._send(500, "text/plain", result.stderr.encode())
 
-    def _save_draw(self, rel, scene) -> None:
+    def _save_draw(self, rel, scene, dir_=None) -> None:
         """Persist an Excalidraw scene into the vault.
 
-        rel   — vault-relative target path (falsy → a new file at the vault root,
-                slug from the current time). Must stay inside the active scan root
-                and carry the .excalidraw extension.
+        rel   — vault-relative path of an existing file to overwrite (falsy → a new
+                file, slug from the current time). Must carry the .excalidraw ext.
         scene — the scene object (JSON-serializable) to write.
+        dir_  — for a NEW file, the vault-relative directory to create it in (e.g.
+                a task's ``tasks/<slug>/draws``). Falsy → the scan root. Created if
+                missing. Ignored when ``rel`` is given.
 
-        The file lands in the scan root, so the watcher reindexes it on its next
-        tick — no explicit rebuild here (keeps saves snappy under rapid ⌘S).
+        Everything must stay inside the active scan root. The file lands there, so
+        the watcher reindexes it on its next tick — no explicit rebuild here.
         """
         if scene is None:
             self._send(400, "text/plain", b"missing scene")
@@ -271,8 +273,14 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 self._send(403, "text/plain", b"Forbidden")
                 return
         else:
+            base = root
+            if dir_:
+                base = (root / dir_).resolve()
+                if not is_within(base, root):
+                    self._send(403, "text/plain", b"Forbidden")
+                    return
             slug = "drawing-" + time.strftime("%Y%m%d-%H%M%S")
-            target = (root / f"{slug}.excalidraw").resolve()
+            target = (base / f"{slug}.excalidraw").resolve()
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(json.dumps(scene), encoding="utf-8")
@@ -362,6 +370,22 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 body = body[:m.end()] + lineage_html + body[m.end():]
             else:
                 body = lineage_html + body
+
+        # Task manifests get a floating "New draw" button that opens a blank canvas
+        # scoped to this task's draws/ folder (tasks/<slug>/draws/).
+        if path.name.lower() == "manifest.md" and path.parent.parent.name == "tasks":
+            try:
+                draws_rel = (path.parent / "draws").resolve().relative_to(
+                    _active_root.resolve()
+                ).as_posix()
+                href = "/draw?dir=" + quote(draws_rel, safe="/")
+                body = (
+                    f'<a class="doc-newdraw" href="{esc_html(href)}" target="_blank" '
+                    f'rel="noopener" title="New Excalidraw diagram in this task">'
+                    f'✏︎ New draw</a>' + body
+                )
+            except ValueError:
+                pass
 
         html = _PAGE.format(
             title=title,
