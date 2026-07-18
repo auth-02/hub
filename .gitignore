@@ -7,3 +7,6 @@ __pycache__/
 *.DS_Store
 .hub-server.out
 /tasks/
+
+# uv regenerates this on demand; the project is zero-dependency (stdlib-only)
+uv.lock
