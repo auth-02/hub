@@ -21,6 +21,9 @@ and traces:
 - **`/hub`** — builds and serves the browsable Hub index (every `.md`/`.html`,
   task, run, artifact, and skill in the current directory) on
   <http://localhost:8787>, watching for changes.
+- **`/hub-daemon`** — *optional*: run that viewer as a persistent macOS launchd
+  agent (from the same bundled wheel) so it survives logout/reboot. Opt-in only —
+  `install` / `uninstall` / `status`.
 
 ## Offline by design
 
