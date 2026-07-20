@@ -5,11 +5,20 @@
   "type": "module",
   "description": "Dev-time UI source for hubspace. Built output lands in ../static and ships in the wheel; this package never ships.",
   "scripts": {
-    "build": "vite build",
+    "build": "vite build && vite build --config vite.draw.config.ts",
+    "build:hub": "vite build",
+    "build:draw": "vite build --config vite.draw.config.ts",
     "dev": "vite build --watch"
   },
+  "dependencies": {
+    "@excalidraw/excalidraw": "^0.17.6",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
   "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.0",
     "typescript": "^5.5.0",
-    "vite": "^5.4.0"
+    "vite": "^5.4.0",
+    "vite-plugin-static-copy": "^1.0.6"
   }
 }

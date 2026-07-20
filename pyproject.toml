@@ -61,7 +61,7 @@ artifacts = [
     "hubspace/static/page.css",
     "hubspace/static/backlinks.css",
     "hubspace/static/chrome.css",
-    "hubspace/static/fonts/**",
+    "hubspace/static/excalidraw-assets/**",
 ]
 
 # Runtime assets (favicon, hub.css, hub.js) live inside hubspace/assets and ship
@@ -85,5 +85,5 @@ artifacts = [
     "hubspace/static/page.css",
     "hubspace/static/backlinks.css",
     "hubspace/static/chrome.css",
-    "hubspace/static/fonts/**",
+    "hubspace/static/excalidraw-assets/**",
 ]
