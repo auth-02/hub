@@ -20,8 +20,23 @@ and traces:
 
 - **`/hub`** — builds and serves the browsable Hub index (every `.md`/`.html`,
   task, run, artifact, and skill in the current directory) on
-  <http://localhost:8787>, watching for changes. Runs via `uvx --from hubspaces`,
-  so no separate install is required.
+  <http://localhost:8787>, watching for changes.
+
+## Offline by design
+
+The plugin ships a **pinned `hubspaces` wheel** under `vendor/` and always runs
+*that* wheel via `uv` (`uvx --offline --from vendor/*.whl hub serve`). This means:
+
+- **Fully offline from the first run** — nothing is fetched from PyPI, ever.
+- **No version skew** — `/hub` never runs a separately-installed `hubspaces`; it
+  only ever runs its own bundled wheel.
+- **Single source of truth** — the engine is authored only in the `hubspaces`
+  package; the plugin carries a frozen build snapshot, not a second copy of the
+  source. CI re-vendors the wheel automatically on every release.
+
+The **only external requirement is `uv`** ([install](https://docs.astral.sh/uv/getting-started/installation/)).
+`uv` provisions an isolated interpreter and environment, so nothing touches the
+user's Python.
 
 ## Install
 

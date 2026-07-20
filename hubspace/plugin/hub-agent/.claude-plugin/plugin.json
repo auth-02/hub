@@ -1,6 +1,6 @@
 {
   "name": "hub-agent",
-  "version": "0.2.0",
+  "version": "0.2.3",
   "description": "Self-sufficient Hub agent: bundles the producer skills (manifest, stacked, kagaz, dak) plus the `/hub` command that builds and serves the browsable Hub index. One install gives both the agentic producers and the consumer dashboard.",
   "author": { "name": "Atharva" },
   "homepage": "https://github.com/auth-02/hub",
