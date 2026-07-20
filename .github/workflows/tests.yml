@@ -20,6 +20,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+      # render/page.py inlines these hand-authored stylesheets from static/ at
+      # import time. Their source lives in hubspace/ui/public and is copied into
+      # static/ by the Vite build (git-ignored there). The test suite needs no
+      # Node, so materialize those verbatim copies directly instead of building.
+      - name: Stage Python-inlined stylesheets
+        run: cp hubspace/ui/public/*.css hubspace/ui/public/favicon.svg hubspace/static/
       - name: Run test suite (stdlib only, no install)
         run: python3 tests/run_tests.py
       - name: Verify clean install + demo
