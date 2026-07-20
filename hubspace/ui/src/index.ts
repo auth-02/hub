@@ -156,6 +156,9 @@ function closePreview(){
 
 rows.forEach(r=>r.addEventListener('click',e=>{
   e.preventDefault();
+  // Excalidraw diagrams need room to edit, so open the full canvas in a new tab
+  // instead of the narrow preview iframe.
+  if(r.dataset.kind==='draw'){window.open(r.href,'_blank','noopener');return;}
   selRows=getVisible();
   const vi=selRows.indexOf(r);
   if(vi>=0){

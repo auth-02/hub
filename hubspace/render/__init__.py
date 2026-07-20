@@ -6,3 +6,4 @@ from .page import (
     _favicon_href, _inject_into_html, _render_lineage_html, _CSS, _PAGE,
     _LINEAGE_ORDER, _LINEAGE_LABELS, _BACKLINKS_CSS, _DOC_CHROME_CSS, _DOC_PRINT_BTN,
 )
+from .draw import draw_page_html

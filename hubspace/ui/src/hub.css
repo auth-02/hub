@@ -85,6 +85,7 @@ h1 .hub{color:#C15F3C;font-style:italic;}
 .badge.run{color:#fff;background:#2F6B4F;border-color:#2F6B4F;}
 .badge.data{color:#fff;background:#2E7D8A;border-color:#2E7D8A;}
 .badge.skill{color:#fff;background:#4A7FC1;border-color:#3A6BAE;}
+.badge.draw{color:#fff;background:#B5651D;border-color:#9A521A;}
 .path{font-family:var(--mono);font-size:12.5px;flex:1;word-break:break-all;}
 .ago{font-family:var(--mono);font-size:10px;color:var(--mute);flex:0 0 auto;}
 .empty{color:var(--mute);font-style:italic;}

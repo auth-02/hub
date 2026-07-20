@@ -10,7 +10,7 @@
 // Saving POSTs { rel, scene } to /draw/save; the server returns { ok, rel } and
 // we adopt the server-assigned rel for a brand-new diagram.
 import "./draw.css";
-import { StrictMode, Suspense, lazy, useCallback, useRef, useState } from "react";
+import { StrictMode, Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 // Must be set before the Excalidraw chunk evaluates so its fonts resolve to the
@@ -51,8 +51,10 @@ function App() {
       const out = await res.json();
       if (out.rel) {
         relRef.current = out.rel;
-        // Reflect the new slug in the URL without reloading the canvas.
-        history.replaceState(null, "", "/doc/" + encodeURIComponent(out.rel));
+        // Reflect the saved file's path in the URL without reloading the canvas.
+        // Files are served at /<vault-relative-path> (resolved against scan root).
+        const url = "/" + String(out.rel).split("/").map(encodeURIComponent).join("/");
+        history.replaceState(null, "", url);
       }
       setStatus("saved ✓");
     } catch (e) {
@@ -61,19 +63,24 @@ function App() {
     setTimeout(() => setStatus(""), 2000);
   }, []);
 
-  // ⌘S / Ctrl+S saves into the vault instead of the browser's save dialog.
-  const onKeyDown = useCallback(
-    (e: KeyboardEvent) => {
+  // ⌘S / Ctrl+S saves into the vault. Intercept on window in the CAPTURE phase so
+  // it fires before Excalidraw's own document-level handler — otherwise Excalidraw
+  // also runs its "Save to disk" action and the browser's native file picker pops up.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
         void save();
       }
-    },
-    [save],
-  );
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [save]);
 
   return (
-    <div onKeyDownCapture={onKeyDown as any} style={{ position: "fixed", inset: 0 }}>
+    <div style={{ position: "fixed", inset: 0 }}>
       <Excalidraw
         excalidrawAPI={(api: any) => (apiRef.current = api)}
         initialData={STATE.data || undefined}
