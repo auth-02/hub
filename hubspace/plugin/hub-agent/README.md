@@ -19,8 +19,9 @@ and traces. Invoke as `/hub:<skill>` (or let Claude trigger them by context):
 **Consumer commands** — the dashboard that ties it together:
 
 - **`/hub:serve`** — builds and serves the browsable Hub index (every `.md`/`.html`,
-  task, run, artifact, and skill in the current directory) on
-  <http://localhost:8787>, watching for changes.
+  task, run, artifact, skill, and **Excalidraw diagram** in the current directory)
+  on <http://localhost:8787>, watching for changes. Diagrams are created in place,
+  offline, and become first-class lineage nodes badged `DRAW`.
 - **`/hub:daemon`** — *optional*: run that viewer as a persistent macOS launchd
   agent (from the same bundled wheel) so it survives logout/reboot. Opt-in only —
   `install` / `uninstall` / `status`.

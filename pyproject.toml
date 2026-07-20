@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Atharva" }]
-keywords = ["claude-code", "agents", "ai", "local-first", "lineage", "task-tracking", "markdown", "documentation", "full-text-search"]
+keywords = ["claude-code", "agents", "ai", "local-first", "lineage", "task-tracking", "excalidraw", "diagrams", "markdown", "documentation", "full-text-search"]
 dependencies = []
 classifiers = [
     "Development Status :: 4 - Beta",
