@@ -5,7 +5,7 @@
     {
       "name": "hub",
       "source": "./hubspace/plugin/hub-agent",
-      "description": "Self-sufficient Hub: producer skills (manifest, stacked, kagaz, dak) plus the `/hub:serve` command to build and serve the browsable index. Opt-in; hub-core needs no plugin."
+      "description": "Self-sufficient Hub: producer skills (manifest, stacked, kagaz, dak) plus the `/hub:serve` command to build and serve the browsable index, with in-place Excalidraw diagrams as first-class lineage nodes. Opt-in; hub-core needs no plugin."
     }
   ]
 }
