@@ -123,8 +123,12 @@ class TestExcludeDirs(unittest.TestCase):
 
 class TestDefaultView(unittest.TestCase):
     def test_valid_views(self):
-        for v in ("work", "list", "board", "calendar", "activity"):
+        for v in ("work", "list", "board", "calendar"):
             self.assertEqual(config.resolve_default_view({"default_view": v}), v)
+
+    def test_activity_view_removed(self):
+        # 'activity' was removed as a view; it should now be rejected.
+        self.assertEqual(config.resolve_default_view({"default_view": "activity"}), "")
 
     def test_invalid_view_returns_empty(self):
         self.assertEqual(config.resolve_default_view({"default_view": "kanban"}), "")

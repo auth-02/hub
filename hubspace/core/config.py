@@ -17,7 +17,7 @@ under a `[hub]` table; top-level keys are also accepted for convenience:
     scan_root    = "~/work/docs"
     port         = 8787
     exclude_dirs = ["vendor", "fixtures"]   # added to the built-in excludes
-    default_view = "board"                  # work | list | board | calendar | activity
+    default_view = "board"                  # work | list | board | calendar
 
 Environment variables always override the file. Stdlib-only (tomllib, Py 3.11+).
 """
@@ -27,7 +27,7 @@ import os
 import tomllib
 from pathlib import Path
 
-_VALID_VIEWS = {"work", "list", "board", "calendar", "activity"}
+_VALID_VIEWS = {"work", "list", "board", "calendar"}
 
 
 def state_dir() -> Path:
