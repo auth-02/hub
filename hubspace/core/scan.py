@@ -11,11 +11,14 @@ from pathlib import Path
 EXTS = {".md", ".html", ".htm"}
 PROMPT_EXTS = {".txt"}
 DATA_EXTS = {".pdf", ".xlsx", ".xls", ".csv", ".tsv"}
+DRAW_EXTS = {".excalidraw"}  # Excalidraw diagrams — first-class vault docs, any dir
 
 
 def _included(path: Path) -> bool:
     ext = path.suffix.lower()
     if ext in EXTS:
+        return True
+    if ext in DRAW_EXTS:  # draw anywhere in the vault
         return True
     if ext in PROMPT_EXTS and "/prompts/" in path.as_posix():
         return True
@@ -36,6 +39,10 @@ def _classify(path: Path, rel: str, repo_name: str = "") -> str | None:
     # tasks/<slug>/... — prepend so classification patterns match.
     effective_rel = f"tasks/{rel}" if repo_name.lower() == "tasks" else rel
     parts = effective_rel.split("/")
+
+    # Excalidraw diagrams are always kind:draw, regardless of name or location.
+    if path.suffix.lower() in DRAW_EXTS:
+        return "draw"
 
     if stem == "claude":
         return "claude"

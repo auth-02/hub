@@ -115,6 +115,22 @@ class TestClassify(unittest.TestCase):
         p = Path("/repo/docs/api/reference.md")
         self.assertEqual(scan._classify(p, "docs/api/reference.md"), "doc")
 
+    def test_excalidraw_returns_draw(self):
+        p = Path("/repo/diagram.excalidraw")
+        self.assertEqual(scan._classify(p, "diagram.excalidraw"), "draw")
+
+    def test_excalidraw_anywhere_returns_draw(self):
+        # kind:draw regardless of location — even inside docs/ or tasks/
+        p = Path("/repo/docs/arch.excalidraw")
+        self.assertEqual(scan._classify(p, "docs/arch.excalidraw"), "draw")
+        p2 = Path("/repo/tasks/slug/flow.excalidraw")
+        self.assertEqual(scan._classify(p2, "tasks/slug/flow.excalidraw"), "draw")
+
+    def test_excalidraw_named_readme_still_draw(self):
+        # Extension wins over stem-based rules
+        p = Path("/repo/README.excalidraw")
+        self.assertEqual(scan._classify(p, "README.excalidraw"), "draw")
+
 
 class TestTaskSlug(unittest.TestCase):
     def test_path_inside_tasks(self):
@@ -203,6 +219,10 @@ class TestIncluded(unittest.TestCase):
 
     def test_xlsx_in_data_dir(self):
         self.assertTrue(scan._included(Path("/repo/tasks/slug/data/report.xlsx")))
+
+    def test_excalidraw_included_anywhere(self):
+        self.assertTrue(scan._included(Path("/repo/diagram.excalidraw")))
+        self.assertTrue(scan._included(Path("/repo/deep/nested/flow.excalidraw")))
 
 
 class TestSkillSlug(unittest.TestCase):

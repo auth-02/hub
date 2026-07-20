@@ -113,6 +113,11 @@ class TestExtractBody(unittest.TestCase):
     def test_pdf_returns_empty(self):
         self.assertEqual(metadata.extract_body("doc.pdf", "binary"), "")
 
+    def test_excalidraw_returns_empty(self):
+        # JSON scene graph must not be indexed as raw text
+        scene = '{"type":"excalidraw","elements":[{"type":"text","text":"hello"}]}'
+        self.assertEqual(metadata.extract_body("diagram.excalidraw", scene), "")
+
     def test_csv_normalises_whitespace(self):
         result = metadata.extract_body("data.csv", "a,  b ,c\n1,2,3")
         self.assertIn("a", result)

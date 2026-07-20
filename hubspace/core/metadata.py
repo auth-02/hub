@@ -107,6 +107,9 @@ def extract_body(path: str, text: str, max_chars: int = 2000) -> str:
         return _extract_html_body(text[:_READ_LIMIT], max_chars)
     if ext in (".pdf", ".xls"):
         return ""
+    if ext == ".excalidraw":
+        # JSON scene graph — don't index raw JSON. (Phase 04 may extract labels.)
+        return ""
     if ext == ".xlsx":
         return _extract_xlsx_body(path, max_chars)
     if ext in (".csv", ".tsv"):
