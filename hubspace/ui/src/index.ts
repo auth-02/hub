@@ -102,17 +102,7 @@ activeRepos=new Set((sessionStorage.getItem('docs_hub_repos')||'').split(',').fi
 function softReload(){location.reload();}
 setInterval(()=>softReload(),120000);
 
-// ── Activity helpers (shared by the activity view + timeline) ──────────────
-const FEED_ACTIONS={
-  task:    {created:'New task started',    updated:'Task plan updated'},
-  run:     {created:'Run logged',          updated:'Run notes updated'},
-  artifact:{created:'Artifact created',    updated:'Artifact revised'},
-  prompt:  {created:'Prompt added',        updated:'Prompt updated'},
-  doc:     {created:'Doc added',           updated:'Doc updated'},
-  data:    {created:'Data file added',     updated:'Data file updated'},
-  claude:  {created:'CLAUDE.md updated',   updated:'CLAUDE.md updated'},
-  readme:  {created:'README updated',      updated:'README updated'},
-};
+// ── Relative-time helper (used by board / work / timeline / trace) ─────────
 function feedAgo(ts){
   const d=(Date.now()/1000)-ts;
   if(d<90) return 'just now';
@@ -636,62 +626,12 @@ function closeTrace(){
 }
 document.getElementById('trace-back').addEventListener('click',closeTrace);
 
-// ── Activity view ─────────────────────────────────────────────────────────
-function renderActivityView(){
-  const el=document.getElementById('act-content');
-  // Merge ACTIVITY_DATA events with TIMELINE_DATA tasks, sort desc by ts
-  const events=[];
-  (ACTIVITY_DATA||[]).forEach(ev=>{
-    const name=ev.sl||ev.p.split('/').pop().replace(/\.[^.]+$/,'');
-    const actions=FEED_ACTIONS[ev.k]||{created:'File added',updated:'File modified'};
-    const actionText=(actions[ev.ev]||'Changed');
-    events.push({ts:ev.ts,title:name.replace(/[-_]/g,' ').replace(/^./,c=>c.toUpperCase()),type:actionText,repo:ev.rp||''});
-  });
-  // Also add timeline task summaries as events
-  (TIMELINE_DATA.tasks||[]).forEach(t=>{
-    const name=tagName(t.sl);
-    const parts=[];
-    if(t.runs)parts.push(t.runs+' run'+(t.runs>1?'s':''));
-    if(t.artifacts)parts.push(t.artifacts+' artifact'+(t.artifacts>1?'s':''));
-    const detail=parts.join(', ')||(t.status||'updated');
-    events.push({ts:t.ts,title:name,type:detail,repo:t.rp||''});
-  });
-  events.sort((a,b)=>b.ts-a.ts);
-
-  if(!events.length){
-    el.innerHTML='<div class="act-empty">No recent activity yet.</div>';
-    return;
-  }
-
-  // Group by calendar day
-  const byDay=new Map();
-  events.forEach(ev=>{
-    const d=new Date(ev.ts*1000);
-    const key=d.toLocaleDateString('en-US',{weekday:'long',month:'long',day:'numeric'});
-    if(!byDay.has(key))byDay.set(key,[]);
-    byDay.get(key).push(ev);
-  });
-
-  let h='';
-  byDay.forEach((evs,day)=>{
-    h+=`<div class="act-day">${esc(day)}</div>`;
-    evs.forEach(ev=>{
-      h+=`<div class="act-ev">
-        <div class="act-title">${esc(ev.title)}</div>
-        <div class="act-detail"><span class="ad-type">${esc(ev.type)}</span>${ev.repo?' · '+esc(ev.repo):''}</div>
-      </div>`;
-    });
-  });
-  el.innerHTML=h;
-}
-
 // ── View toggle ───────────────────────────────────────────────────────────
 (function(){
   const layout=document.querySelector('.hub-layout');
   const board=document.getElementById('board');
   const cal=document.getElementById('calendar');
   const workView=document.getElementById('work-view');
-  const actView=document.getElementById('activity-view');
   const pills=[...document.querySelectorAll('.view-pill')];
   const hasWork=TASKS_DATA.length>0;
   const savedView=sessionStorage.getItem('docs_hub_view');
@@ -707,11 +647,9 @@ function renderActivityView(){
     board.classList.toggle('show',v==='board');
     cal.classList.toggle('show',v==='calendar');
     workView.classList.toggle('show',v==='work');
-    actView.classList.toggle('show',v==='activity');
     if(v==='board')renderBoard();
     if(v==='calendar')renderCalendar();
     if(v==='work')renderWorkView();
-    if(v==='activity')renderActivityView();
   }
   pills.forEach(p=>p.addEventListener('click',()=>setView(p.dataset.view)));
   setView(view);
