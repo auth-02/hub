@@ -17,11 +17,10 @@ set -euo pipefail
 HUB_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PORT="${HUB_SERVER_PORT:-8787}"
 UV="$(which uv 2>/dev/null || echo "$HOME/.local/bin/uv")"
-AGENTS="$HOME/Library/LaunchAgents"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/hub"
 SIDECAR="$STATE_DIR/.scan_root"
 
-mkdir -p "$AGENTS" "$STATE_DIR"
+mkdir -p "$STATE_DIR"   # ~/Library/LaunchAgents is created by `hub agent`
 
 # Seed the sidecar — the authoritative, UI-overridable scan root. Only an
 # explicit HUB_SCAN_ROOT overrides an existing sidecar; otherwise keep what the
@@ -35,66 +34,20 @@ else
 fi
 printf '%s\n' "$SCAN_ROOT" > "$SIDECAR"
 
-# ── com.user.hub — rebuild index every 120 s ──────────────────────────────
-# Sets HUB_SERVER_PORT only, so rebuilt links point at localhost:$PORT. No
-# HUB_SCAN_ROOT — resolution falls through to the sidecar above.
-cat > "$AGENTS/com.user.hub.plist" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>com.user.hub</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>$UV</string>
-        <string>run</string>
-        <string>--project</string>
-        <string>$HUB_DIR</string>
-        <string>hub</string>
-    </array>
-    <key>EnvironmentVariables</key>
-    <dict>
-        <key>HUB_SERVER_PORT</key><string>$PORT</string>
-    </dict>
-    <key>WorkingDirectory</key><string>$HUB_DIR</string>
-    <key>RunAtLoad</key><true/>
-    <key>StartInterval</key><integer>120</integer>
-</dict>
-</plist>
-EOF
+# Plist generation + launchctl load now live once in the engine (`hub agent`);
+# this script only supplies the dev launcher (`uv run --project $HUB_DIR hub`)
+# and its two agents. HUB_SCAN_ROOT is intentionally NOT pinned in the plists —
+# resolution falls through to the sidecar seeded above, so the UI's "change scan
+# root" button persists across restarts.
+EXEC=$(printf '%q run --project %q hub' "$UV" "$HUB_DIR")
+HUB_RUN=("$UV" run --project "$HUB_DIR" hub)
 
-# ── com.user.hub-server — HTTP server, KeepAlive ──────────────────────────
-# Port is passed as a CLI arg; no env needed. No HUB_SCAN_ROOT (sidecar wins).
-cat > "$AGENTS/com.user.hub-server.plist" <<EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key><string>com.user.hub-server</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>$UV</string>
-        <string>run</string>
-        <string>--project</string>
-        <string>$HUB_DIR</string>
-        <string>hub</string>
-        <string>serve</string>
-        <string>--port</string>
-        <string>$PORT</string>
-    </array>
-    <key>WorkingDirectory</key><string>$HUB_DIR</string>
-    <key>RunAtLoad</key><true/>
-    <key>KeepAlive</key><true/>
-</dict>
-</plist>
-EOF
-
-# ── Load (unload first if already running) ────────────────────────────────
-for label in com.user.hub com.user.hub-server; do
-    launchctl unload "$AGENTS/$label.plist" 2>/dev/null || true
-    launchctl load "$AGENTS/$label.plist"
-    echo "  loaded $label"
-done
+# com.user.hub        — rebuild the index every 120 s (StartInterval)
+# com.user.hub-server — HTTP server, KeepAlive
+"${HUB_RUN[@]}" agent install --label com.user.hub \
+    --exec "$EXEC" --rebuild-interval 120 --port "$PORT" --root "$HUB_DIR"
+"${HUB_RUN[@]}" agent install --label com.user.hub-server \
+    --exec "$EXEC" --serve --port "$PORT" --root "$HUB_DIR"
 
 echo ""
 echo "Hub running at http://localhost:$PORT"
