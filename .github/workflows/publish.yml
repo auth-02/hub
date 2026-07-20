@@ -18,6 +18,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      # Build the web UI (hubspace/ui -> hubspace/static). Built assets are
+      # .gitignore'd, so they must be regenerated here before packaging or the
+      # wheel would ship without hub.js/hub.css.
+      - run: make build-ui
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
