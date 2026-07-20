@@ -1,4 +1,4 @@
-# hub-agent — Claude Code plugin
+# hub — Claude Code plugin
 
 A **self-sufficient agent** for [Hub](../../README.md): install it once and you
 get both halves of the workflow — the *producers* that create structured work,
@@ -7,31 +7,54 @@ and the *consumer* (Hub) that indexes, cross-links, and serves it as one page.
 ## What's bundled
 
 **Producer skills** — they create exactly the structure Hub indexes, badges,
-and traces:
+and traces. Invoke as `/hub:<skill>` (or let Claude trigger them by context):
 
-| Skill | Produces |
-|-------|----------|
-| `manifest` | Living `tasks/<slug>/manifest.md` (+ `data/` `artifacts/` `runs/`) for any non-trivial task. |
-| `stacked` | Decomposes large changes into a stack of small, reviewable units. |
-| `kagaz` | Editorial/technical document + frontend design (HTML→PDF, slides, reports). |
-| `dak` | Publishes and shares reports / short URLs. |
+| Skill | Invoke | Produces |
+|-------|--------|----------|
+| `manifest` | `/hub:manifest` | Living `tasks/<slug>/manifest.md` (+ `data/` `artifacts/` `runs/`) for any non-trivial task. |
+| `stacked` | `/hub:stacked` | Decomposes large changes into a stack of small, reviewable units. |
+| `kagaz` | `/hub:kagaz` | Editorial/technical document + frontend design (HTML→PDF, slides, reports). |
+| `dak` | `/hub:dak` | Publishes and shares reports / short URLs. |
 
-**Consumer command** — the dashboard that ties it together:
+**Consumer commands** — the dashboard that ties it together:
 
-- **`/hub`** — builds and serves the browsable Hub index (every `.md`/`.html`,
+- **`/hub:serve`** — builds and serves the browsable Hub index (every `.md`/`.html`,
   task, run, artifact, and skill in the current directory) on
-  <http://localhost:8787>, watching for changes. Runs via `uvx --from hubspaces`,
-  so no separate install is required.
+  <http://localhost:8787>, watching for changes.
+- **`/hub:daemon`** — *optional*: run that viewer as a persistent macOS launchd
+  agent (from the same bundled wheel) so it survives logout/reboot. Opt-in only —
+  `install` / `uninstall` / `status`.
+
+> Everything is namespaced by the plugin name (`hub`), so it's `/hub:serve`,
+> `/hub:manifest`, etc. — never a bare `/serve`.
+
+## Offline by design
+
+The plugin ships a **pinned `hubspaces` wheel** under `vendor/` and always runs
+*that* wheel via `uv` (`uv tool run --offline --from vendor/*.whl hub serve`).
+This means:
+
+- **Fully offline from the first run** — nothing is fetched from PyPI, ever.
+- **No version skew** — it never runs a separately-installed `hubspaces`; only
+  ever its own bundled wheel.
+- **Single source of truth** — the engine is authored only in the `hubspaces`
+  package; the plugin carries a frozen build snapshot, not a second copy of the
+  source. CI re-vendors the wheel automatically on every release.
+
+The **only external requirement is `uv`** ([install](https://docs.astral.sh/uv/getting-started/installation/)).
+`uv` provisions an isolated interpreter and environment, so nothing touches the
+user's Python.
 
 ## Install
 
 ```
 /plugin marketplace add auth-02/hub
-/plugin install hub-agent@hub
+/plugin install hub@hub
 ```
 
-Then `/hub` to serve the dashboard, and start any feature with a plan-before-code
-loop so the producer skills scaffold structure Hub picks up automatically.
+Then `/hub:serve` to serve the dashboard, and start any feature with a
+plan-before-code loop so the producer skills scaffold structure Hub picks up
+automatically.
 
 ## Note on hub-core
 

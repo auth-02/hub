@@ -362,6 +362,23 @@ def main() -> None:
              "Safe to re-run on an existing task to add them later.",
     )
 
+    # hub agent {install|uninstall|status} — persistent launchd agent (macOS).
+    # Reusable by both the package launchd script and the plugin daemon script;
+    # only the launcher differs (passed via --exec). See cli/agent.py.
+    agent_p = sub.add_parser("agent", help="Manage a persistent launchd agent (macOS) that runs hub")
+    agent_p.add_argument("action", choices=["install", "uninstall", "status"])
+    agent_p.add_argument("--label", default="com.user.hub", help="launchd label (default: com.user.hub)")
+    agent_p.add_argument("--port", type=int, default=8787, help="Port to serve on (default: 8787)")
+    agent_p.add_argument("--root", default=None, help="WorkingDirectory to serve (default: CWD)")
+    agent_p.add_argument("--exec", dest="exec_prefix", default=None,
+                         help="Launcher command prefix, e.g. 'uv tool run --offline --from <wheel> hub' "
+                              "(default: resolved 'hub')")
+    grp = agent_p.add_mutually_exclusive_group()
+    grp.add_argument("--serve", action="store_true",
+                     help="KeepAlive agent running 'hub serve' (default)")
+    grp.add_argument("--rebuild-interval", dest="rebuild_interval", type=int, metavar="SECS",
+                     help="StartInterval agent that rebuilds the index every SECS")
+
     args, _ = ap.parse_known_args()
 
     if args.cmd == "init":
@@ -373,6 +390,10 @@ def main() -> None:
         return
     if args.cmd == "new" and getattr(args, "kind", None) == "task":
         _cmd_new_task(args.slug, Path.cwd(), getattr(args, "with_dirs", None))
+        return
+    if args.cmd == "agent":
+        from .agent import run as agent_run
+        agent_run(args)
         return
 
     if args.root:

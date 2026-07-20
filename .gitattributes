@@ -1,0 +1,2 @@
+# The vendored plugin wheel is a binary artifact — never diff/merge as text.
+*.whl binary

@@ -66,3 +66,60 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  vendor-plugin-wheel:
+    # After a real release, re-vendor the freshly built wheel into the hub-agent
+    # plugin and open a bump PR, keeping the plugin's bundled engine in lockstep
+    # with PyPI. Uses RELEASE_PAT (not GITHUB_TOKEN) so the PR can be opened.
+    # Only bumps plugin.json (NOT hubspace/__init__.py), so it never re-triggers
+    # release.yml — no release loop.
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.RELEASE_PAT }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Re-vendor wheel + bump plugin version
+        id: vendor
+        run: |
+          set -euo pipefail
+          WHEEL=$(ls dist/hubspaces-*.whl | head -1)
+          VER=$(basename "$WHEEL" | sed -E 's/^hubspaces-([^-]+)-.*/\1/')
+          VENDOR=hubspace/plugin/hub-agent/vendor
+          PJ=hubspace/plugin/hub-agent/.claude-plugin/plugin.json
+          mkdir -p "$VENDOR"
+          rm -f "$VENDOR"/*.whl
+          cp "$WHEEL" "$VENDOR/"
+          sed -i -E '0,/"version":/ s/("version": ")[^"]+(")/\1'"$VER"'\2/' "$PJ"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+      - name: Open bump PR
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          VER="${{ steps.vendor.outputs.version }}"
+          BR="chore/vendor-wheel-$VER"
+          if git diff --quiet; then
+            echo "Vendored wheel already in sync for $VER — nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BR"
+          git add hubspace/plugin/hub-agent/vendor \
+                  hubspace/plugin/hub-agent/.claude-plugin/plugin.json
+          git commit -m "chore(plugin): vendor hubspaces $VER wheel + bump plugin to $VER"
+          git push -f origin "$BR"
+          if ! gh pr create --base main --head "$BR" \
+                --title "chore(plugin): re-vendor hubspaces $VER wheel" \
+                --body "Automated: bundles the freshly released \`hubspaces-$VER\` wheel into \`hub-agent/vendor/\` and bumps the plugin version to \`$VER\`. Triggered by the \`$VER\` release."; then
+            echo "PR already exists for $BR — branch updated."
+          fi
