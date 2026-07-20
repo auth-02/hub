@@ -4,7 +4,7 @@
 
 # Hub
 
-**Point it at a folder. Get every `.md` and `.html` inside as one searchable, previewable page.**
+**Your agent produces. Hub links it. You trace it.**
 
 [![PyPI](https://img.shields.io/pypi/v/hubspaces?cacheSeconds=600)](https://pypi.org/project/hubspaces/)
 [![Python](https://img.shields.io/pypi/pyversions/hubspaces?cacheSeconds=600)](https://pypi.org/project/hubspaces/)
@@ -15,7 +15,13 @@
 
 </div>
 
-Hub scans a directory tree, indexes every document into SQLite with full-text search and task lineage, and serves a fast local browser at `http://localhost:8787`. No npm. No framework. No runtime dependencies — pure stdlib Python (3.11+).
+Point it at a folder — every task, decision, run, and diagram becomes one searchable, traceable page. The manifest records *what you decided, what the agent decided, what it found, and the plan*; lineage makes that record navigable, so nothing your agent makes floats free. Most AI-dev tools market the generation — Hub keeps the **record of why**.
+
+Under the hood: Hub scans a directory tree, indexes every document into SQLite with full-text search and task lineage, and serves a fast local browser at `http://localhost:8787`. No npm. No framework. No runtime dependencies — pure stdlib Python (3.11+); nothing leaves your machine.
+
+**Two ways in:**
+- **Package (`hubspaces`)** — Hub, standalone. `pip install`, point at any folder.
+- **Plugin (`hub`)** — batteries-included for Claude Code: producer skills *and* the full engine bundled in, working offline the moment you install it. See [the plugin](hubspace/plugin/hub-agent/README.md).
 
 ---
 
@@ -73,10 +79,11 @@ What you'll see:
 
 ## Features
 
+- **Lineage trace** — every run, artifact, prompt, and diagram traces back to the task and the decision that produced it. Click any row for a live preview with a `// trace` panel; nothing your agent makes floats free.
+- **Diagrams in place** — create Excalidraw diagrams in the UI, offline. Task diagrams are first-class lineage nodes, badged `DRAW`.
 - **Full-text search** — filter by repo, path, title, and body simultaneously. Implicit AND, `repo:name` prefix supported.
-- **Kind chips** — one-click filters for TASK, RUN, ARTIFACT, CLAUDE, README, DOC, PROMPT. Stack with repo chips and search.
+- **Kind chips** — one-click filters for TASK, RUN, ARTIFACT, DRAW, CLAUDE, README, DOC, PROMPT, DATA, SKILL. Stack with repo chips and search.
 - **Task status badges** — every task manifest shows a clickable status pill. Cycles `ongoing → completed → paused`. Persisted — survives DB resets, scan-root changes, and git branch switches.
-- **Split-pane preview** — click any row for a live rendered preview with lineage trace. No page navigation needed.
 - **Hub Timeline** — drawer (`Ctrl+T`) with a synthesised daily summary grouped by *today / yesterday / this week*, pulling from the activity log + `git log` across all repos.
 - **Activity view** — a main view listing recent file events across the scan root: what changed, which task, how long ago.
 - **Auto-rebuild** — file watcher triggers a rebuild within ~3 s of any change in the scan root.
@@ -179,6 +186,25 @@ Reload after upgrading:
 launchctl kickstart -k gui/$(id -u)/com.user.hub-server
 launchctl kickstart -k gui/$(id -u)/com.user.hub
 ```
+
+---
+
+## Roadmap
+
+*Direction, not commitment.* Everything below feeds or exposes the **lineage
+graph** — the one asset the whole product sits on:
+
+1. **Comments** — notes on a manifest or artifact the agent can read and close the
+   loop on; human ↔ agent, in one place.
+2. **Sharing** — one-click publish of an asset, or a whole task with its full
+   lineage, to a review link.
+3. **Hub Spec** — the producer contract, published and versioned: emit this
+   structure and *any* agent or tool works with Hub.
+4. **Agent retrieval (MCP)** — a surface so coding agents find the right task and
+   its context themselves.
+
+Arc: **close the loop in place → share it out → make the contract open → let
+agents query it themselves.**
 
 ---
 

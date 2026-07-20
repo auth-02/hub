@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "hubspaces"
 dynamic = ["version"]
-description = "Local markdown/HTML browser with split-pane preview, full-text search, and a task board — stdlib-only."
+description = "A local, dependency-free ledger for agent-driven work: point it at a folder and every task, decision, run, and diagram becomes one searchable, traceable page. Stdlib-only Python."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Atharva" }]
-keywords = ["markdown", "documentation", "browser", "full-text-search", "static-site", "notes"]
+keywords = ["claude-code", "agents", "ai", "local-first", "lineage", "task-tracking", "markdown", "documentation", "full-text-search"]
 dependencies = []
 classifiers = [
     "Development Status :: 4 - Beta",

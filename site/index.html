@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Hub — every .md & .html, one page</title>
-<meta name="description" content="Point Hub at a folder and get every Markdown and HTML file inside as one searchable, previewable page. Stdlib-only Python.">
+<title>Hub — your agent produces, Hub links it, you trace it</title>
+<meta name="description" content="A local, dependency-free ledger for agent-driven work. Point Hub at a folder and every task, decision, run, and diagram becomes one searchable, traceable page. Stdlib-only Python; nothing leaves your machine.">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -69,17 +69,20 @@
 <body>
 <div class="wrap">
   <img class="logo" src="favicon.svg" alt="Hub logo" width="52" height="52">
-  <p class="kicker">// hub directory</p>
-  <h1><em>Hub:</em> Every <em>.md</em> &amp; <em>.html</em>, one page.</h1>
-  <p class="lede">Point Hub at a folder. It indexes every Markdown and HTML file inside into
-    full-text search with task lineage, and serves a fast local browser — split-pane preview,
-    kind filters, activity view, timeline. No npm. No framework. Pure stdlib Python.</p>
+  <p class="kicker">// a record of why, for agent-driven work</p>
+  <h1>Your agent produces. <em>Hub</em> links it. You trace it.</h1>
+  <p class="lede">Point Hub at a folder — every task, decision, run, and diagram becomes one
+    searchable, traceable page. The manifest records what you decided, what the agent decided,
+    what it found, and the plan; lineage makes that record navigable, so nothing your agent
+    makes floats free. No npm. No framework. Pure stdlib Python — nothing leaves your machine.</p>
 
   <div class="cta">
     <a class="btn primary" href="https://pypi.org/project/hubspaces/" target="_blank" rel="noopener">pip install hubspaces</a>
     <a class="btn" href="https://github.com/auth-02/hub" target="_blank" rel="noopener">View on GitHub →</a>
   </div>
-  <p class="note">Then <code>cd</code> into any project and run <code>hub serve</code> — or try it instantly: <code>hub serve --demo</code>.</p>
+  <p class="note"><b>Two ways in:</b> <code>pip install hubspaces</code> for the standalone package,
+    or <code>/plugin install hub@hub</code> for the batteries-included Claude Code plugin (engine
+    bundled, works offline). Then <code>hub serve</code> — or try it instantly: <code>hub serve --demo</code>.</p>
 
   <div class="shot"><img src="banner.png" alt="Hub index — every document in one searchable page" loading="lazy"></div>
 
@@ -87,22 +90,26 @@
 
   <h2>// what it does</h2>
   <ul class="feat">
+    <li><b>Lineage trace</b> — every run, artifact, prompt, and diagram traces back to the task and the decision that produced it, via a <code>// trace</code> panel.</li>
+    <li><b>Diagrams in place</b> — create Excalidraw diagrams in the UI, offline; task diagrams are first-class lineage nodes.</li>
     <li><b>Full-text search</b> across title, body, path, and repo — implicit AND, <code>repo:name</code> prefix.</li>
-    <li><b>Split-pane preview</b> with a <code>// trace</code> panel linking runs, artifacts, and the parent task.</li>
     <li><b>Task board &amp; status badges</b> — click to cycle <code>ongoing → completed → paused</code>, persisted.</li>
-    <li><b>Timeline drawer &amp; activity view</b> — what changed, which task, when; daily summaries pulled from git.</li>
+    <li><b>Timeline</b> — what changed, which task, when; daily summaries pulled from git.</li>
     <li><b>Auto-rebuild</b> — a file watcher refreshes the index within ~3 s of any change.</li>
   </ul>
 
   <hr>
 
   <h2>// get started</h2>
-  <pre><span class="c"># install (isolated)</span>
+  <pre><span class="c"># package — standalone, isolated install</span>
 pipx install hubspaces
-
-<span class="c"># browse any folder</span>
 cd ~/my-project
-hub serve             <span class="c"># http://localhost:8787, rebuilds on change</span></pre>
+hub serve             <span class="c"># http://localhost:8787, rebuilds on change</span>
+
+<span class="c"># plugin — batteries-included for Claude Code (engine bundled, offline)</span>
+/plugin marketplace add auth-02/hub
+/plugin install hub@hub
+/hub:serve            <span class="c"># producer skills + the viewer, one install</span></pre>
   <p class="note">Configure with a <code>hub.toml</code> (<code>hub init</code> scaffolds one): scan root, port, excluded dirs, default view.</p>
 
   <footer>
