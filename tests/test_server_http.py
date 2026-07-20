@@ -251,6 +251,63 @@ class TestServerHttp(unittest.TestCase):
         status, _ = _post(self._port, "/draw/save", payload)
         self.assertEqual(status, 400)
 
+    def test_draw_save_into_dir_creates_nested_file(self):
+        import json
+        payload = json.dumps({
+            "rel": None, "dir": "tasks/my-task/draws", "scene": {"elements": []},
+        }).encode("utf-8")
+        status, body = _post(self._port, "/draw/save", payload)
+        self.assertEqual(status, 200)
+        out = json.loads(body)
+        self.assertTrue(out["rel"].startswith("tasks/my-task/draws/"))
+        self.assertTrue((Path(self._scan_root) / out["rel"]).exists())
+
+    def test_draw_save_dir_rejects_traversal(self):
+        import json
+        payload = json.dumps({
+            "rel": None, "dir": "../escape", "scene": {"elements": []},
+        }).encode("utf-8")
+        status, _ = _post(self._port, "/draw/save", payload)
+        self.assertEqual(status, 403)
+
+    def test_task_manifest_page_has_new_draw_menu_item(self):
+        # A manifest.md under tasks/<slug>/ gets a "New draw" item in the ⋯ menu.
+        d = Path(self._scan_root) / "tasks" / "demo-task"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "manifest.md").write_text("# Demo Task\n", encoding="utf-8")
+        status, body = _get(self._port, f"{d}/manifest.md")
+        self.assertEqual(status, 200)
+        self.assertIn(b'<details class="doc-menu">', body)
+        self.assertIn(b"/draw?dir=tasks/demo-task/draws", body)
+        self.assertIn(b'class="pencil"', body)
+
+    def test_plain_md_has_menu_but_no_new_draw(self):
+        # Every doc page has the ⋯ menu (Save as PDF); only task manifests add New draw.
+        status, body = _get(self._port, f"{self._scan_root}/hello.md")
+        if status == 200:
+            self.assertIn(b'<details class="doc-menu">', body)
+            self.assertNotIn(b"/draw?dir=", body)
+
+    def test_draw_save_with_name(self):
+        import json
+        payload = json.dumps({
+            "rel": None, "name": "My Architecture!", "scene": {"elements": []},
+        }).encode("utf-8")
+        status, body = _post(self._port, "/draw/save", payload)
+        self.assertEqual(status, 200)
+        out = json.loads(body)
+        # sanitized: punctuation dropped, spaces kept
+        self.assertEqual(out["rel"], "My Architecture.excalidraw")
+        self.assertTrue((Path(self._scan_root) / out["rel"]).exists())
+
+    def test_draw_save_name_collision_gets_suffix(self):
+        import json
+        (Path(self._scan_root) / "dup.excalidraw").write_text("{}", encoding="utf-8")
+        payload = json.dumps({"rel": None, "name": "dup", "scene": {"elements": []}}).encode("utf-8")
+        status, body = _post(self._port, "/draw/save", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)["rel"], "dup-2.excalidraw")
+
 
 if __name__ == "__main__":
     unittest.main()

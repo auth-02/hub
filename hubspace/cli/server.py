@@ -37,7 +37,7 @@ from ..utils.text import esc_html, slugify
 from ..render import (
     _render_md, _render_csv, _render_xlsx, _inject_into_html,
     _render_lineage_html, _favicon_href, _CSS, _DOC_CHROME_CSS, _PAGE, _add_outline,
-    draw_page_html,
+    draw_page_html, doc_menu, DOC_PDF_ITEM,
 )
 
 
@@ -82,6 +82,23 @@ def _resolve_scan_root() -> Path:
 
 SCAN_ROOT = _resolve_scan_root()
 _active_root: Path = SCAN_ROOT  # updated by _set_root(); used by rebuild + watcher
+
+
+def _safe_draw_stem(name) -> str:
+    """Sanitize a user-supplied diagram name into a safe filename stem.
+
+    Drops path separators and a trailing ``.excalidraw``, keeps only
+    alphanumerics/space/dash/underscore, caps length, and falls back to a
+    timestamp slug when the result is empty.
+    """
+    if name:
+        name = str(name).strip()
+        if name.lower().endswith(".excalidraw"):
+            name = name[: -len(".excalidraw")]
+        name = "".join(c for c in name if c.isalnum() or c in " -_").strip()[:80]
+        if name:
+            return name
+    return "drawing-" + time.strftime("%Y%m%d-%H%M%S")
 
 
 class HubHandler(http.server.BaseHTTPRequestHandler):
@@ -198,7 +215,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", 0))
             try:
                 body = json.loads(self.rfile.read(length).decode("utf-8"))
-                self._save_draw(body.get("rel"), body.get("scene"))
+                self._save_draw(body.get("rel"), body.get("scene"), body.get("dir"), body.get("name"))
             except (ValueError, KeyError) as e:
                 self._send(400, "text/plain", str(e).encode())
         elif url_path == "/_task-status":
@@ -247,16 +264,21 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         else:
             self._send(500, "text/plain", result.stderr.encode())
 
-    def _save_draw(self, rel, scene) -> None:
+    def _save_draw(self, rel, scene, dir_=None, name=None) -> None:
         """Persist an Excalidraw scene into the vault.
 
-        rel   — vault-relative target path (falsy → a new file at the vault root,
-                slug from the current time). Must stay inside the active scan root
-                and carry the .excalidraw extension.
+        rel   — vault-relative path of an existing file to overwrite (falsy → a new
+                file). Must carry the .excalidraw ext.
         scene — the scene object (JSON-serializable) to write.
+        dir_  — for a NEW file, the vault-relative directory to create it in (e.g.
+                a task's ``tasks/<slug>/draws``). Falsy → the scan root. Created if
+                missing. Ignored when ``rel`` is given.
+        name  — for a NEW file, the user-chosen base name (sanitized to a safe
+                filename; falls back to a timestamp slug). A colliding name gets a
+                ``-N`` suffix so we never clobber an existing diagram.
 
-        The file lands in the scan root, so the watcher reindexes it on its next
-        tick — no explicit rebuild here (keeps saves snappy under rapid ⌘S).
+        Everything must stay inside the active scan root. The file lands there, so
+        the watcher reindexes it on its next tick — no explicit rebuild here.
         """
         if scene is None:
             self._send(400, "text/plain", b"missing scene")
@@ -271,8 +293,21 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 self._send(403, "text/plain", b"Forbidden")
                 return
         else:
-            slug = "drawing-" + time.strftime("%Y%m%d-%H%M%S")
-            target = (root / f"{slug}.excalidraw").resolve()
+            base = root
+            if dir_:
+                base = (root / dir_).resolve()
+                if not is_within(base, root):
+                    self._send(403, "text/plain", b"Forbidden")
+                    return
+            stem = _safe_draw_stem(name)
+            target = (base / f"{stem}.excalidraw").resolve()
+            n = 2
+            while target.exists():  # don't overwrite a different diagram
+                target = (base / f"{stem}-{n}.excalidraw").resolve()
+                n += 1
+            if not is_within(target, root):
+                self._send(403, "text/plain", b"Forbidden")
+                return
         try:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(json.dumps(scene), encoding="utf-8")
@@ -362,6 +397,25 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 body = body[:m.end()] + lineage_html + body[m.end():]
             else:
                 body = lineage_html + body
+
+        # Floating ⋯ actions menu (top-right). Task manifests also get a "New draw"
+        # item that opens a blank canvas scoped to this task's draws/ folder.
+        menu_items = []
+        if path.name.lower() == "manifest.md" and path.parent.parent.name == "tasks":
+            try:
+                draws_rel = (path.parent / "draws").resolve().relative_to(
+                    _active_root.resolve()
+                ).as_posix()
+                href = "/draw?dir=" + quote(draws_rel, safe="/")
+                menu_items.append(
+                    f'<a class="doc-menu-item" href="{esc_html(href)}" target="_blank" '
+                    f'rel="noopener" title="New Excalidraw diagram in this task">'
+                    f'<span class="pencil">✏︎</span> New draw</a>'
+                )
+            except ValueError:
+                pass
+        menu_items.append(DOC_PDF_ITEM)
+        body = doc_menu(menu_items) + body
 
         html = _PAGE.format(
             title=title,

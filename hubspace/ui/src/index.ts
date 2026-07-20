@@ -253,8 +253,8 @@ document.addEventListener('keydown',e=>{
 function buildLineage(links){
   const groups={};
   links.forEach(l=>{(groups[l.r]=groups[l.r]||[]).push(l);});
-  const ORDER=['belongs_to_task','belongs_to_skill','task_has_run','task_has_artifact','task_has_data','task_has_prompt','task_has_doc','skill_has_ref'];
-  const LABELS={'belongs_to_task':'↑ task','belongs_to_skill':'↑ skill','task_has_run':'runs','task_has_artifact':'artifacts','task_has_data':'data','task_has_prompt':'prompts','task_has_doc':'docs','skill_has_ref':'references'};
+  const ORDER=['belongs_to_task','belongs_to_skill','task_has_run','task_has_artifact','task_has_draw','task_has_data','task_has_prompt','task_has_doc','skill_has_ref'];
+  const LABELS={'belongs_to_task':'↑ task','belongs_to_skill':'↑ skill','task_has_run':'runs','task_has_artifact':'artifacts','task_has_draw':'draws','task_has_data':'data','task_has_prompt':'prompts','task_has_doc':'docs','skill_has_ref':'references'};
   let h='<div class="ln-label">// trace</div>';
   ORDER.forEach(r=>{
     if(!groups[r]) return;
@@ -595,8 +595,8 @@ function openTrace(t){
   // Lineage grid from LINEAGE_DATA keyed by manifest abs
   const lin=document.getElementById('trace-lineage');
   const links=LINEAGE_DATA[t.abs]||[];
-  const LIN_ORDER=['task_has_run','task_has_artifact','task_has_prompt','task_has_data','task_has_doc'];
-  const LIN_LABELS={'task_has_run':'Runs','task_has_artifact':'Artifacts','task_has_prompt':'Prompts','task_has_data':'Data','task_has_doc':'Docs'};
+  const LIN_ORDER=['task_has_run','task_has_artifact','task_has_draw','task_has_prompt','task_has_data','task_has_doc'];
+  const LIN_LABELS={'task_has_run':'Runs','task_has_artifact':'Artifacts','task_has_draw':'Draws','task_has_prompt':'Prompts','task_has_data':'Data','task_has_doc':'Docs'};
   const groups={};
   links.forEach(l=>{(groups[l.r]=groups[l.r]||[]).push(l);});
   let linH='';

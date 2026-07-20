@@ -20,6 +20,10 @@ import { createRoot } from "react-dom/client";
 type DrawState = { rel: string | null; data: any | null };
 const STATE: DrawState = (window as any).DRAW_STATE || { rel: null, data: null };
 
+// Optional target directory for a NEW diagram (e.g. a task's tasks/<slug>/draws),
+// passed as /draw?dir=... by the manifest page's "New draw" button.
+const DIR: string | null = new URLSearchParams(window.location.search).get("dir");
+
 // Lazy so the ~1 MB Excalidraw bundle is a separate chunk, deferred until paint.
 const Excalidraw = lazy(() =>
   import("@excalidraw/excalidraw").then((m) => ({ default: m.Excalidraw })),
@@ -29,8 +33,13 @@ function App() {
   const apiRef = useRef<any>(null);
   const relRef = useRef<string | null>(STATE.rel);
   const [status, setStatus] = useState<string>("");
+  const [naming, setNaming] = useState(false);
+  const [nameVal, setNameVal] = useState("");
 
-  const save = useCallback(async () => {
+  // Serialize the current scene and POST it. `name` is only used for a brand-new
+  // diagram (the server slugifies it into <name>.excalidraw); existing files save
+  // in place via their rel.
+  const save = useCallback(async (name?: string) => {
     const api = apiRef.current;
     if (!api) return;
     setStatus("saving…");
@@ -45,7 +54,12 @@ function App() {
       const res = await fetch("/draw/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rel: relRef.current, scene: JSON.parse(scene) }),
+        body: JSON.stringify({
+          rel: relRef.current,
+          dir: relRef.current ? null : DIR, // only for a brand-new diagram
+          name: relRef.current ? null : name || null,
+          scene: JSON.parse(scene),
+        }),
       });
       if (!res.ok) throw new Error(String(res.status));
       const out = await res.json();
@@ -66,18 +80,25 @@ function App() {
   // ⌘S / Ctrl+S saves into the vault. Intercept on window in the CAPTURE phase so
   // it fires before Excalidraw's own document-level handler — otherwise Excalidraw
   // also runs its "Save to disk" action and the browser's native file picker pops up.
+  // A brand-new diagram first asks for a name (modal); existing files save in place.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
         e.stopPropagation();
         e.stopImmediatePropagation();
-        void save();
+        if (relRef.current) void save();
+        else setNaming(true);
       }
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [save]);
+
+  const confirmName = useCallback(() => {
+    setNaming(false);
+    void save(nameVal.trim() || undefined);
+  }, [nameVal, save]);
 
   return (
     <div style={{ position: "fixed", inset: 0 }}>
@@ -85,6 +106,35 @@ function App() {
         excalidrawAPI={(api: any) => (apiRef.current = api)}
         initialData={STATE.data || undefined}
       />
+      {naming && (
+        <div
+          className="draw-modal"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") confirmName();
+            else if (e.key === "Escape") setNaming(false);
+          }}
+        >
+          <div className="draw-modal-card">
+            <div className="draw-modal-kicker">// SAVE DIAGRAM</div>
+            <div className="draw-modal-title">Name this diagram.</div>
+            <div className="draw-modal-row">
+              <input
+                autoFocus
+                type="text"
+                placeholder="architecture"
+                spellCheck={false}
+                value={nameVal}
+                onChange={(e) => setNameVal(e.target.value)}
+              />
+              <span className="draw-modal-ext">.excalidraw</span>
+            </div>
+            <div className="draw-modal-actions">
+              <button className="draw-btn" onClick={() => setNaming(false)}>Cancel</button>
+              <button className="draw-btn primary" onClick={confirmName}>Save</button>
+            </div>
+          </div>
+        </div>
+      )}
       {status && (
         <div
           style={{

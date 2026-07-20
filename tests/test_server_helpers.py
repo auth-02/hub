@@ -142,7 +142,9 @@ class TestInjectIntoHtml(unittest.TestCase):
     def test_print_button_injected(self):
         src = "<html><head></head><body></body></html>"
         result = render._inject_into_html(src, "")
-        self.assertIn("doc-print", result)
+        # HTML docs get the ⋯ menu with a Save-as-PDF item.
+        self.assertIn("doc-menu", result)
+        self.assertIn("window.print()", result)
 
 
 class TestRenderMd(unittest.TestCase):
