@@ -9,6 +9,11 @@ __pycache__/
 .hub-server.out
 /tasks/
 
+# Planning/marketing docs stay local, off main. HUB-LAYOUT.md is the exception —
+# it's the producer/consumer contract referenced by scan.py / hub.py / AGENTS.md.
+docs/*
+!docs/HUB-LAYOUT.md
+
 # uv regenerates this on demand; the project is zero-dependency (stdlib-only)
 uv.lock
 
