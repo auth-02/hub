@@ -46,23 +46,30 @@ The differentiated structure. A task is a directory under `<repo>/tasks/<slug>/`
 │       └── <name>.md    ← RUN
 ├── artifacts/           (optional, created on demand)
 │   └── <name>.{md,html} ← ARTIFACT
-├── data/                (optional, created on demand)
-│   └── <name>.{xlsx,csv,json,…}  ← DATA
-└── comments/            (optional, created on demand)
-    └── <date>-<slug>.md ← NOTE
+├── draws/               (optional, created on demand)
+│   └── <name>.excalidraw ← DRAW
+├── comments/            (optional, created on demand)
+│   └── <date>-<slug>.md ← NOTE
+└── data/                (optional, created on demand)
+    └── <name>.{xlsx,csv,json,…}  ← DATA
 ```
 
 - `<slug>` is `kebab-case`. It is the task's stable id.
 - `manifest.md` is what makes the directory a task, and is the **only** thing a
   producer must create. Without it, the directory's files are still indexed but
   show **no trace** (see §6, orphans).
-- The `runs/`, `artifacts/`, and `data/` subdirs are **optional and created
-  lazily** — only when a file first needs to land in one. A fresh task is just
-  its `manifest.md`; empty scaffolding directories are noise. Producers must not
-  pre-create them.
+- The `runs/`, `artifacts/`, `draws/`, `comments/`, and `data/` subdirs are
+  **optional and created lazily** — only when a file first needs to land in one.
+  A fresh task is
+  just its `manifest.md`; empty scaffolding directories are noise. Producers must
+  not pre-create them.
 - `runs/` is partitioned by ISO date directories. The run's date comes from the
   directory name, not the file.
-- `artifacts/` and `data/` are flat (one level). Names are free.
+- `artifacts/`, `draws/`, and `data/` are flat (one level). Names are free.
+- `draws/` is the conventional home for a task's `.excalidraw` canvases. Unlike
+  the other subdirs, DRAW is resolved by extension, not by this path (§3), so a
+  `.excalidraw` file anywhere is still a DRAW — `draws/` is where the UI's *New
+  draw* action and the `hub draw` verb put one when scoped to a task.
 - `comments/` holds **notes** — one markdown file per note, `<date>-<slug>.md`,
   flat and created on demand. Each note carries a small front-matter anchor
   (`target:` — the task-relative file it is about, may be `manifest.md`; optional
@@ -84,6 +91,7 @@ Kind is derived purely from path. First match wins, top to bottom:
 
 | Path pattern                              | Kind     |
 | ----------------------------------------- | -------- |
+| `**/*.excalidraw` (by extension, any dir) | DRAW     |
 | `**/CLAUDE.md`                            | CLAUDE   |
 | `**/README.md`                            | README   |
 | `<repo>/tasks/<slug>/manifest.md`         | TASK     |
@@ -95,8 +103,10 @@ Kind is derived purely from path. First match wins, top to bottom:
 | `<repo>/docs/**.md`                       | DOC      |
 | any other `.md` / `.html`                 | MD       |
 
-`MD` is the catch-all and is never an error — a repo of loose notes is a valid,
-fully searchable hub.
+`DRAW` is resolved by the `.excalidraw` extension and so matches first, before
+any name- or path-based rule — an Excalidraw canvas is a DRAW wherever it lives
+(its conventional home is a task's `draws/`, §2). `MD` is the catch-all and is
+never an error — a repo of loose notes is a valid, fully searchable hub.
 
 PROMPT is recognized only where a `prompts/` folder already exists; nothing in
 hub or `hub new` creates one (see §2).
@@ -212,9 +222,10 @@ Producers must not use these for content; hub owns or ignores them:
 - `hub.toml`, `.scan_root`, `.hub.log` — hub config/state.
 - The hub state directory (`$XDG_STATE_HOME/hub` or `~/.local/state/hub`) — never
   inside the scan root.
-- `manifest.md`, `runs/`, `artifacts/`, `prompts/`, `data/`, `comments/` —
-  structural, as defined above. (`prompts/` is reserved when present, but never
-  created by hub; `comments/` is created on demand by `hub note`.)
+- `manifest.md`, `runs/`, `artifacts/`, `draws/`, `prompts/`, `data/`,
+  `comments/` — structural, as defined above. (`prompts/` is reserved when
+  present, but never created by hub; `comments/` is created on demand by
+  `hub note`.)
 
 ---
 
