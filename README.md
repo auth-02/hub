@@ -85,7 +85,6 @@ What you'll see:
 - **Kind chips** — one-click filters for TASK, RUN, ARTIFACT, DRAW, CLAUDE, README, DOC, PROMPT, DATA, SKILL. Stack with repo chips and search.
 - **Task status badges** — every task manifest shows a clickable status pill. Cycles `ongoing → completed → paused`. Persisted — survives DB resets, scan-root changes, and git branch switches.
 - **Hub Timeline** — drawer (`Ctrl+T`) with a synthesised daily summary grouped by *today / yesterday / this week*, pulling from the activity log + `git log` across all repos.
-- **Activity view** — a main view listing recent file events across the scan root: what changed, which task, how long ago.
 - **Auto-rebuild** — file watcher triggers a rebuild within ~3 s of any change in the scan root.
 - **Keyboard-first** — navigate the full list without a mouse.
 
@@ -100,7 +99,7 @@ Everything is optional. Drop a `hub.toml` in the folder you run Hub from (or run
 scan_root    = "."                      # directory to index (default: CWD)
 port         = 8787                      # local server port
 exclude_dirs = ["vendor", "fixtures"]   # extra dirs to skip (added to built-ins)
-default_view = "board"                   # work | list | board | calendar | activity
+default_view = "board"                   # work | list | board | calendar
 ```
 
 Environment variables override the file:
