@@ -337,5 +337,32 @@ class TestCmdNewTask(unittest.TestCase):
         self.assertTrue((d / "manifest.md").exists())
 
 
+class TestRenderTemplate(unittest.TestCase):
+    """S4a — render() fills the template (incl. the task_timeline placeholder)
+    with no str.format KeyError, and bakes the per-task timeline into the page."""
+
+    def test_render_fills_all_placeholders(self):
+        # No missing/extra placeholder blows up str.format(); empty groups render.
+        out = hub.render({})
+        self.assertIn("<!DOCTYPE html>", out)
+        self.assertIn("TASK_TIMELINE_DATA", out)
+
+    def test_task_timeline_placeholder_is_baked(self):
+        payload = ('{"cortex\\tauth-refactor":'
+                   '[{"id":"n1","kind":"task","path":"tasks/auth-refactor/manifest.md",'
+                   '"at":"2026-07-22"}]}')
+        out = hub.render({}, task_timeline_json=payload)
+        self.assertIn("const TASK_TIMELINE_DATA=" + payload, out)
+
+    def test_drawer_chrome_is_gone(self):
+        # The timeline drawer (tl-tab / tl-drawer / feed-drawer) was retired; the
+        # global timeline now mounts at the head of Work.
+        out = hub.render({})
+        for gone in ('id="tl-tab"', 'id="tl-drawer"', 'feed-drawer'):
+            self.assertNotIn(gone, out)
+        self.assertIn('id="tl-panel"', out)
+        self.assertIn('id="hub-timeline"', out)
+
+
 if __name__ == "__main__":
     unittest.main()

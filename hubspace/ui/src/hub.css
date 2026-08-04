@@ -95,15 +95,32 @@ h1 .hub{color:#C15F3C;font-style:italic;}
 footer{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-family:var(--mono);font-size:10px;color:var(--mute);letter-spacing:.1em;}
 .preview-pane{flex:0 0 520px;position:sticky;top:16px;margin-top:18px;height:calc(100vh - 50px);overflow:hidden;display:none;flex-direction:column;background:var(--bg);border:1px solid var(--line);border-top:3px solid var(--accent2);}
 .preview-pane.open{display:flex;}
-.feed-tab{position:fixed;right:0;top:140px;background:var(--accent2);color:#fff;font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;writing-mode:vertical-rl;padding:14px 7px;cursor:pointer;z-index:30;border:none;transition:right .22s ease;}
-.feed-tab.open{right:320px;}
-.feed-drawer{position:fixed;top:0;right:-340px;width:320px;height:100vh;background:var(--bg);border-left:3px solid var(--accent2);box-shadow:-6px 0 28px rgba(0,0,0,.1);display:flex;flex-direction:column;z-index:29;transition:right .22s ease;}
-.feed-drawer.open{right:0;}
-.feed-drawer-header{display:flex;justify-content:space-between;align-items:center;padding:14px 14px 10px;border-bottom:1px solid var(--line);flex-shrink:0;}
-.feed-drawer-title{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);}
-.feed-drawer-close{font-family:var(--mono);font-size:11px;background:none;border:none;cursor:pointer;color:var(--mute);padding:2px 6px;}
-.feed-drawer-close:hover{color:var(--ink);}
-#hub-timeline{flex:1;overflow-y:auto;min-height:0;}
+/* S4a — global timeline lives at the head of Work (drawer retired). */
+.tl-panel{border:1px solid var(--line);border-top:3px solid var(--accent2);background:var(--alt);margin-bottom:26px;}
+.tl-panel-head{display:flex;justify-content:space-between;align-items:center;padding:9px 14px;border-bottom:1px solid var(--line);}
+.tl-panel-title{font-family:var(--mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);}
+.tl-collapse{font-family:var(--mono);font-size:14px;line-height:1;background:none;border:1px solid var(--line);color:var(--mute);cursor:pointer;padding:0 9px;height:22px;}
+.tl-collapse:hover{color:var(--accent2);border-color:var(--accent2);}
+#hub-timeline{max-height:360px;overflow-y:auto;padding:2px 0 6px;}
+.tl-panel-summary{display:none;font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:.05em;padding:11px 14px;}
+.tl-panel.collapsed #hub-timeline{display:none;}
+.tl-panel.collapsed .tl-panel-summary{display:block;}
+/* per-task spine (Trace, scope='task') — same visual language, chronological. */
+.trace-tl-head{display:none;align-items:center;justify-content:space-between;margin:22px 0 8px;}
+.trace-tl-head .trace-section-label{margin:0;}
+.trace-tl-copy{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent2);background:none;border:1px solid var(--line);padding:4px 9px;cursor:pointer;}
+.trace-tl-copy:hover{border-color:var(--accent2);}
+.trace-timeline{border-left:1px solid var(--line);margin:0 0 4px 5px;}
+.tlx-item{display:flex;gap:10px;padding:4px 0 4px 16px;position:relative;}
+.tlx-dot{position:absolute;left:-5px;top:8px;width:9px;height:9px;border-radius:50%;border:2px solid var(--bg);}
+.tlx-author .tlx-dot{background:var(--accent);}
+.tlx-nav .tlx-dot{background:var(--accent2);}
+.tlx-body{flex:1;min-width:0;}
+.tlx-title{font-family:var(--mono);font-size:12px;color:var(--ink);word-break:break-all;}
+.tlx-kind{color:var(--mute);}
+.tlx-author .tlx-kind{color:var(--accent);}
+.tlx-nav .tlx-kind{color:var(--accent2);}
+.tlx-meta{font-family:var(--mono);font-size:9px;color:var(--mute);letter-spacing:.06em;margin-top:1px;}
 .tl-label{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);padding:12px 14px 8px;}
 .tl-period{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);padding:8px 14px 4px;}
 .tl-task{padding:8px 14px;border-bottom:1px solid var(--line);}

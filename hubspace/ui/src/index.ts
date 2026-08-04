@@ -262,38 +262,68 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
 
 function fileHref(abs){return SERVER_ORIGIN?SERVER_ORIGIN+encodeURI(abs):'file://'+encodeURI(abs);}
 
-// ── Workspace Timeline ────────────────────────────────────────────────────
-(function(){
-  const el=document.getElementById('hub-timeline');
+// ── Timeline (ONE renderer, TWO scopes: 'global' | 'task') ─────────────────
+// 1c: the same component renders at the head of Work ("what have I been doing")
+// and inside Trace ("how did this task get here") — differing only by which
+// query feeds it. Authoring kinds (things you create) read oxblood --accent;
+// navigation kinds (structure you move through) read deep-sea --accent2.
+const TL_AUTHOR=new Set(['artifact','run','note','draw','data']);
+const TL_EVENT_LABEL={task:'Task opened',artifact:'Artifact added',run:'Run logged',note:'Note',prompt:'Prompt written',doc:'Doc written',draw:'Diagram',data:'Data added'};
+
+// The 2b timeline nodes for a task, chronological (oldest first = evolution).
+// ISO `at` dates sort lexically, so no Date parsing needed.
+function taskTimelineEvents(t){
+  const nodes=(typeof TASK_TIMELINE_DATA!=='undefined'&&TASK_TIMELINE_DATA[t.rp+'\t'+t.sl])||[];
+  return nodes.slice().sort((a,b)=>(a.at<b.at?-1:a.at>b.at?1:0));
+}
+
+// Global scope: bucket a unix ts into today / yesterday / this-week (or null).
+function tlBucket(ts,now){
+  const todayStart=(()=>{const d=new Date(now*1000);d.setHours(0,0,0,0);return d.getTime()/1000;})();
+  if(ts>=todayStart) return 'today';
+  if(ts>=todayStart-86400) return 'yesterday';
+  if(ts>=todayStart-6*86400) return 'week';
+  return null;
+}
+
+// scope==='global' → renders TIMELINE_DATA into `mount`, returns a one-line
+// summary string. scope==='task' → renders the per-task spine, returns event count.
+function renderTimeline(mount,scope,task){
+  if(!mount) return scope==='task'?0:'';
+  if(scope==='task'){
+    const evs=taskTimelineEvents(task);
+    mount.innerHTML=evs.map(ev=>{
+      const kind=ev.kind||'doc';
+      const label=TL_EVENT_LABEL[kind]||kind.toUpperCase();
+      const name=(ev.path||'').split('/').pop()||label;
+      return `<div class="tlx-item ${TL_AUTHOR.has(kind)?'tlx-author':'tlx-nav'}">
+        <span class="tlx-dot"></span>
+        <div class="tlx-body">
+          <div class="tlx-title"><span class="tlx-kind">${esc(label)}</span> ${esc(name)}</div>
+          <div class="tlx-meta">${esc(ev.at||'')}</div>
+        </div>
+      </div>`;
+    }).join('');
+    return evs.length;
+  }
+  // scope==='global'
   const tasks=TIMELINE_DATA.tasks||[];
   const commits=TIMELINE_DATA.commits||[];
-  if(!tasks.length&&!commits.length){el.innerHTML='';return;}
-
+  if(!tasks.length&&!commits.length){mount.innerHTML='';return '';}
   const now=Date.now()/1000;
-  const todayStart=(()=>{const d=new Date();d.setHours(0,0,0,0);return d.getTime()/1000;})();
-  const yesterdayStart=todayStart-86400;
-  const weekStart=todayStart-6*86400;
-
-  function bucket(ts){
-    if(ts>=todayStart) return 'today';
-    if(ts>=yesterdayStart) return 'yesterday';
-    if(ts>=weekStart) return 'week';
-    return null;
-  }
-
   const grouped={today:[],yesterday:[],week:[]};
-  tasks.forEach(t=>{const b=bucket(t.ts);if(b)grouped[b].push(t);});
-
+  tasks.forEach(t=>{const b=tlBucket(t.ts,now);if(b)grouped[b].push(t);});
   const cIdx={};
+  let commitCount=0;
   commits.forEach(c=>{
-    const b=bucket(c.ts);if(!b)return;
+    const b=tlBucket(c.ts,now);if(!b)return;
+    commitCount++;
     const k=b+':'+c.rp;
     if(!cIdx[k])cIdx[k]=[];
     if(cIdx[k].length<3)cIdx[k].push(c.msg);
   });
-
   function renderTask(t,b){
-    const name=t.sl.replace(/[-_]/g,' ').replace(/^./,c=>c.toUpperCase());
+    const name=tagName(t.sl);
     const bullets=[];
     if(t.manifest)bullets.push(t.manifest>1?`manifest revised ×${t.manifest}`:'manifest revised');
     if(t.runs)bullets.push(t.runs===1?'1 run logged':`${t.runs} runs logged`);
@@ -308,11 +338,10 @@ function fileHref(abs){return SERVER_ORIGIN?SERVER_ORIGIN+encodeURI(abs):'file:/
         <span class="tl-repo">${esc(t.rp)}</span>
         <span class="tl-status ${statusCls}">${esc(t.status)}</span>
       </div>
-      ${bullets.length?`<ul class="tl-bullets">${bullets.map(b=>`<li class="tl-bullet">${esc(b)}</li>`).join('')}</ul>`:''}
+      ${bullets.length?`<ul class="tl-bullets">${bullets.map(x=>`<li class="tl-bullet">${esc(x)}</li>`).join('')}</ul>`:''}
       ${repoCommits.map(m=>`<div class="tl-commit">${esc(m)}</div>`).join('')}
     </div>`;
   }
-
   const LABELS={today:'What have I been working on?',yesterday:'What did I work on yesterday?',week:'What did I work on this week?'};
   let h='';
   ['today','yesterday','week'].forEach(b=>{
@@ -320,22 +349,41 @@ function fileHref(abs){return SERVER_ORIGIN?SERVER_ORIGIN+encodeURI(abs):'file:/
     h+=`<div class="tl-period">${LABELS[b]}</div>`;
     h+=grouped[b].map(t=>renderTask(t,b)).join('');
   });
-  el.innerHTML=h;
-})();
+  mount.innerHTML=h;
+  const taskCount=grouped.today.length+grouped.yesterday.length+grouped.week.length;
+  const parts=[];
+  if(taskCount)parts.push(`${taskCount} task${taskCount>1?'s':''} active`);
+  if(commitCount)parts.push(`${commitCount} commit${commitCount>1?'s':''}`);
+  return parts.length?parts.join(' · ')+' this week':'';
+}
 
-// ── Timeline drawer ───────────────────────────────────────────────────────
+// ── Head-of-Work timeline: render + collapse (persisted) ───────────────────
 (function(){
-  const drawer=document.getElementById('tl-drawer');
-  const tab=document.getElementById('tl-tab');
-  function openTl(){drawer.classList.add('open');tab.classList.add('open');tab.textContent='‹';}
-  function closeTl(){drawer.classList.remove('open');tab.classList.remove('open');tab.textContent='// timeline';}
-  window.closeTl=closeTl;
-  tab.addEventListener('click',()=>drawer.classList.contains('open')?closeTl():openTl());
-  document.getElementById('tl-close').addEventListener('click',closeTl);
-  document.addEventListener('keydown',e=>{
-    if((e.ctrlKey||e.metaKey)&&e.key==='t'){e.preventDefault();drawer.classList.contains('open')?closeTl():openTl();}
-    else if(e.key==='Escape'&&drawer.classList.contains('open'))closeTl();
-  });
+  const panel=document.getElementById('tl-panel');
+  const mount=document.getElementById('hub-timeline');
+  const summaryEl=document.getElementById('tl-panel-summary');
+  const btn=document.getElementById('tl-collapse');
+  if(!panel||!mount) return;
+  const summary=renderTimeline(mount,'global');
+  if(!summary){panel.style.display='none';return;}  // empty → no panel at all
+  summaryEl.textContent=summary;
+  // Always-on for a new workspace, then remember the user's choice.
+  const KEY='hub_tl_collapsed';
+  let collapsed=false;
+  try{collapsed=localStorage.getItem(KEY)==='1';}catch(_){}
+  function apply(){
+    panel.classList.toggle('collapsed',collapsed);
+    btn.textContent=collapsed?'+':'–';
+    btn.title=(collapsed?'expand':'collapse')+' timeline (y)';
+  }
+  function toggle(){
+    collapsed=!collapsed;
+    try{localStorage.setItem(KEY,collapsed?'1':'0');}catch(_){}
+    apply();
+  }
+  apply();
+  btn.addEventListener('click',toggle);
+  window._toggleTimeline=toggle;  // wired to the `y` hotkey
 })();
 
 // ── Task Board (kanban) ───────────────────────────────────────────────────
@@ -706,6 +754,28 @@ function openTrace(t){
     linH+='</div>';
   });
   lin.innerHTML=linH||'<div class="tl-lbl" style="color:var(--mute)">—</div><div class="tl-files" style="padding:12px 0 12px 16px;border-left:1px solid var(--line);color:var(--mute);font-family:var(--mono);font-size:11px">no children indexed yet</div>';
+
+  // Per-task timeline spine — "how did this task get here" (1c). Same renderer
+  // as the head-of-Work timeline, scope='task'. NOTE events (S3b comments/) are
+  // included because they carry a task_slug and flow through query.timeline.
+  const tlHead=document.getElementById('trace-tl-head');
+  const tlLabel=document.getElementById('trace-tl-label');
+  const n=renderTimeline(document.getElementById('trace-timeline'),'task',t);
+  if(n){
+    tlLabel.textContent=`// how this evolved · ${n} event${n>1?'s':''}`;
+    tlHead.style.display='flex';
+  } else {
+    tlHead.style.display='none';
+  }
+  document.getElementById('trace-tl-copy').onclick=()=>{
+    const evs=taskTimelineEvents(t);
+    const md=`# How "${tagName(t.sl)}" evolved\n\n`+evs.map(ev=>{
+      const label=TL_EVENT_LABEL[ev.kind||'doc']||(ev.kind||'').toUpperCase();
+      const name=(ev.path||'').split('/').pop()||'';
+      return `- ${ev.at||''} · ${label} · ${name}`;
+    }).join('\n')+'\n';
+    copy(md,'timeline copied as markdown');
+  };
 
   const actionsEl=document.getElementById('trace-actions');
   actionsEl.innerHTML='';
@@ -1338,7 +1408,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     if(k==='n'){e.preventDefault();openPalette('');openNewTask('');}
     else if(k==='c'){e.preventDefault();openNewNote(null);}
     else if(e.key==='?'){e.preventDefault();help.classList.add('show');}
-    else if(k==='y'){e.preventDefault();document.getElementById('tl-tab').click();}
+    else if(k==='y'){e.preventDefault();if(window._toggleTimeline)window._toggleTimeline();}
     else if('1234'.includes(e.key)&&window._setView){
       e.preventDefault();window._setView(['work','list','board','calendar'][+e.key-1]);}
   });

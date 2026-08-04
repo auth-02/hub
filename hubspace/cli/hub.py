@@ -29,6 +29,7 @@ from .. import __version__
 from ..core import config
 from ..core import db
 from ..core import metadata
+from ..core import query
 from ..core.scan import _included, _meta
 from ..utils.paths import env_path
 from ..utils.text import relative_time
@@ -160,7 +161,7 @@ def _first_run_html(root: Path) -> str:
     )
 
 
-def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]", timeline_json: str = "{}", tasks_json: str = "[]") -> str:
+def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]", timeline_json: str = "{}", tasks_json: str = "[]", task_timeline_json: str = "{}") -> str:
     total     = sum(len(v) for v in groups.values())
     md_total  = sum(1 for v in groups.values() for f in v if f["ext"] == "md")
     html_total = total - md_total
@@ -234,6 +235,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         activity_json=activity_json,
         timeline_json=timeline_json,
         tasks_json=tasks_json,
+        task_timeline_json=task_timeline_json,
         server_origin_json=json.dumps(_SERVER_ORIGIN),
         default_view_json=json.dumps(DEFAULT_VIEW),
         upload_exts_json=json.dumps(sorted(UPLOAD_EXTS)),
@@ -554,6 +556,15 @@ def main() -> None:
     for ot in orphan_tasks:
         if (ot["sl"], ot["rp"]) not in existing_keys:
             all_tasks.append(ot)
+
+    # S4a — per-task timeline (the "how this evolved" spine in Trace). Reuse the
+    # 2b contract (query.timeline) so the client renders already-indexed lineage
+    # with no new endpoint. Keyed by "<repo>\t<slug>" for O(1) client lookup.
+    task_timelines: dict = {}
+    for t in all_tasks:
+        nodes = query.timeline(conn, t["sl"], repo=t["rp"]).get("nodes", [])
+        if nodes:
+            task_timelines[f'{t["rp"]}\t{t["sl"]}'] = nodes
     conn.close()
 
     for t in all_tasks:
@@ -569,9 +580,10 @@ def main() -> None:
         {"tasks": timeline_tasks, "commits": git_commits},
         separators=(",", ":"),
     )
+    task_timeline_json = json.dumps(task_timelines, separators=(",", ":"))
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(render(groups, fts_json, lineage_json, task_status_json, activity_json, timeline_json, tasks_json), encoding="utf-8")
+    OUTPUT.write_text(render(groups, fts_json, lineage_json, task_status_json, activity_json, timeline_json, tasks_json, task_timeline_json), encoding="utf-8")
     total = sum(len(v) for v in groups.values())
     log(f"[hub] scanned {ROOT} -> {OUTPUT} ({total} files, {len(groups)} groups, {len(all_tasks)} tasks)")
 

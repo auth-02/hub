@@ -56,6 +56,14 @@
   </aside>
 </div>
 <div id="work-view">
+  <section class="tl-panel" id="tl-panel">
+    <div class="tl-panel-head">
+      <span class="tl-panel-title">// timeline</span>
+      <button class="tl-collapse" id="tl-collapse" title="collapse / expand (y)">–</button>
+    </div>
+    <div id="hub-timeline"></div>
+    <div class="tl-panel-summary" id="tl-panel-summary"></div>
+  </section>
   <div class="stat-strip" id="stat-strip"></div>
   <div id="task-rows"></div>
   <div id="loose-section"></div>
@@ -95,17 +103,14 @@
     <ul class="trace-plan" id="trace-plan"></ul>
     <div class="trace-section-label" id="trace-decisions-label" style="display:none">// decisions</div>
     <ul class="trace-decisions" id="trace-decisions"></ul>
+    <div class="trace-tl-head" id="trace-tl-head" style="display:none">
+      <span class="trace-section-label" id="trace-tl-label"></span>
+      <button class="trace-tl-copy" id="trace-tl-copy" type="button">Copy as markdown</button>
+    </div>
+    <div class="trace-timeline" id="trace-timeline"></div>
     <div class="trace-lineage" id="trace-lineage"></div>
     <div class="trace-actions" id="trace-actions"></div>
   </div>
-</div>
-<button class="feed-tab" id="tl-tab">// timeline</button>
-<div class="feed-drawer" id="tl-drawer">
-  <div class="feed-drawer-header">
-    <span class="feed-drawer-title">// hub timeline</span>
-    <button class="feed-drawer-close" id="tl-close">✕</button>
-  </div>
-  <div id="hub-timeline"></div>
 </div>
 <div id="toast" class="toast"></div>
 <div id="modal" class="modal" role="dialog" aria-modal="true">
@@ -224,7 +229,7 @@
       <li><kbd>↵</kbd><span>preview</span></li>
       <li><kbd>t</kbd><span>trace</span></li>
       <li><kbd>1</kbd>–<kbd>4</kbd><span>views</span></li>
-      <li><kbd>y</kbd><span>timeline</span></li>
+      <li><kbd>y</kbd><span>collapse timeline</span></li>
       <li><kbd>n</kbd><span>new task</span></li>
       <li><kbd>c</kbd><span>note</span></li>
       <li><kbd>?</kbd><span>this list</span></li>
@@ -240,6 +245,7 @@ const FTS_DATA={fts_json};
 const LINEAGE_DATA={lineage_json};
 const TASK_STATUS_DATA={task_status_json};
 const TIMELINE_DATA={timeline_json};
+const TASK_TIMELINE_DATA={task_timeline_json};
 const TASKS_DATA={tasks_json};
 const UPLOAD_EXTS_DATA={upload_exts_json};
 const _currentRoot={scan_root_json};
