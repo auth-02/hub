@@ -264,8 +264,6 @@ background-image:radial-gradient(circle,#C9BFA3 .7px,transparent .7px);backgroun
 .trace-btn.primary{background:var(--accent2);border-color:var(--accent2);color:#fff;}
 .trace-btn.primary:hover{background:var(--ink);border-color:var(--ink);}
 
-/* ── Activity view ─────────────────────────────────────────────────────── */
-
 /* ── First-run screen ──────────────────────────────────────────────────── */
 .first-run{text-align:center;padding:80px 24px;max-width:560px;margin:0 auto;}
 .first-run-eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--mute);margin-bottom:14px;}
