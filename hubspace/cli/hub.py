@@ -74,6 +74,7 @@ EXCLUDE_DIRS = {
 EXCLUDE_DIRS |= config.config_exclude_dirs(CONFIG)
 DEFAULT_VIEW = config.resolve_default_view(CONFIG)
 UPLOAD_EXTS = config.upload_exts(CONFIG)  # allowlist mirrored to the UI (1d)
+PRIVATE = config.is_private(CONFIG)       # baked → JS PRIVATE; drops Publish row (1f)
 
 def log(msg: str) -> None:
     print(msg)
@@ -239,6 +240,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         server_origin_json=json.dumps(_SERVER_ORIGIN),
         default_view_json=json.dumps(DEFAULT_VIEW),
         upload_exts_json=json.dumps(sorted(UPLOAD_EXTS)),
+        private_json=json.dumps(PRIVATE),
     )
 
 
@@ -470,6 +472,90 @@ def _cmd_draw(name: str | None, task: str | None, repo: str | None) -> None:
     print(f"  created  {shown}")
 
 
+def _dak_script() -> Path:
+    """Path to the bundled dak skill script (may not exist in an installed wheel).
+
+    The hub-agent plugin — dak included — is excluded from the wheel, so in a
+    pip/pipx install this file is absent and we fall back to printing the exact
+    command for the user to run. In a source checkout it is present and we shell
+    out to it. Hub NEVER imports dak; the subprocess boundary is the only link.
+    """
+    return (_HERE.parent / "plugin" / "hub-agent" / "skills"
+            / "dak" / "scripts" / "dak.py")
+
+
+def _cmd_publish(path_arg: str, *, reviewed: bool, do_redact: bool,
+                 dry_run: bool, title: str | None, mode: str | None,
+                 slug: str | None) -> None:
+    """hub publish <path> — the privacy gate + handoff to dak (roadmap 1f).
+
+    Hub does the LOCAL work only: run the redaction scan and (with --redact)
+    prepare a sanitized copy. The actual upload is dak's job — Hub either shells
+    out to the bundled dak script or, if it is absent, prints the exact command.
+    Hub itself makes no network call.
+
+    Gate: findings block publishing unless --i-have-reviewed (publish as-is) or
+    --redact (publish a sanitized copy). With neither flag it is a scan only and
+    exits non-zero when findings exist. `[hub] private = true` refuses entirely.
+    """
+    from ..core import publish as _publish
+
+    if config.is_private(CONFIG):
+        print("  refusing: this workspace is private ([hub] private = true)")
+        sys.exit(2)
+
+    target = Path(path_arg).expanduser()
+    if not target.is_absolute():
+        target = Path.cwd() / target
+    if not target.is_file():
+        print(f"  error: not a file: {path_arg}")
+        sys.exit(1)
+
+    text = metadata.read_safe(str(target))
+    findings = _publish.scan(text)
+
+    if findings:
+        print(f"  {_publish.summary(findings)}")
+    else:
+        print("  ✓ scan clean — no findings")
+
+    publishing = reviewed or do_redact
+    if not publishing:
+        # scan-only mode (--redact-scan or no gate flag)
+        sys.exit(1 if findings else 0)
+
+    # An approved publish. Decide what file dak receives.
+    if do_redact and findings:
+        redacted = _publish.redact(text, findings)
+        copy_dir = config.state_dir() / "publish"
+        copy_dir.mkdir(parents=True, exist_ok=True)
+        copy = copy_dir / f"{target.stem}.redacted{target.suffix}"
+        copy.write_text(redacted, encoding="utf-8")
+        print(f"  redacted copy → {copy}  (original untouched)")
+        publish_path = copy
+    else:
+        publish_path = target
+
+    dak = _dak_script()
+    cmd = ["python3", str(dak), str(publish_path)]
+    if mode:
+        cmd += ["--mode", mode]
+    if slug:
+        cmd += ["--slug", slug]
+    cmd += ["--title", title or target.stem]
+    if dry_run:
+        cmd += ["--dry-run"]
+
+    if not dak.exists():
+        print("  dak not bundled here — run this to publish:")
+        print("    " + " ".join(cmd))
+        return
+    print("  handing off to dak:")
+    print("    " + " ".join(cmd))
+    result = subprocess.run(cmd)
+    sys.exit(result.returncode)
+
+
 def main() -> None:
     global ROOT
     ap = argparse.ArgumentParser(
@@ -540,6 +626,22 @@ def main() -> None:
     draw_p.add_argument("--task", default=None, help="Scope the draw to a task's draws/ folder")
     draw_p.add_argument("--repo", default=None, help="Owning repo (a subdir of the scan root)")
 
+    # hub publish <path> — privacy gate (scan → review/redact) + handoff to dak.
+    # Hub does the local scan only; dak (a separate script) does the upload.
+    pub_p = sub.add_parser("publish", help="Scan + publish one asset via dak (hub publish <path>)")
+    pub_p.add_argument("path", help="File to publish (absolute or CWD-relative)")
+    gate = pub_p.add_mutually_exclusive_group()
+    gate.add_argument("--redact-scan", action="store_true",
+                      help="Only run the scan and exit non-zero if findings exist (default)")
+    gate.add_argument("--i-have-reviewed", dest="reviewed", action="store_true",
+                      help="Publish the file as-is despite findings (you reviewed them)")
+    gate.add_argument("--redact", dest="do_redact", action="store_true",
+                      help="Publish a sanitized copy with findings redacted (original untouched)")
+    pub_p.add_argument("--dry-run", action="store_true", help="Pass --dry-run through to dak")
+    pub_p.add_argument("--title", default=None, help="Title for the published page")
+    pub_p.add_argument("--mode", choices=["snapshot", "live"], default=None, help="dak publish mode")
+    pub_p.add_argument("--slug", default=None, help="dak URL slug")
+
     # hub agent {install|uninstall|status} — persistent launchd agent (macOS).
     # Reusable by both the package launchd script and the plugin daemon script;
     # only the launcher differs (passed via --exec). See cli/agent.py.
@@ -588,6 +690,17 @@ def main() -> None:
         return
     if args.cmd == "draw":
         _cmd_draw(args.name, args.task, args.repo)
+        return
+    if args.cmd == "publish":
+        _cmd_publish(
+            args.path,
+            reviewed=args.reviewed,
+            do_redact=args.do_redact,
+            dry_run=args.dry_run,
+            title=args.title,
+            mode=args.mode,
+            slug=args.slug,
+        )
         return
 
     if args.root:

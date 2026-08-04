@@ -260,6 +260,26 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                                        "detail": str(e)}).encode())
                 return
             self._manifest_edit(body)
+        elif url_path == "/_publish-scan":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                self._send(400, "application/json",
+                           json.dumps({"ok": False, "error": "bad_json",
+                                       "detail": str(e)}).encode())
+                return
+            self._publish_scan(body)
+        elif url_path == "/_publish":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                self._send(400, "application/json",
+                           json.dumps({"ok": False, "error": "bad_json",
+                                       "detail": str(e)}).encode())
+                return
+            self._publish(body)
         elif url_path == "/_task-status":
             length = int(self.headers.get("Content-Length", 0))
             try:
@@ -636,6 +656,122 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             new_mtime = cur_mtime
         self._send(200, "application/json",
                    json.dumps({"ok": True, "rel": rel, "mtime": new_mtime}).encode())
+
+    def _publish_scan(self, body: dict) -> None:
+        """Run the shared redaction scanner for one path — the UI's publish gate.
+
+        Body is JSON ``{path}`` (absolute, from a file row's data-abs, or
+        scan-root-relative). The path must resolve INSIDE the active scan root
+        (same containment rule as GET) — no arbitrary filesystem reads. Returns
+        ``{ok, findings, private}`` using the exact same core.publish.scan the
+        CLI uses, so both surfaces share ONE scanner. Hub makes no network call
+        here; this only reads a local file. When the workspace is private we
+        still report ``private: true`` so the UI can refuse consistently.
+        """
+        from ..core import publish as _publish
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        raw = (body.get("path") or "").strip()
+        if not raw:
+            _fail(400, {"ok": False, "error": "path required"})
+            return
+        root = _active_root.resolve()
+        p = Path(raw)
+        if not p.is_absolute():
+            p = root / raw.lstrip("/")
+        resolved = p.resolve()
+        if not is_within(resolved, root):
+            _fail(403, {"ok": False, "error": "forbidden"})
+            return
+        if not resolved.is_file():
+            _fail(404, {"ok": False, "error": "not_found"})
+            return
+        try:
+            text = resolved.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            _fail(403, {"ok": False, "error": "read_failed", "detail": str(e)})
+            return
+        findings = _publish.scan(text)
+        private = config.is_private(config.load_config())
+        self._send(200, "application/json",
+                   json.dumps({"ok": True, "findings": findings,
+                               "private": private}).encode())
+
+    def _publish(self, body: dict) -> None:
+        """Prepare the local publish and return dak's command — never runs HTTP.
+
+        Body is JSON ``{path, redact_indices?:[int], title?, mode?, slug?}``.
+        Re-runs the scan server-side (the client's finding list is advisory only)
+        and, for the ``redact_indices`` subset the user left toggled on, writes a
+        sanitized copy to ``state_dir()/publish`` (the ORIGINAL is never touched)
+        via the same core.publish.redact the CLI uses. Returns the exact `dak`
+        command for the user to run — Hub hands off, it does not upload. Refuses
+        when the workspace is private. This is the UI twin of `hub publish`.
+        """
+        from ..core import publish as _publish
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        if config.is_private(config.load_config()):
+            _fail(403, {"ok": False, "error": "private"})
+            return
+        raw = (body.get("path") or "").strip()
+        if not raw:
+            _fail(400, {"ok": False, "error": "path required"})
+            return
+        root = _active_root.resolve()
+        p = Path(raw)
+        if not p.is_absolute():
+            p = root / raw.lstrip("/")
+        resolved = p.resolve()
+        if not is_within(resolved, root) or not resolved.is_file():
+            _fail(400, {"ok": False, "error": "invalid path"})
+            return
+        try:
+            text = resolved.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            _fail(403, {"ok": False, "error": "read_failed", "detail": str(e)})
+            return
+
+        findings = _publish.scan(text)
+        idx = body.get("redact_indices")
+        publish_path = resolved
+        if isinstance(idx, list) and idx and findings:
+            chosen = [findings[i] for i in idx
+                      if isinstance(i, int) and 0 <= i < len(findings)]
+            if chosen:
+                redacted = _publish.redact(text, chosen)
+                copy_dir = config.state_dir() / "publish"
+                copy_dir.mkdir(parents=True, exist_ok=True)
+                copy = copy_dir / f"{resolved.stem}.redacted{resolved.suffix}"
+                try:
+                    copy.write_text(redacted, encoding="utf-8")
+                except OSError as e:
+                    _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+                    return
+                publish_path = copy
+
+        # Build the dak command (Hub never executes the upload from the UI path).
+        _dak = (_PKG_ROOT / "plugin" / "hub-agent" / "skills"
+                / "dak" / "scripts" / "dak.py")
+        title = (body.get("title") or resolved.stem).strip() or resolved.stem
+        mode = body.get("mode") if body.get("mode") in ("snapshot", "live") else None
+        slug = (body.get("slug") or "").strip()
+        cmd = ["python3", str(_dak), str(publish_path)]
+        if mode:
+            cmd += ["--mode", mode]
+        if slug:
+            cmd += ["--slug", slug]
+        cmd += ["--title", title]
+        self._send(200, "application/json", json.dumps({
+            "ok": True,
+            "command": " ".join(cmd),
+            "copy": str(publish_path) if publish_path != resolved else None,
+            "dak_present": _dak.exists(),
+        }).encode())
 
     def _save_draw(self, rel, scene, dir_=None, name=None) -> None:
         """Persist an Excalidraw scene into the vault.

@@ -946,7 +946,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
 
   // ── static action rows (Make section — WRITE, oxblood) ──
   function actions(){
-    return [
+    const a=[
       {type:'action',write:true,id:'act:new-task',key:'N',ic:'✎',label:'New task',
        cli:'hub new task <slug>',prim:()=>openNewTask('')},
       {type:'action',write:true,id:'act:new-draw',key:'D',ic:'✎',label:'New draw',
@@ -957,9 +957,14 @@ document.getElementById('rebuild').addEventListener('click',e=>{
        cli:'hub timeline <slug> --graph',prim:()=>{closePalette();if(window._openGraphFor)window._openGraphFor(null);}},
       {type:'action',write:true,id:'act:add-data',ic:'✎',label:'Add data',
        cli:'hub data <path>',prim:()=>openAddData(null)},
-      {type:'action',write:true,id:'act:publish',ic:'✎',label:'Publish',
-       cli:'hub publish',prim:()=>{flash('Publish lands in a later layer');}},
     ];
+    // Publishing leaves the machine. When the workspace is private, the row is
+    // dropped entirely (baked from hub.toml [hub] private → the PRIVATE global).
+    if(typeof PRIVATE==='undefined' || !PRIVATE){
+      a.push({type:'action',write:true,id:'act:publish',ic:'✎',label:'Publish',
+       cli:'hub publish <path>',prim:()=>openPublish(null)});
+    }
+    return a;
   }
   function taskItems(){
     return TASKS_DATA.map(t=>({
@@ -1391,6 +1396,112 @@ document.getElementById('rebuild').addEventListener('click',e=>{
   document.getElementById('pal-nt-note-back').addEventListener('click',noteBack);
   document.getElementById('pal-note-cancel').addEventListener('click',closePalette);
   noteSaveBtn.addEventListener('click',noteSave);
+
+  // ── publish confirm sheet (1f) ─────────────────────────────────────────────
+  // Publishing is deliberately high-friction: scan → review/redact → confirm.
+  // It NEVER fires on ↵. The scan is computed server-side (POST /_publish-scan)
+  // so the UI and the `hub publish` CLI share ONE scanner (core/publish.py). The
+  // redact toggles below apply only to the published COPY — the source file is
+  // never modified. Publish hands off to dak (Hub makes no network call): the
+  // server returns the exact dak command via POST /_publish for the user to run.
+  const pubScreen=document.getElementById('pal-publish-screen');
+  const pubFileSel=document.getElementById('pal-pub-file');
+  const pubTitle=document.getElementById('pal-pub-title');
+  const pubScanEl=document.getElementById('pal-pub-scan');
+  const pubListEl=document.getElementById('pal-pub-list');
+  const pubGoBtn=document.getElementById('pal-pub-go');
+  let pubFindings=[];      // last scan result
+  let pubKeep=[];          // per-finding redact toggle (true = redact this one)
+
+  function pubFileOptions(){
+    const seen=new Set(),opts=[];
+    rows.forEach(r=>{
+      const abs=r.dataset.abs;if(!abs||seen.has(abs))return;seen.add(abs);
+      const path=r.querySelector('.path')?r.querySelector('.path').textContent:abs;
+      opts.push({abs:abs,label:path});
+    });
+    return opts;
+  }
+  function pubRenderFindings(){
+    if(!pubFindings.length){
+      pubScanEl.textContent='✓ scan clean — nothing a public reader shouldn’t see';
+      pubScanEl.className='pal-pub-scan ok';
+      pubListEl.innerHTML='';
+    }else{
+      const n=pubFindings.length;
+      pubScanEl.textContent='⚠ '+n+' finding'+(n===1?'':'s')+' — review before this leaves your machine';
+      pubScanEl.className='pal-pub-scan warn';
+      pubListEl.innerHTML=pubFindings.map((f,i)=>
+        '<label class="pal-pub-item"><input type="checkbox" data-i="'+i+'"'+(pubKeep[i]?' checked':'')+'>'+
+        '<span class="pal-pub-kind">'+esc(f.kind)+'</span>'+
+        '<span class="pal-pub-loc">L'+f.line+'</span>'+
+        '<span class="pal-pub-text">'+esc(f.text)+'</span>'+
+        '<span class="pal-pub-tog">redact</span></label>'
+      ).join('');
+    }
+    pubGoBtn.disabled=!pubFileSel.value;
+  }
+  function pubScan(){
+    const abs=pubFileSel.value;
+    pubFindings=[];pubKeep=[];
+    if(!abs){pubScanEl.textContent='pick an asset';pubScanEl.className='pal-pub-scan';pubListEl.innerHTML='';pubGoBtn.disabled=true;return;}
+    pubScanEl.textContent='scanning…';pubScanEl.className='pal-pub-scan';
+    fetch('/_publish-scan',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:abs})})
+      .then(r=>r.json()).then(d=>{
+        pubFindings=(d&&d.findings)||[];
+        pubKeep=pubFindings.map(()=>true);  // default: redact everything
+        pubRenderFindings();
+      }).catch(()=>{pubScanEl.textContent='scan failed';pubScanEl.className='pal-pub-scan warn';});
+  }
+  function openPublish(prefill){
+    if(typeof PRIVATE!=='undefined'&&PRIVATE){flash('this workspace is private');return;}
+    help.classList.remove('show');
+    if(!pal.classList.contains('show')) pal.classList.add('show');
+    searchScreen.classList.add('hidden');ntScreen.classList.add('hidden');
+    if(adScreen)adScreen.classList.add('hidden');
+    if(noteScreen)noteScreen.classList.add('hidden');
+    pubScreen.classList.remove('hidden');
+    const opts=pubFileOptions();
+    pubFileSel.innerHTML=opts.length
+      ? opts.map(o=>'<option value="'+esc(o.abs)+'">'+esc(o.label)+'</option>').join('')
+      : '<option value="">no files to publish</option>';
+    const want=prefill&&prefill.abs;
+    if(want&&opts.some(o=>o.abs===want))pubFileSel.value=want;
+    pubTitle.value='';
+    pubScan();
+    setTimeout(()=>{pubFileSel.focus();},0);
+  }
+  window._openPublish=openPublish;
+  function pubBack(){pubScreen.classList.add('hidden');searchScreen.classList.remove('hidden');openPalette('');}
+
+  function pubPublish(){
+    const abs=pubFileSel.value;
+    if(!abs){flash('pick an asset');return;}
+    const redact_indices=pubKeep.map((k,i)=>k?i:-1).filter(i=>i>=0);
+    pubGoBtn.disabled=true;
+    fetch('/_publish',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:abs,redact_indices:redact_indices,title:pubTitle.value.trim()})})
+      .then(r=>r.json().then(d=>({ok:r.ok,d:d})).catch(()=>({ok:r.ok,d:{}})))
+      .then(res=>{
+        pubGoBtn.disabled=false;
+        const d=res.d||{};
+        if(res.ok&&d.command){
+          copy(d.command,'dak command copied — run it to publish');
+          return;
+        }
+        flash(d.error==='private'?'this workspace is private':('publish failed'+(d.error?': '+d.error:'')));
+      }).catch(()=>{pubGoBtn.disabled=false;flash('publish failed');});
+  }
+
+  pubFileSel.addEventListener('change',pubScan);
+  pubListEl.addEventListener('change',e=>{
+    const cb=e.target.closest('input[type=checkbox]');if(!cb)return;
+    pubKeep[+cb.dataset.i]=cb.checked;
+  });
+  document.getElementById('pal-pub-back').addEventListener('click',pubBack);
+  document.getElementById('pal-pub-cancel').addEventListener('click',closePalette);
+  pubGoBtn.addEventListener('click',pubPublish);
 
   // Drop files anywhere on the page → open Add-data pre-scoped (or stage into it).
   function hasFiles(e){return e.dataTransfer&&[...(e.dataTransfer.types||[])].indexOf('Files')>=0;}

@@ -217,6 +217,26 @@
         <button class="btn primary" id="pal-note-save" type="button" disabled>Save note</button>
       </div>
     </div>
+    <div class="pal-screen hidden" id="pal-publish-screen">
+      <div class="pal-nt-head">
+        <button class="pal-back" id="pal-pub-back" type="button">← back</button>
+        <span class="pal-nt-kicker">// THIS LEAVES YOUR MACHINE</span>
+      </div>
+      <div class="pal-pub-body">
+        <label class="pal-nt-label">Asset</label>
+        <select id="pal-pub-file" class="pal-nt-select"></select>
+        <label class="pal-nt-label">Title <span class="pal-nt-hint">optional — names the public page</span></label>
+        <input id="pal-pub-title" class="pal-nt-input" type="text" autocomplete="off"
+               spellcheck="false" placeholder="Token rotation flow">
+        <div class="pal-pub-scan" id="pal-pub-scan">scanning…</div>
+        <div class="pal-pub-list" id="pal-pub-list"></div>
+        <div class="pal-pub-note">Redactions apply to the published copy only — your file is never modified.</div>
+      </div>
+      <div class="pal-nt-actions">
+        <button class="btn" id="pal-pub-cancel" type="button">Cancel</button>
+        <button class="btn primary" id="pal-pub-go" type="button" disabled>Publish</button>
+      </div>
+    </div>
   </div>
 </div>
 <div id="pal-help" class="pal-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
@@ -248,6 +268,7 @@ const TIMELINE_DATA={timeline_json};
 const TASK_TIMELINE_DATA={task_timeline_json};
 const TASKS_DATA={tasks_json};
 const UPLOAD_EXTS_DATA={upload_exts_json};
+const PRIVATE={private_json};
 const _currentRoot={scan_root_json};
 // ── Toast / clipboard ─────────────────────────────────────────────────────
 const SIDECAR={sidecar_json};

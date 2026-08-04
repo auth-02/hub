@@ -156,6 +156,22 @@ def upload_exts(config: dict) -> set[str]:
     return set(DEFAULT_UPLOAD_EXTS)
 
 
+def is_private(config: dict) -> bool:
+    """Whether this workspace is marked private via hub.toml `[hub] private`.
+
+    A private workspace refuses to publish at all (roadmap 1f): the CLI `hub
+    publish` verb bails and the palette drops its Publish row. Accepts a TOML
+    boolean (`private = true`) or a truthy string, mirroring how the other
+    scalar keys are read. Anything else (unset / falsy) → not private.
+    """
+    v = config.get("private")
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "yes", "on")
+    return False
+
+
 def resolve_default_view(config: dict) -> str:
     """Configured default view, or "" if unset/invalid (JS falls back to its own default)."""
     v = config.get("default_view")
