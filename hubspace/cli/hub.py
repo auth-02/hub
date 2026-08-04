@@ -162,7 +162,7 @@ def _first_run_html(root: Path) -> str:
     )
 
 
-def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]", timeline_json: str = "{}", tasks_json: str = "[]", task_timeline_json: str = "{}", published_json: str = "{}") -> str:
+def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]", timeline_json: str = "{}", tasks_json: str = "[]", task_timeline_json: str = "{}", published_json: str = "{}", provenance_json: str = "{}") -> str:
     total     = sum(len(v) for v in groups.values())
     md_total  = sum(1 for v in groups.values() for f in v if f["ext"] == "md")
     html_total = total - md_total
@@ -242,6 +242,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         upload_exts_json=json.dumps(sorted(UPLOAD_EXTS)),
         private_json=json.dumps(PRIVATE),
         published_json=published_json,
+        provenance_json=provenance_json,
     )
 
 
@@ -899,8 +900,22 @@ def main() -> None:
     from ..core import publish as _publish
     published_json = json.dumps(_publish.load_published(), separators=(",", ":"))
 
+    # S6 (2a) — bake per-artifact provenance so the UI can show an "ask again"
+    # affordance (copy-only) on agent-generated artifacts. Read straight from
+    # each file's own front matter; only artifacts carry it, so the map is tiny.
+    provenance: dict = {}
+    for repo, files in groups.items():
+        for f in files:
+            if f.get("kind") == "artifact" and Path(f["abs"]).suffix.lower() in (
+                ".html", ".htm", ".md", ".markdown"
+            ):
+                prov = metadata.extract_provenance(metadata.read_safe(f["abs"]))
+                if prov:
+                    provenance[f["abs"]] = prov
+    provenance_json = json.dumps(provenance, separators=(",", ":"))
+
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(render(groups, fts_json, lineage_json, task_status_json, activity_json, timeline_json, tasks_json, task_timeline_json, published_json), encoding="utf-8")
+    OUTPUT.write_text(render(groups, fts_json, lineage_json, task_status_json, activity_json, timeline_json, tasks_json, task_timeline_json, published_json, provenance_json), encoding="utf-8")
     total = sum(len(v) for v in groups.values())
     log(f"[hub] scanned {ROOT} -> {OUTPUT} ({total} files, {len(groups)} groups, {len(all_tasks)} tasks)")
 

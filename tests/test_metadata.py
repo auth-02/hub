@@ -255,5 +255,49 @@ class TestExtractDecisions(unittest.TestCase):
         self.assertEqual(decisions, ["extra spaces"])
 
 
+class TestExtractProvenance(unittest.TestCase):
+    """S6 (2a) — provenance front matter written by the /changelog skill."""
+
+    def test_raw_frontmatter_md(self):
+        text = (
+            "---\n"
+            'generated_by: "claude ▸ skill:changelog"\n'
+            'commit_range: "abc123..def456"\n'
+            "written_at: 2026-08-05T10:00:00Z\n"
+            "task: my-feature\n"
+            "---\n\n# Changelog\n"
+        )
+        prov = metadata.extract_provenance(text)
+        self.assertEqual(prov["generated_by"], "claude ▸ skill:changelog")
+        self.assertEqual(prov["commit_range"], "abc123..def456")
+        self.assertEqual(prov["written_at"], "2026-08-05T10:00:00Z")
+        self.assertEqual(prov["task"], "my-feature")
+
+    def test_html_comment_wrapped_frontmatter(self):
+        # .html artifacts wrap the block in a comment so it never renders.
+        text = (
+            "<!--\n---\n"
+            'generated_by: "claude ▸ skill:changelog"\n'
+            'commit_range: "aaa..bbb"\n'
+            "---\n-->\n<!DOCTYPE html><html><body>hi</body></html>"
+        )
+        prov = metadata.extract_provenance(text)
+        self.assertEqual(prov["generated_by"], "claude ▸ skill:changelog")
+        self.assertEqual(prov["commit_range"], "aaa..bbb")
+
+    def test_normal_file_returns_none(self):
+        self.assertIsNone(metadata.extract_provenance("# Just a doc\n\nnothing here"))
+
+    def test_frontmatter_without_generated_by_returns_none(self):
+        # A normal manifest front matter (title/status) is not provenance.
+        text = "---\ntitle: Something\nstatus: ongoing\n---\n# Doc\n"
+        self.assertIsNone(metadata.extract_provenance(text))
+
+    def test_optional_fields_absent(self):
+        text = '---\ngenerated_by: "agent"\n---\nbody'
+        prov = metadata.extract_provenance(text)
+        self.assertEqual(prov, {"generated_by": "agent"})
+
+
 if __name__ == "__main__":
     unittest.main()

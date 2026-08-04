@@ -37,8 +37,9 @@ from ..utils.text import esc_html, slugify
 from ..render import (
     _render_md, _render_csv, _render_xlsx, _inject_into_html,
     _render_lineage_html, _favicon_href, _CSS, _DOC_CHROME_CSS, _PAGE, _add_outline,
-    draw_page_html, doc_menu, DOC_PDF_ITEM,
+    draw_page_html, doc_menu, DOC_PDF_ITEM, render_provenance,
 )
+from ..core import metadata as _metadata
 
 
 def _state_dir() -> Path:
@@ -188,7 +189,8 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             src = fs_path.read_text(encoding="utf-8", errors="replace")
             links = _get_lineage(str(fs_path.resolve()))
             lineage_html = _render_lineage_html(links, self.__class__.server_port) if links else ""
-            src = _inject_into_html(src, lineage_html, _favicon_href(self.__class__.server_port))
+            provenance_html = render_provenance(_metadata.extract_provenance(src))
+            src = _inject_into_html(src, lineage_html, _favicon_href(self.__class__.server_port), provenance_html)
             self._send(200, "text/html; charset=utf-8", src.encode("utf-8"))
         elif fs_path.suffix.lower() == ".txt":
             src = fs_path.read_text(encoding="utf-8", errors="replace")
@@ -1055,12 +1057,21 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         links = _get_lineage(str(path.resolve()))
         lineage_html = _render_lineage_html(links, self.__class__.server_port)
 
-        if lineage_html:
+        # S6 (2a) — provenance line for agent-generated artifacts (.md/.txt),
+        # read from the file's own front matter. Empty for ordinary files.
+        provenance_html = ""
+        if path.suffix.lower() in (".md", ".markdown", ".txt"):
+            provenance_html = render_provenance(
+                _metadata.extract_provenance(_metadata.read_safe(str(path)))
+            )
+        inject_html = lineage_html + provenance_html
+
+        if inject_html:
             m = re.search(r"</h1>", body)
             if m:
-                body = body[:m.end()] + lineage_html + body[m.end():]
+                body = body[:m.end()] + inject_html + body[m.end():]
             else:
-                body = lineage_html + body
+                body = inject_html + body
 
         # Floating ⋯ actions menu (top-right). Task manifests also get a "New draw"
         # item that opens a blank canvas scoped to this task's draws/ folder.

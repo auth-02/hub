@@ -156,6 +156,23 @@ function selectRow(idx){
   openPreview(selRows[selIdx]);
 }
 
+// S6 (2a) — build the /changelog command for an artifact that carries the
+// skill's provenance front matter. The "ask again" button COPIES this string;
+// it never calls an endpoint or runs anything. Hub stays a consumer.
+function askAgainCmd(abs){
+  if(typeof PROVENANCE_DATA==='undefined'||!PROVENANCE_DATA) return null;
+  const prov=PROVENANCE_DATA[abs];
+  if(!prov) return null;
+  const slug=prov.task||'<task-slug>';
+  const rng=prov.commit_range||'';
+  const end=rng.includes('..')?rng.split('..').pop():rng;
+  return end?`/changelog ${slug} --since ${end}`:`/changelog ${slug}`;
+}
+const pvAsk=document.getElementById('pv-ask');
+if(pvAsk) pvAsk.addEventListener('click',()=>{
+  const cmd=askAgainCmd(_openPreviewAbs);
+  if(cmd) copy(cmd,'copied: '+cmd);
+});
 function openPreview(row){
   pvTitle.textContent=row.querySelector('.path').textContent;
   pvOpen.href=row.href;
@@ -164,6 +181,7 @@ function openPreview(row){
   const links=LINEAGE_DATA[abs]||[];
   if(links.length){pvLineage.innerHTML=buildLineage(links);pvLineage.classList.add('show');}
   else pvLineage.classList.remove('show');
+  if(pvAsk) pvAsk.style.display=askAgainCmd(abs)?'':'none';
   pvBody.classList.add('iframe-mode');
   pvBody.innerHTML=`<iframe class="pv-iframe" src="${row.href}"></iframe>`;
   preview.classList.add('open');

@@ -15,6 +15,14 @@ _DECISIONS_SECTION = re.compile(
 )
 _DECISION_ITEM = re.compile(r"^\d+\.\s+(.+)$", re.MULTILINE)
 _H1            = re.compile(r"^#\s+(.+)$", re.MULTILINE)
+# S6 (2a) — provenance front matter written by the /changelog skill. The block
+# may sit raw (`.md`) or wrapped in a leading HTML comment (`.html`, so it never
+# renders): `<!--\n---\n…\n---\n-->`. `generated_by` is the required signal.
+_PROV_BLOCK    = re.compile(r"^\s*(?:<!--\s*)?---\s*\n(.*?)\n---", re.DOTALL)
+_FM_GENBY      = re.compile(r"^generated_by:\s*['\"]?(.+?)['\"]?\s*$", re.MULTILINE)
+_FM_RANGE      = re.compile(r"^commit_range:\s*['\"]?(.+?)['\"]?\s*$", re.MULTILINE)
+_FM_WRITTEN    = re.compile(r"^written_at:\s*['\"]?(.+?)['\"]?\s*$", re.MULTILINE)
+_FM_TASK       = re.compile(r"^task:\s*['\"]?(.+?)['\"]?\s*$", re.MULTILINE)
 _MD_FM_STRIP   = re.compile(r"^---\s*\n.*?\n---\s*\n?", re.DOTALL)
 _MD_FENCE      = re.compile(r"```[\s\S]*?```")
 _MD_INLINE_CODE = re.compile(r"`[^`\n]+`")
@@ -82,6 +90,33 @@ def extract_status(text: str) -> str:
                 if val in _VALID_STATUSES:
                     return val
     return "ongoing"
+
+
+def extract_provenance(text: str) -> dict | None:
+    """Return the changelog skill's provenance front matter, or None.
+
+    Hub does not generate these files — the `/changelog` skill (2a) drops a
+    self-contained artifact and stamps who/when/what-range into a front-matter
+    block. Hub only *reads* it here to surface a provenance line; it never
+    writes it. Requires `generated_by`; the rest are optional.
+    """
+    m = _PROV_BLOCK.match(text[:3000])
+    if not m:
+        return None
+    block = m.group(1)
+    g = _FM_GENBY.search(block)
+    if not g:
+        return None
+    prov = {"generated_by": g.group(1).strip()}
+    for key, rx in (
+        ("commit_range", _FM_RANGE),
+        ("written_at", _FM_WRITTEN),
+        ("task", _FM_TASK),
+    ):
+        mm = rx.search(block)
+        if mm:
+            prov[key] = mm.group(1).strip()
+    return prov
 
 
 def extract_decisions(text: str) -> list:

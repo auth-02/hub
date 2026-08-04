@@ -72,7 +72,36 @@ def _favicon_href(port: int) -> str:
     return f"http://localhost:{port}" + quote(str(config.static_dir() / "favicon.svg"), safe="/:@")
 
 
-def _inject_into_html(src: str, lineage_html: str, favicon: str = "") -> str:
+def render_provenance(prov: dict | None) -> str:
+    """A small "written by …" line for agent-generated artifacts (S6 / 2a).
+
+    ``prov`` is ``metadata.extract_provenance()`` output. Returns ``""`` for a
+    normal file (no provenance front matter), so ordinary artifacts are
+    unaffected. Hub only *reports* this — it did not generate the file.
+    """
+    if not prov:
+        return ""
+
+    def _esc(s: str) -> str:
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    parts = [f'written by {_esc(prov["generated_by"])}']
+    written = prov.get("written_at")
+    if written:
+        parts.append(_esc(written))
+    rng = prov.get("commit_range")
+    if rng:
+        parts.append(f'<span class="prov-range">{_esc(rng)}</span>')
+    line = " · ".join(parts)
+    return (
+        '<div class="provenance">'
+        f'<span class="prov-line">{line}</span>'
+        '<span class="prov-note">Hub did not generate this file.</span>'
+        "</div>"
+    )
+
+
+def _inject_into_html(src: str, lineage_html: str, favicon: str = "", provenance_html: str = "") -> str:
     """Inject backlinks CSS + HTML into an existing HTML document."""
     src, outline_html = _add_outline(src)
     head_inject = f"<style>{_BACKLINKS_CSS}{_DOC_CHROME_CSS}</style>"
@@ -83,10 +112,11 @@ def _inject_into_html(src: str, lineage_html: str, favicon: str = "") -> str:
     src = re.sub(r"<body[^>]*>", lambda mo: mo.group(0) + _DOC_PRINT_BTN, src, count=1, flags=re.IGNORECASE)
     if outline_html:
         src = re.sub(r"<body[^>]*>", lambda mo: mo.group(0) + outline_html, src, count=1, flags=re.IGNORECASE)
+    inject_html = lineage_html + provenance_html
     m = re.search(r"</h1>", src, re.IGNORECASE)
     if m:
-        return src[: m.end()] + lineage_html + src[m.end() :]
-    return re.sub(r"<body[^>]*>", lambda mo: mo.group(0) + lineage_html, src, count=1, flags=re.IGNORECASE)
+        return src[: m.end()] + inject_html + src[m.end() :]
+    return re.sub(r"<body[^>]*>", lambda mo: mo.group(0) + inject_html, src, count=1, flags=re.IGNORECASE)
 
 
 def _render_lineage_html(links: list, port: int) -> str:
