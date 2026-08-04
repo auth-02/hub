@@ -56,6 +56,7 @@ def _classify(path: Path, rel: str, repo_name: str = "") -> str | None:
         if sub == "artifacts":   return "artifact"
         if sub == "prompts":     return "prompt"
         if sub == "data":        return "data"
+        if sub == "comments":    return "note"
         if len(parts) == 3 and stem == "manifest":
             return "task"
 

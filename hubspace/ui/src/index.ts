@@ -243,8 +243,8 @@ document.addEventListener('keydown',e=>{
 function buildLineage(links){
   const groups={};
   links.forEach(l=>{(groups[l.r]=groups[l.r]||[]).push(l);});
-  const ORDER=['belongs_to_task','belongs_to_skill','task_has_run','task_has_artifact','task_has_draw','task_has_data','task_has_prompt','task_has_doc','skill_has_ref'];
-  const LABELS={'belongs_to_task':'↑ task','belongs_to_skill':'↑ skill','task_has_run':'runs','task_has_artifact':'artifacts','task_has_draw':'draws','task_has_data':'data','task_has_prompt':'prompts','task_has_doc':'docs','skill_has_ref':'references'};
+  const ORDER=['belongs_to_task','belongs_to_skill','task_has_run','task_has_artifact','task_has_draw','task_has_data','task_has_note','task_has_prompt','task_has_doc','skill_has_ref'];
+  const LABELS={'belongs_to_task':'↑ task','belongs_to_skill':'↑ skill','task_has_run':'runs','task_has_artifact':'artifacts','task_has_draw':'draws','task_has_data':'data','task_has_note':'notes','task_has_prompt':'prompts','task_has_doc':'docs','skill_has_ref':'references'};
   let h='<div class="ln-label">// trace</div>';
   ORDER.forEach(r=>{
     if(!groups[r]) return;
@@ -585,8 +585,8 @@ function openTrace(t){
   // Lineage grid from LINEAGE_DATA keyed by manifest abs
   const lin=document.getElementById('trace-lineage');
   const links=LINEAGE_DATA[t.abs]||[];
-  const LIN_ORDER=['task_has_run','task_has_artifact','task_has_draw','task_has_prompt','task_has_data','task_has_doc'];
-  const LIN_LABELS={'task_has_run':'Runs','task_has_artifact':'Artifacts','task_has_draw':'Draws','task_has_prompt':'Prompts','task_has_data':'Data','task_has_doc':'Docs'};
+  const LIN_ORDER=['task_has_run','task_has_artifact','task_has_draw','task_has_note','task_has_prompt','task_has_data','task_has_doc'];
+  const LIN_LABELS={'task_has_run':'Runs','task_has_artifact':'Artifacts','task_has_draw':'Draws','task_has_note':'Notes','task_has_prompt':'Prompts','task_has_data':'Data','task_has_doc':'Docs'};
   const groups={};
   links.forEach(l=>{(groups[l.r]=groups[l.r]||[]).push(l);});
   let linH='';
@@ -766,7 +766,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
       {type:'action',write:true,id:'act:new-draw',key:'D',ic:'✎',label:'New draw',
        cli:'hub draw',prim:()=>{closePalette();window.open('/draw','_blank','noopener');}},
       {type:'action',write:true,id:'act:new-note',key:'C',ic:'✎',label:'New note',
-       cli:'hub note <path>',prim:()=>{flash('New note lands in a later layer');}},
+       cli:'hub note <path>',prim:()=>openNewNote(null)},
       {type:'action',write:true,id:'act:add-data',ic:'✎',label:'Add data',
        cli:'hub data <path>',prim:()=>openAddData(null)},
       {type:'action',write:true,id:'act:publish',ic:'✎',label:'Publish',
@@ -901,6 +901,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     help.classList.remove('show');
     ntScreen.classList.add('hidden');
     if(adScreen) adScreen.classList.add('hidden');
+    if(noteScreen) noteScreen.classList.add('hidden');
     searchScreen.classList.remove('hidden');
     scope=scopeChar&&SCOPE_TYPE[scopeChar]?scopeChar:'';
     pal.classList.add('show');
@@ -976,6 +977,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     if(!pal.classList.contains('show')) pal.classList.add('show');
     searchScreen.classList.add('hidden');ntScreen.classList.remove('hidden');
     const _ad=document.getElementById('pal-adddata-screen');if(_ad)_ad.classList.add('hidden');
+    const _nt=document.getElementById('pal-note-screen');if(_nt)_nt.classList.add('hidden');
     repoSel.innerHTML=repoList().map(r=>'<option value="'+esc(r)+'">'+esc(r)+'</option>').join('');
     titleInput.value=prefillTitle||'';
     planArea.value='';
@@ -1075,6 +1077,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     help.classList.remove('show');
     if(!pal.classList.contains('show')) pal.classList.add('show');
     searchScreen.classList.add('hidden');ntScreen.classList.add('hidden');
+    if(noteScreen)noteScreen.classList.add('hidden');
     adScreen.classList.remove('hidden');
     adStaged=[];
     adTaskSel.innerHTML = TASKS_DATA.length
@@ -1127,6 +1130,80 @@ document.getElementById('rebuild').addEventListener('click',e=>{
   document.getElementById('pal-ad-cancel').addEventListener('click',closePalette);
   adAddBtn.addEventListener('click',adUpload);
 
+  // ── new-note screen (1e) ──────────────────────────────────────────────────
+  // A note is one markdown file at tasks/<slug>/comments/<date>-<slug>.md with a
+  // front-matter anchor (target/range). The sole network call is POST /_note,
+  // where the server re-enforces the guards (repo/slug/target-escape/collision).
+  const noteScreen=document.getElementById('pal-note-screen');
+  const noteTaskSel=document.getElementById('pal-note-task');
+  const noteTarget=document.getElementById('pal-note-target');
+  const noteRange=document.getElementById('pal-note-range');
+  const noteText=document.getElementById('pal-note-text');
+  const noteDest=document.getElementById('pal-note-dest');
+  const noteSaveBtn=document.getElementById('pal-note-save');
+
+  function noteRender(){
+    const t=TASKS_DATA[+noteTaskSel.value];
+    const tgt=(noteTarget.value||'').trim()||'manifest.md';
+    noteDest.textContent = t
+      ? ((t.rp&&t.rp!=='(root)'?t.rp+'/':'')+'tasks/'+t.sl+'/comments/  ← target: '+tgt)
+      : '';
+    noteSaveBtn.disabled=!(t && noteText.value.trim());
+  }
+  function openNewNote(prefill){
+    help.classList.remove('show');
+    if(!pal.classList.contains('show')) pal.classList.add('show');
+    searchScreen.classList.add('hidden');ntScreen.classList.add('hidden');
+    if(adScreen)adScreen.classList.add('hidden');
+    noteScreen.classList.remove('hidden');
+    noteTaskSel.innerHTML = TASKS_DATA.length
+      ? TASKS_DATA.map((t,i)=>'<option value="'+i+'">'+esc(t.rp+' · tasks/'+t.sl)+'</option>').join('')
+      : '<option value="">no tasks yet — create one first</option>';
+    // A prefill may pin the task + target (e.g. from a file row's dataset).
+    if(prefill&&prefill.slug){
+      const idx=TASKS_DATA.findIndex(t=>t.sl===prefill.slug&&(!prefill.repo||t.rp===prefill.repo));
+      if(idx>=0)noteTaskSel.value=String(idx);
+    }
+    noteTarget.value=(prefill&&prefill.target)||'';
+    noteRange.value='';
+    noteText.value='';
+    noteRender();
+    setTimeout(()=>{(prefill&&prefill.target?noteText:noteTarget).focus();},0);
+  }
+  window._openNewNote=openNewNote;
+  function noteBack(){noteScreen.classList.add('hidden');searchScreen.classList.remove('hidden');openPalette('');}
+
+  function noteSave(){
+    const t=TASKS_DATA[+noteTaskSel.value];
+    if(!t){flash('pick a task');return;}
+    const bodyText=noteText.value.trim();
+    if(!bodyText){flash('note body required');return;}
+    const target=(noteTarget.value||'').trim()||'manifest.md';
+    const range=(noteRange.value||'').trim();
+    noteSaveBtn.disabled=true;
+    fetch('/_note',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({repo:t.rp,slug:t.sl,target:target,range:range,body:bodyText})})
+      .then(r=>r.json().then(d=>({ok:r.ok,d:d})).catch(()=>({ok:r.ok,d:{}})))
+      .then(res=>{
+        if(res.ok){flashSticky('saving note…');softReload();return;}
+        noteSaveBtn.disabled=false;
+        const d=res.d||{};
+        flash('note failed: '+(d.detail||d.error||'unknown'));
+      }).catch(()=>{noteSaveBtn.disabled=false;flash('note failed');});
+  }
+
+  noteTaskSel.addEventListener('change',noteRender);
+  noteTarget.addEventListener('input',noteRender);
+  noteText.addEventListener('input',noteRender);
+  noteText.addEventListener('keydown',e=>{
+    if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();noteSave();}
+    else if(e.key==='Escape'){e.preventDefault();noteBack();}
+  });
+  noteTarget.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();noteBack();}});
+  document.getElementById('pal-nt-note-back').addEventListener('click',noteBack);
+  document.getElementById('pal-note-cancel').addEventListener('click',closePalette);
+  noteSaveBtn.addEventListener('click',noteSave);
+
   // Drop files anywhere on the page → open Add-data pre-scoped (or stage into it).
   function hasFiles(e){return e.dataTransfer&&[...(e.dataTransfer.types||[])].indexOf('Files')>=0;}
   document.addEventListener('dragover',e=>{if(hasFiles(e))e.preventDefault();});
@@ -1158,7 +1235,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     // Single-key global shortcuts (n/c/? are new; 1–4/y are additive, no conflict
     // with the existing j/k/Enter/Esc//' handler above).
     if(k==='n'){e.preventDefault();openPalette('');openNewTask('');}
-    else if(k==='c'){e.preventDefault();flash('New note lands in a later layer');}
+    else if(k==='c'){e.preventDefault();openNewNote(null);}
     else if(e.key==='?'){e.preventDefault();help.classList.add('show');}
     else if(k==='y'){e.preventDefault();document.getElementById('tl-tab').click();}
     else if('1234'.includes(e.key)&&window._setView){

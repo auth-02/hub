@@ -158,6 +158,131 @@ def accept_upload(
     return target, None
 
 
+# ── comments / notes (roadmap 1e — Comments & annotations) ──────────────────
+# A note is ONE markdown file at `<repo>/tasks/<slug>/comments/<date>-<slug>.md`
+# with a small front-matter anchor pointing at the file it is about. The writer
+# below is shared by the `hub note` CLI verb and the `POST /_note` endpoint so
+# both emit the identical shape (verb-parity, roadmap 2c). Like write_manifest()
+# it touches no DB — the watcher/rebuild reconcile the new file on their tick.
+
+
+def note_stem(body: str, target: str = "", max_words: int = 6) -> str:
+    """A short kebab slug for a note filename, from the body then the target.
+
+    Takes the first few words of the note body; if that yields nothing usable,
+    falls back to the target file's stem, then to a bare ``note``. Capped so the
+    filename stays short.
+    """
+    from ..utils.text import slugify
+
+    base = slugify(" ".join((body or "").split()[:max_words]))
+    if not base and target:
+        base = slugify(Path(target).stem)
+    return (base[:60].strip("-")) or "note"
+
+
+def render_note(
+    target: str,
+    body: str,
+    author: str | None = None,
+    range_: str | None = None,
+    created: str | None = None,
+) -> str:
+    """Return a note's markdown: a small front-matter anchor + the body.
+
+    `range` and `author` are emitted only when given; `target` and `created`
+    always appear. See docs/HUB-LAYOUT.md §2 (comments/).
+    """
+    lines = ["---", f"target: {target}"]
+    if range_:
+        lines.append(f"range: {range_}")
+    if author:
+        lines.append(f"author: {author}")
+    lines.append(f"created: {created or date.today().isoformat()}")
+    lines += ["---", "", (body or "").strip()]
+    return "\n".join(lines) + "\n"
+
+
+def write_note(
+    repo_root: Path,
+    slug: str,
+    target: str,
+    body: str,
+    author: str | None = None,
+    range_: str | None = None,
+    created: str | None = None,
+) -> Path:
+    """Write exactly one note into `<repo_root>/tasks/<slug>/comments/`.
+
+    The single note writer shared by `hub note` and `POST /_note`. The file is
+    `comments/<date>-<note-slug>.md` — markdown whose front matter anchors it to
+    `target` (the task-relative path the note is about) with an optional line
+    `range`. `comments/` is created lazily; a colliding filename suffixes `-N`
+    and an existing note is never overwritten. Raises `SlugError` on an unsafe
+    slug or a `target` that escapes the task, `ValueError` on an empty
+    target/body, and lets `OSError` propagate on a read-only root. Returns the
+    written path.
+    """
+    if not valid_slug(slug):
+        raise SlugError(f"invalid slug: {slug!r}")
+    task_dir = (repo_root / "tasks" / slug).resolve()
+    if not is_within(task_dir, (repo_root / "tasks").resolve()):
+        raise SlugError(f"slug escapes tasks/: {slug!r}")
+    target = (target or "").strip()
+    if not target:
+        raise ValueError("target required")
+    body = (body or "").strip()
+    if not body:
+        raise ValueError("body required")
+    # `target` is task-relative and must resolve inside the task dir — no absolute
+    # path, no `..` traversal escaping the task.
+    if target.startswith("/") or "\x00" in target:
+        raise SlugError(f"target escapes task: {target!r}")
+    if not is_within((task_dir / target).resolve(), task_dir):
+        raise SlugError(f"target escapes task: {target!r}")
+    created = created or date.today().isoformat()
+    stem = note_stem(body, target)
+    comments_dir = task_dir / "comments"
+    path = comments_dir / f"{created}-{stem}.md"
+    n = 2
+    while path.exists():  # never clobber an existing note
+        path = comments_dir / f"{created}-{stem}-{n}.md"
+        n += 1
+    # Defence in depth: the resolved write must stay inside the task dir.
+    if not is_within(path.resolve(), task_dir):
+        raise SlugError("note path escapes task")
+    comments_dir.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        render_note(target, body, author, range_, created), encoding="utf-8"
+    )
+    return path
+
+
+def find_task_for(path: Path) -> tuple[Path, str, str] | None:
+    """Walk up from `path` to the nearest `tasks/<slug>/`; return its context.
+
+    Returns ``(repo_root, slug, target_rel)`` where `repo_root` owns the `tasks/`
+    dir, `slug` is the task, and `target_rel` is `path` expressed relative to the
+    task dir (the note's `target:` anchor). Returns None when `path` is not under
+    any `tasks/<slug>/`. Used by the `hub note <path>` CLI verb.
+    """
+    p = path.resolve()
+    parts = p.parts
+    for i in range(len(parts) - 1):
+        if parts[i] == "tasks" and i > 0:
+            slug = parts[i + 1] if i + 1 < len(parts) else ""
+            if not valid_slug(slug):
+                continue
+            repo_root = Path(*parts[:i])
+            task_dir = repo_root / "tasks" / slug
+            try:
+                target_rel = p.relative_to(task_dir.resolve()).as_posix()
+            except ValueError:
+                continue
+            return repo_root, slug, target_rel
+    return None
+
+
 def write_manifest(
     repo_root: Path,
     slug: str,

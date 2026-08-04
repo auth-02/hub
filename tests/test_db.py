@@ -213,6 +213,23 @@ class TestBuildLineage(unittest.TestCase):
         # A draw under a task must NOT be mislabeled as a doc
         self.assertNotIn("task_has_doc", rel_types)
 
+    def test_task_to_note_edge_created(self):
+        db.upsert(self.conn,
+                  _fake_meta("/r/tasks/slug/manifest.md", kind="task", task_slug="slug"),
+                  "Manifest", "")
+        db.upsert(self.conn,
+                  _fake_meta("/r/tasks/slug/comments/2026-08-04-x.md",
+                             rel="tasks/slug/comments/2026-08-04-x.md",
+                             kind="note", task_slug="slug"),
+                  "Note", "")
+        self.conn.commit()
+        db.build_lineage(self.conn)
+        rel_types = {r[0] for r in self.conn.execute("SELECT rel_type FROM lineage").fetchall()}
+        self.assertIn("task_has_note", rel_types)
+        self.assertIn("belongs_to_task", rel_types)
+        # A note under a task must NOT be mislabeled as a doc
+        self.assertNotIn("task_has_doc", rel_types)
+
     def test_lineage_cleared_on_rebuild(self):
         db.upsert(self.conn,
                   _fake_meta("/r/tasks/s/manifest.md", kind="task", task_slug="s"),

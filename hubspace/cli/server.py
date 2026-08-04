@@ -233,6 +233,16 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             self._new_task(body)
         elif url_path == "/_upload":
             self._upload()
+        elif url_path == "/_note":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                self._send(400, "application/json",
+                           json.dumps({"ok": False, "error": "bad_json",
+                                       "detail": str(e)}).encode())
+                return
+            self._note(body)
         elif url_path == "/_task-status":
             length = int(self.headers.get("Content-Length", 0))
             try:
@@ -421,6 +431,72 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 print(result.stderr or result.stdout, file=_sys2.stderr)
         self._send(200, "application/json",
                    json.dumps({"ok": True, "written": written, "results": results}).encode())
+
+    def _note(self, body: dict) -> None:
+        """Write one note into `<repo>/tasks/<slug>/comments/` — the 1e producer.
+
+        Body is JSON ``{repo, slug, target, range?, body, author?}``. Writes
+        exactly one `comments/<date>-<note-slug>.md` (see docs/HUB-LAYOUT.md §2),
+        anchored to `target` (a task-relative path that must resolve inside the
+        task). Reuses the same repo/slug guards as `/_new-task` and `/_upload`;
+        `tasks.write_note` enforces the target-escape guard and never overwrites
+        (collision → `-N`). A read-only root → 403. On success, rebuilds so the
+        note appears on reload — no DB row is written directly.
+        """
+        from ..core import tasks as _tasks
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        root = _active_root.resolve()
+        repo = (body.get("repo") or "").strip()
+        slug = (body.get("slug") or "").strip()
+        target = (body.get("target") or "").strip()
+        note_body = (body.get("body") or "").strip()
+        author = (body.get("author") or "").strip() or None
+        range_ = (body.get("range") or "").strip() or None
+
+        if not _tasks.valid_slug(slug):
+            _fail(400, {"ok": False, "error": "invalid_slug"})
+            return
+        if not target:
+            _fail(400, {"ok": False, "error": "target required"})
+            return
+        if not note_body:
+            _fail(400, {"ok": False, "error": "body required"})
+            return
+        if repo and repo != "(root)":
+            repo_root = (root / repo).resolve()
+            if not is_within(repo_root, root) or not repo_root.is_dir():
+                _fail(400, {"ok": False, "error": "invalid repo"})
+                return
+        else:
+            repo_root = root
+        task_dir = (repo_root / "tasks" / slug).resolve()
+        if not is_within(task_dir, root) or not task_dir.is_dir():
+            _fail(400, {"ok": False, "error": "invalid task"})
+            return
+
+        try:
+            path = _tasks.write_note(repo_root, slug, target, note_body,
+                                     author=author, range_=range_)
+        except _tasks.SlugError as e:
+            _fail(400, {"ok": False, "error": "invalid_target", "detail": str(e)})
+            return
+        except ValueError as e:
+            _fail(400, {"ok": False, "error": "invalid", "detail": str(e)})
+            return
+        except OSError as e:
+            _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+            return
+
+        rel = path.relative_to(root).as_posix()
+        result = self._rebuild(_active_root)
+        if result.returncode != 0:
+            import sys as _sys2
+            print(result.stderr or result.stdout, file=_sys2.stderr)
+        self._send(200, "application/json",
+                   json.dumps({"ok": True, "rel": rel}).encode())
 
     def _save_draw(self, rel, scene, dir_=None, name=None) -> None:
         """Persist an Excalidraw scene into the vault.

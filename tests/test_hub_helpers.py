@@ -37,6 +37,11 @@ class TestClassify(unittest.TestCase):
         p = Path("/repo/tasks/slug/data/input.csv")
         self.assertEqual(scan._classify(p, "tasks/slug/data/input.csv"), "data")
 
+    def test_inside_comments_dir_returns_note(self):
+        p = Path("/repo/tasks/slug/comments/2026-08-04-rotation.md")
+        self.assertEqual(
+            scan._classify(p, "tasks/slug/comments/2026-08-04-rotation.md"), "note")
+
     def test_inside_prompts_dir_at_repo_root_returns_none(self):
         # Top-level prompts/ is not in the spec; only tasks/<slug>/prompts/** → prompt
         p = Path("/repo/prompts/system.txt")

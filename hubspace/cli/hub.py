@@ -325,6 +325,44 @@ def _cmd_new_task(slug: str, target: Path, with_dirs: list[str] | None = None) -
             print(f"  created  tasks/{slug}/{sub}/")
 
 
+def _cmd_note(path_arg: str, message: str, range_: str | None = None) -> None:
+    """hub note <path> -m "..." [--range L41-L48] — annotate a task file.
+
+    `<path>` is the target file the note is about. Walks up to the nearest
+    `tasks/<slug>/` to find the owning task, then writes the note into that
+    task's `comments/` via the shared `tasks.write_note` (same writer as
+    `POST /_note`). Errors clearly when `<path>` is not under any task.
+    """
+    from ..core import tasks as _tasks
+
+    target = Path(path_arg).expanduser()
+    if not target.is_absolute():
+        target = Path.cwd() / target
+    ctx = _tasks.find_task_for(target)
+    if ctx is None:
+        print(f"  error: {path_arg} is not under a tasks/<slug>/ directory")
+        sys.exit(1)
+    repo_root, slug, target_rel = ctx
+    try:
+        author = subprocess.run(
+            ["git", "-C", str(repo_root), "config", "user.name"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip() or None
+    except Exception:
+        author = None
+    try:
+        note = _tasks.write_note(repo_root, slug, target_rel, message,
+                                 author=author, range_=range_)
+    except (_tasks.SlugError, ValueError) as e:
+        print(f"  error: {e}")
+        sys.exit(1)
+    try:
+        rel = note.relative_to(repo_root).as_posix()
+    except ValueError:
+        rel = str(note)
+    print(f"  created  {rel}")
+
+
 def main() -> None:
     global ROOT
     ap = argparse.ArgumentParser(
@@ -339,6 +377,7 @@ def main() -> None:
             "  hub init                           scaffold tasks/ in the current directory\n"
             "  hub new task add-sso-login         create a task (manifest.md only)\n"
             "  hub new task add-sso-login --with all   ...and pre-create runs/ artifacts/ data/\n"
+            "  hub note tasks/add-sso-login/artifacts/flow.html -m \"rotation window feels short\"\n"
             "  hub serve --port 8787              serve the hub over HTTP (watches + rebuilds)\n"
         ),
     )
@@ -362,6 +401,13 @@ def main() -> None:
         help="Pre-create subdir(s): runs, artifacts, data, or all. Repeatable. "
              "Safe to re-run on an existing task to add them later.",
     )
+
+    # hub note <path> -m "..." — annotate a task file (roadmap 1e / 2c).
+    note_p = sub.add_parser("note", help="Annotate a task file (hub note <path> -m <msg>)")
+    note_p.add_argument("path", help="Target file the note is about (under a tasks/<slug>/)")
+    note_p.add_argument("-m", "--message", required=True, help="The note body")
+    note_p.add_argument("--range", dest="range", default=None, metavar="L..",
+                        help="Optional line range the note is about, e.g. L41-L48")
 
     # hub agent {install|uninstall|status} — persistent launchd agent (macOS).
     # Reusable by both the package launchd script and the plugin daemon script;
@@ -391,6 +437,9 @@ def main() -> None:
         return
     if args.cmd == "new" and getattr(args, "kind", None) == "task":
         _cmd_new_task(args.slug, Path.cwd(), getattr(args, "with_dirs", None))
+        return
+    if args.cmd == "note":
+        _cmd_note(args.path, args.message, getattr(args, "range", None))
         return
     if args.cmd == "agent":
         from .agent import run as agent_run

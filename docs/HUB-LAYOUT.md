@@ -46,8 +46,10 @@ The differentiated structure. A task is a directory under `<repo>/tasks/<slug>/`
 │       └── <name>.md    ← RUN
 ├── artifacts/           (optional, created on demand)
 │   └── <name>.{md,html} ← ARTIFACT
-└── data/                (optional, created on demand)
-    └── <name>.{xlsx,csv,json,…}  ← DATA
+├── data/                (optional, created on demand)
+│   └── <name>.{xlsx,csv,json,…}  ← DATA
+└── comments/            (optional, created on demand)
+    └── <date>-<slug>.md ← NOTE
 ```
 
 - `<slug>` is `kebab-case`. It is the task's stable id.
@@ -61,6 +63,12 @@ The differentiated structure. A task is a directory under `<repo>/tasks/<slug>/`
 - `runs/` is partitioned by ISO date directories. The run's date comes from the
   directory name, not the file.
 - `artifacts/` and `data/` are flat (one level). Names are free.
+- `comments/` holds **notes** — one markdown file per note, `<date>-<slug>.md`,
+  flat and created on demand. Each note carries a small front-matter anchor
+  (`target:` — the task-relative file it is about, may be `manifest.md`; optional
+  `range:` line range) followed by the note body. A note is a real, diffable,
+  git-tracked file at a predictable path — untouched by `rm hub.db`. Written by
+  `hub note <path>` or the "New note" palette row; hub never scaffolds it.
 
 > **`prompts/` is not part of the task unit.** The PROMPT kind (§3) is owned by
 > any pre-existing `prompts/` folder a repo or task already keeps for its own
@@ -83,6 +91,7 @@ Kind is derived purely from path. First match wins, top to bottom:
 | `<repo>/tasks/<slug>/artifacts/**`        | ARTIFACT |
 | `<repo>/tasks/<slug>/prompts/**`          | PROMPT   |
 | `<repo>/tasks/<slug>/data/**`             | DATA     |
+| `<repo>/tasks/<slug>/comments/**`         | NOTE     |
 | `<repo>/docs/**.md`                       | DOC      |
 | any other `.md` / `.html`                 | MD       |
 
@@ -203,8 +212,9 @@ Producers must not use these for content; hub owns or ignores them:
 - `hub.toml`, `.scan_root`, `.hub.log` — hub config/state.
 - The hub state directory (`$XDG_STATE_HOME/hub` or `~/.local/state/hub`) — never
   inside the scan root.
-- `manifest.md`, `runs/`, `artifacts/`, `prompts/`, `data/` — structural, as
-  defined above. (`prompts/` is reserved when present, but never created by hub.)
+- `manifest.md`, `runs/`, `artifacts/`, `prompts/`, `data/`, `comments/` —
+  structural, as defined above. (`prompts/` is reserved when present, but never
+  created by hub; `comments/` is created on demand by `hub note`.)
 
 ---
 
