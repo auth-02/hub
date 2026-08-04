@@ -324,6 +324,54 @@ def _cmd_new_task(slug: str, target: Path, with_dirs: list[str] | None = None) -
             print(f"  created  tasks/{slug}/{sub}/")
 
 
+def _cmd_trace(path: str, as_json: bool) -> None:
+    """hub trace <path> — print the lineage graph around a file (query.trace)."""
+    from ..core import query
+    conn = query.connect()
+    try:
+        result = query.trace(conn, path)
+    finally:
+        if conn is not None:
+            conn.close()
+    if as_json:
+        print(json.dumps(result, indent=2))
+        return
+    if result["kind"] is None:
+        print(f"  not indexed: {path}")
+        return
+    print(f"{result['path']}  [{result['kind']}]"
+          + (f"  task: {result['task']}" if result["task"] else ""))
+    for e in result["up"]:
+        print(f"  ↑ {e['rel_type']}: {e['rel']} [{e['kind']}]")
+    for e in result["down"]:
+        print(f"  ↓ {e['rel_type']}: {e['rel']} [{e['kind']}]")
+    if result["siblings"]:
+        print(f"  ↔ {len(result['siblings'])} sibling(s):")
+        for s in result["siblings"]:
+            print(f"      {s['rel']} [{s['kind']}]")
+
+
+def _cmd_timeline(slug: str, as_json: bool, repo: str | None) -> None:
+    """hub timeline <slug> — print the 2b timeline (JSON) or a chronological list."""
+    from ..core import query
+    conn = query.connect()
+    try:
+        result = query.timeline(conn, slug, repo=repo)
+    finally:
+        if conn is not None:
+            conn.close()
+    if as_json:
+        print(json.dumps(result))
+        return
+    nodes = sorted(result["nodes"], key=lambda n: (n["at"], n["path"]))
+    if not nodes:
+        print(f"  no task found: {slug}")
+        return
+    print(f"timeline: {result['task']}  ({len(nodes)} events)")
+    for n in nodes:
+        print(f"  {n['at']}  {n['kind']:9} {n['path']}")
+
+
 def main() -> None:
     global ROOT
     ap = argparse.ArgumentParser(
@@ -362,6 +410,22 @@ def main() -> None:
              "Safe to re-run on an existing task to add them later.",
     )
 
+    # hub mcp serve — MCP stdio server (JSON-RPC 2.0 over newline-delimited
+    # stdin/stdout). A daemon, so it has no palette/UI row (roadmap note on 1h).
+    mcp_p = sub.add_parser("mcp", help="Run the read-only MCP stdio server (hub mcp serve)")
+    mcp_p.add_argument("action", choices=["serve"], help="MCP action")
+
+    # hub trace <path> [--json] — lineage graph around one file (query.trace).
+    trace_p = sub.add_parser("trace", help="Show the lineage around a file (query.trace)")
+    trace_p.add_argument("path", help="Absolute or scan-root-relative file path")
+    trace_p.add_argument("--json", action="store_true", help="Emit raw JSON")
+
+    # hub timeline <slug> [--json] [--repo R] — the 2b task timeline contract.
+    timeline_p = sub.add_parser("timeline", help="Show a task timeline (query.timeline)")
+    timeline_p.add_argument("slug", help="Task slug (lowercase-hyphenated)")
+    timeline_p.add_argument("--json", action="store_true", help="Emit the raw 2b JSON contract")
+    timeline_p.add_argument("--repo", default=None, help="Owning repo (disambiguates a slug)")
+
     # hub agent {install|uninstall|status} — persistent launchd agent (macOS).
     # Reusable by both the package launchd script and the plugin daemon script;
     # only the launcher differs (passed via --exec). See cli/agent.py.
@@ -394,6 +458,16 @@ def main() -> None:
     if args.cmd == "agent":
         from .agent import run as agent_run
         agent_run(args)
+        return
+    if args.cmd == "mcp":
+        from . import mcp
+        mcp.serve()
+        return
+    if args.cmd == "trace":
+        _cmd_trace(args.path, args.json)
+        return
+    if args.cmd == "timeline":
+        _cmd_timeline(args.slug, args.json, args.repo)
         return
 
     if args.root:
