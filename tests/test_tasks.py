@@ -181,5 +181,115 @@ class TestNoteStem(unittest.TestCase):
         self.assertEqual(tasks.note_stem("", ""), "note")
 
 
+# A realistic manifest with frontmatter, prose, an editable Plan, and Decisions.
+_MANIFEST = (
+    "---\n"
+    "status: ongoing\n"
+    "title: Add SSO\n"
+    "created: 2026-08-04\n"
+    "owner: atharva\n"
+    "---\n"
+    "\n"
+    "# Add SSO\n"
+    "\n"
+    "Some prose about the problem. Keep me byte-for-byte.\n"
+    "\n"
+    "## Plan\n"
+    "- [ ] design the flow\n"
+    "- [x] write the migration\n"
+    "\n"
+    "## Decisions\n"
+    "1. Use OIDC, not SAML.\n"
+    "2. Sessions are stateless.\n"
+)
+
+
+class TestRewriteManifest(unittest.TestCase):
+    def test_noop_when_nothing_given(self):
+        self.assertEqual(tasks.rewrite_manifest(_MANIFEST), _MANIFEST)
+
+    def test_rewrite_status_preserves_everything_else(self):
+        out = tasks.rewrite_manifest(_MANIFEST, status="completed")
+        self.assertIn("status: completed\n", out)
+        self.assertNotIn("status: ongoing", out)
+        # Every non-status line survives byte-for-byte.
+        self.assertEqual(
+            out.replace("status: completed", "status: ongoing"), _MANIFEST
+        )
+
+    def test_status_only_leaves_plan_and_decisions_untouched(self):
+        out = tasks.rewrite_manifest(_MANIFEST, status="paused")
+        self.assertIn("- [ ] design the flow\n- [x] write the migration\n", out)
+        self.assertIn("## Decisions\n1. Use OIDC, not SAML.\n", out)
+
+    def test_toggle_checkbox(self):
+        plan = [
+            {"text": "design the flow", "done": True},
+            {"text": "write the migration", "done": True},
+        ]
+        out = tasks.rewrite_manifest(_MANIFEST, plan=plan)
+        self.assertIn("- [x] design the flow\n- [x] write the migration\n", out)
+        # Prose, frontmatter, decisions preserved.
+        self.assertIn("Some prose about the problem. Keep me byte-for-byte.", out)
+        self.assertIn("## Decisions\n1. Use OIDC, not SAML.\n", out)
+        self.assertIn("status: ongoing\n", out)
+
+    def test_edit_and_add_plan_line(self):
+        plan = [
+            {"text": "design the auth flow", "done": False},  # edited text
+            {"text": "write the migration", "done": True},
+            {"text": "ship it", "done": False},               # added line
+        ]
+        out = tasks.rewrite_manifest(_MANIFEST, plan=plan)
+        self.assertIn(
+            "- [ ] design the auth flow\n"
+            "- [x] write the migration\n"
+            "- [ ] ship it\n",
+            out,
+        )
+        self.assertNotIn("design the flow\n", out)
+
+    def test_both_status_and_plan(self):
+        out = tasks.rewrite_manifest(
+            _MANIFEST, status="completed",
+            plan=[{"text": "all done", "done": True}],
+        )
+        self.assertIn("status: completed\n", out)
+        self.assertIn("- [x] all done\n", out)
+        self.assertNotIn("design the flow", out)
+        self.assertIn("## Decisions\n1. Use OIDC, not SAML.\n", out)
+
+    def test_no_plan_section_gets_one_appended(self):
+        src = "---\nstatus: ongoing\ntitle: T\n---\n\n# T\n\nSome prose.\n"
+        out = tasks.rewrite_manifest(src, plan=[{"text": "first item", "done": False}])
+        self.assertTrue(out.startswith(src.rstrip("\n")) or src.rstrip("\n") in out)
+        self.assertIn("## Plan\n- [ ] first item\n", out)
+        # Original content preserved verbatim.
+        self.assertIn("Some prose.", out)
+        self.assertIn("# T", out)
+
+    def test_prose_after_plan_is_preserved(self):
+        src = (
+            "---\nstatus: ongoing\ntitle: T\n---\n\n# T\n\n"
+            "## Plan\n- [ ] a\n\nTrailing prose after the checklist.\n"
+        )
+        out = tasks.rewrite_manifest(src, plan=[{"text": "a", "done": True}])
+        self.assertIn("- [x] a\n", out)
+        self.assertIn("Trailing prose after the checklist.", out)
+
+    def test_status_inserted_when_frontmatter_lacks_it(self):
+        src = "---\ntitle: T\n---\n\n# T\n"
+        out = tasks.rewrite_manifest(src, status="paused")
+        self.assertIn("status: paused\n", out)
+        self.assertIn("title: T\n", out)
+
+    def test_empty_plan_clears_checklist(self):
+        out = tasks.rewrite_manifest(_MANIFEST, plan=[])
+        self.assertNotIn("- [ ]", out)
+        self.assertNotIn("- [x]", out)
+        self.assertIn("## Plan", out)
+        self.assertIn("## Decisions", out)
+
+
 if __name__ == "__main__":
     unittest.main()

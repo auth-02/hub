@@ -550,24 +550,125 @@ function renderWorkView(){
 
 // ── Trace overlay ─────────────────────────────────────────────────────────
 const traceEl=document.getElementById('trace');
+const _ST_MAP={ongoing:'ts-on',paused:'ts-pause',completed:'ts-done'};
+const _ST_ORDER=['ongoing','paused','completed'];
+
+// 1i — inline manifest editing. The manifest file on disk is the source of
+// truth: every edit POSTs the whole plan (and/or status) to /_manifest-edit,
+// which rewrites ONLY the frontmatter status line + the ## Plan block. We send
+// the mtime we last read (base_mtime); a 409 means the file changed under us —
+// hub never wins that race, so we reload to re-read rather than overwrite.
+async function saveManifest(t,patch){
+  const body=Object.assign({repo:t.rp,slug:t.sl,base_mtime:t.mtime},patch);
+  try{
+    const r=await fetch('/_manifest-edit',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(r.status===409){
+      flashSticky('file changed on disk — reloading…');
+      setTimeout(()=>location.reload(),700);
+      return false;
+    }
+    if(!r.ok){flash('save failed');return false;}
+    const out=await r.json().catch(()=>null);
+    if(out&&out.mtime)t.mtime=out.mtime;  // fresh base for the next edit
+    flash('saved');
+    return true;
+  }catch(e){flash('save failed');return false;}
+}
+
 function openTrace(t){
-  const st=t.status||'ongoing';
-  const stMap={ongoing:'ts-on',paused:'ts-pause',completed:'ts-done'};
+  const stMap=_ST_MAP;
+  const editable=!!t.abs;  // an orphan (no manifest) stays read-only
 
   document.getElementById('trace-crumb').innerHTML=
     `${esc(t.rp)} / <span class="tc-accent">tasks</span> / ${esc(t.sl)}`+
     (t.orphan?' <span style="font-family:var(--mono);font-size:9px;color:var(--mute);border:1px solid var(--line);padding:1px 6px;margin-left:6px">no manifest</span>':'');
   document.getElementById('trace-title').textContent=tagName(t.sl);
-  document.getElementById('trace-status').className='trace-status '+(stMap[st]||'ts-on');
-  document.getElementById('trace-status').textContent=st+' · updated '+feedAgo(t.mtime);
+
+  // Status pill — click to cycle ongoing → paused → completed, persisted to the
+  // manifest frontmatter (and the status sidecar) so the file stays the truth.
+  const statusEl=document.getElementById('trace-status');
+  function renderStatus(){
+    const s=t.status||'ongoing';
+    statusEl.className='trace-status '+(stMap[s]||'ts-on')+(editable?' editable':'');
+    statusEl.textContent=s+' · updated '+feedAgo(t.mtime)+(editable?' · click to cycle':'');
+  }
+  renderStatus();
+  statusEl.onclick=editable?async function(){
+    const prev=t.status||'ongoing';
+    const next=_ST_ORDER[(_ST_ORDER.indexOf(prev)+1)%_ST_ORDER.length];
+    t.status=next;renderStatus();
+    const ok=await saveManifest(t,{status:next});
+    if(ok){const key=t.rp+':'+t.sl;if(typeof TASK_STATUS_DATA!=='undefined')TASK_STATUS_DATA[key]=next;renderStatus();}
+    else{t.status=prev;renderStatus();}
+  }:null;
 
   const planEl=document.getElementById('trace-plan');
-  if(t.plan&&t.plan.length){
-    planEl.innerHTML=t.plan.map(p=>
-      `<li class="${p.d?'tp-done':'tp-todo'}">${esc(p.t)}</li>`
-    ).join('');
+  if(!editable){
+    if(t.plan&&t.plan.length){
+      planEl.innerHTML=t.plan.map(p=>
+        `<li class="${p.d?'tp-done':'tp-todo'}">${esc(p.t)}</li>`
+      ).join('');
+    } else {
+      planEl.innerHTML='<li class="tp-todo" style="color:var(--mute);font-style:italic">no plan checklist in manifest</li>';
+    }
   } else {
-    planEl.innerHTML='<li class="tp-todo" style="color:var(--mute);font-style:italic">no plan checklist in manifest</li>';
+    // Editable checklist: toggle a box, edit a line's text (↵ save · esc revert),
+    // or "+ add a plan item". Each mutation re-sends the whole plan.
+    let planItems=(t.plan||[]).map(p=>({t:p.t,d:!!p.d}));
+    function persistPlan(){
+      t.plan=planItems.map(p=>({t:p.t,d:p.d}));
+      return saveManifest(t,{plan:planItems.map(p=>({text:p.t,done:p.d}))});
+    }
+    function startEdit(span,p){
+      const input=document.createElement('input');
+      input.className='tp-input';input.value=p.t;
+      span.replaceWith(input);input.focus();input.select();
+      let done=false;
+      const finish=async(save)=>{
+        if(done)return;done=true;
+        if(save){
+          const val=input.value.trim();
+          if(val===p.t){renderPlan();return;}
+          p.t=val;
+          if(!val)planItems=planItems.filter(x=>x!==p);  // emptied → drop the line
+          renderPlan();await persistPlan();
+        } else {
+          if(!p.t)planItems=planItems.filter(x=>x!==p);  // abandoned a fresh empty line
+          renderPlan();
+        }
+      };
+      input.onkeydown=(e)=>{
+        if(e.key==='Enter'){e.preventDefault();finish(true);}
+        else if(e.key==='Escape'){e.preventDefault();finish(false);}
+      };
+      input.onblur=()=>finish(true);
+    }
+    function renderPlan(){
+      planEl.innerHTML='';
+      planItems.forEach(p=>{
+        const li=document.createElement('li');
+        li.className='tp-edit '+(p.d?'tp-done':'tp-todo');
+        const box=document.createElement('button');
+        box.type='button';box.className='tp-box';box.title='toggle done';
+        box.onclick=async()=>{p.d=!p.d;renderPlan();await persistPlan();};
+        const span=document.createElement('span');
+        span.className='tp-text';span.textContent=p.t;
+        span.title='click to edit · ↵ save · esc revert';
+        span.onclick=()=>startEdit(span,p);
+        li.appendChild(box);li.appendChild(span);
+        planEl.appendChild(li);
+      });
+      const add=document.createElement('button');
+      add.type='button';add.className='tp-add';add.textContent='+ add a plan item';
+      add.onclick=()=>{
+        const p={t:'',d:false};planItems.push(p);renderPlan();
+        const spans=planEl.querySelectorAll('.tp-text');
+        if(spans.length)startEdit(spans[spans.length-1],p);
+      };
+      planEl.appendChild(add);
+    }
+    renderPlan();
   }
 
   const decisionsEl=document.getElementById('trace-decisions');

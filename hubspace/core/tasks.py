@@ -283,6 +283,93 @@ def find_task_for(path: Path) -> tuple[Path, str, str] | None:
     return None
 
 
+# ── inline manifest editing (roadmap 1i — plan + status only) ────────────────
+# The manifest file on disk is the source of truth. `rewrite_manifest` is the
+# single pure, testable rewriter behind the `POST /_manifest-edit` endpoint: it
+# replaces ONLY the frontmatter `status:` line and the `## Plan` checklist block,
+# preserving prose, decisions, other frontmatter, and lineage byte-for-byte.
+# Kept deliberately narrow (see the 1i comp) — no general asset editing.
+
+_FM_BLOCK    = re.compile(r"\A(---[ \t]*\n)(.*?\n)(---[ \t]*\n)", re.DOTALL)
+_FM_STATUS_LINE = re.compile(r"(?m)^status:.*$")
+_PLAN_HEADING   = re.compile(r"(?im)^#{1,6}[ \t]+plan[ \t]*$")
+_NEXT_HEADING   = re.compile(r"(?m)^#{1,6}[ \t]+\S")
+_CHECKLIST_LINE = re.compile(r"(?m)^- \[[ xX]\] .*$")
+
+
+def _fmt_plan(plan: list[dict]) -> str:
+    """Serialize plan items ``[{text, done}]`` into a `- [ ]`/`- [x]` checklist."""
+    lines = []
+    for p in plan:
+        text = str((p or {}).get("text", "")).strip()
+        mark = "x" if (p or {}).get("done") else " "
+        lines.append(f"- [{mark}] {text}")
+    return "\n".join(lines)
+
+
+def _rewrite_status(text: str, status: str) -> str:
+    """Replace the frontmatter `status:` line (or insert one), preserving all else."""
+    m = _FM_BLOCK.match(text)
+    if not m:
+        # No frontmatter — prepend a minimal one rather than blind-appending.
+        return f"---\nstatus: {status}\n---\n\n" + text
+    open_, fm_body, close = m.group(1), m.group(2), m.group(3)
+    new_body, n = _FM_STATUS_LINE.subn(f"status: {status}", fm_body, count=1)
+    if n == 0:  # frontmatter present but no status line — add one at the top
+        new_body = f"status: {status}\n" + fm_body
+    return open_ + new_body + close + text[m.end():]
+
+
+def _rewrite_plan(text: str, plan: list[dict]) -> str:
+    """Replace the `## Plan` checklist block (append the section if absent).
+
+    Only the contiguous run of `- [ ]`/`- [x]` lines inside the Plan section is
+    rewritten; the heading, surrounding blank lines, and any prose elsewhere in
+    the section are preserved. A manifest with no `## Plan` gets one appended.
+    """
+    checklist = _fmt_plan(plan)
+    m = _PLAN_HEADING.search(text)
+    if not m:
+        if not checklist:
+            return text
+        sep = "" if text == "" else ("\n" if text.endswith("\n\n") else ("\n" if text.endswith("\n") else "\n\n"))
+        block = "## Plan\n" + checklist + "\n"
+        return text + sep + block
+    # The Plan section runs from the heading to the next heading (or EOF).
+    nxt = _NEXT_HEADING.search(text, m.end())
+    section_end = nxt.start() if nxt else len(text)
+    section = text[m.end():section_end]  # begins with the newline after the heading
+    matches = list(_CHECKLIST_LINE.finditer(section))
+    if matches:
+        new_section = section[:matches[0].start()] + checklist + section[matches[-1].end():]
+    elif checklist:
+        new_section = "\n" + checklist + section
+    else:
+        new_section = section
+    return text[:m.end()] + new_section + text[section_end:]
+
+
+def rewrite_manifest(
+    text: str,
+    *,
+    status: str | None = None,
+    plan: list[dict] | None = None,
+) -> str:
+    """Rewrite ONLY the frontmatter `status:` line and/or the `## Plan` block.
+
+    `status` (if given) replaces the frontmatter status value; `plan` (a list of
+    ``{text, done}`` items, if given) replaces the Plan checklist. Everything
+    else — prose, decisions, other frontmatter, lineage — is preserved
+    byte-for-byte. A pure function: the endpoint reads the file, calls this, and
+    writes the result back. Passing neither returns `text` unchanged.
+    """
+    if status is not None:
+        text = _rewrite_status(text, status)
+    if plan is not None:
+        text = _rewrite_plan(text, plan)
+    return text
+
+
 def write_manifest(
     repo_root: Path,
     slug: str,

@@ -249,6 +249,20 @@ background-image:radial-gradient(circle,#C9BFA3 .7px,transparent .7px);backgroun
 .trace-plan li::before{position:absolute;left:0;font-family:var(--mono);font-size:12px;}
 .trace-plan li.tp-done{color:var(--ink-soft);}.trace-plan li.tp-done::before{content:'[x]';color:var(--accent);}
 .trace-plan li.tp-todo::before{content:'[ ]';color:var(--mute);}
+/* 1i — inline manifest editing: editable status pill + plan checklist. */
+.trace-status.editable{cursor:pointer;}
+.trace-status.editable:hover{color:var(--accent);}
+.trace-plan li.tp-edit{padding-left:0;display:flex;align-items:baseline;gap:10px;}
+.trace-plan li.tp-edit::before{content:none;}
+.tp-box{background:none;border:none;padding:0;margin:0;cursor:pointer;font-family:var(--mono);font-size:12px;flex:none;width:26px;text-align:left;line-height:1.4;}
+.trace-plan li.tp-edit.tp-todo .tp-box::before{content:'[ ]';color:var(--mute);}
+.trace-plan li.tp-edit.tp-done .tp-box::before{content:'[x]';color:var(--accent);}
+.tp-text{flex:1;cursor:text;}
+.trace-plan li.tp-edit.tp-done .tp-text{color:var(--ink);}
+.trace-plan li.tp-edit.tp-todo .tp-text{color:var(--mute);}
+.tp-input{flex:1;font-family:var(--body);font-size:14px;color:var(--ink);background:var(--alt);border:1px solid var(--accent);padding:2px 6px;outline:none;}
+.tp-add{background:none;border:1px dashed var(--line);color:var(--mute);font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:lowercase;cursor:pointer;padding:6px 10px;margin-top:12px;}
+.tp-add:hover{color:var(--accent);border-color:var(--accent);}
 .trace-section-label{font-family:var(--mono);font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin:22px 0 8px;}
 .trace-decisions{list-style:none;margin:0 0 24px;padding:0;}
 .trace-decisions li{font-size:13px;padding:5px 0 5px 0;position:relative;color:var(--ink);border-bottom:1px solid var(--line);display:flex;gap:10px;}

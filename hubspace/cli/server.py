@@ -243,6 +243,16 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                                        "detail": str(e)}).encode())
                 return
             self._note(body)
+        elif url_path == "/_manifest-edit":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                self._send(400, "application/json",
+                           json.dumps({"ok": False, "error": "bad_json",
+                                       "detail": str(e)}).encode())
+                return
+            self._manifest_edit(body)
         elif url_path == "/_task-status":
             length = int(self.headers.get("Content-Length", 0))
             try:
@@ -497,6 +507,128 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             print(result.stderr or result.stdout, file=_sys2.stderr)
         self._send(200, "application/json",
                    json.dumps({"ok": True, "rel": rel}).encode())
+
+    def _manifest_edit(self, body: dict) -> None:
+        """Rewrite ONLY a manifest's `status:` + `## Plan` block — the 1i producer.
+
+        Body is JSON ``{repo, slug, status?, plan?:[{text,done}], base_mtime}``.
+        The file on disk is the source of truth: `tasks.rewrite_manifest` replaces
+        just those two regions, preserving prose/decisions/other frontmatter
+        byte-for-byte. Conflict rule ("hub never wins a race against your
+        editor"): `base_mtime` is the mtime the client last read; if the file's
+        current mtime differs, the edit is DISCARDED and we return 409 so the UI
+        re-reads — never a blind overwrite. On success the frontmatter status and
+        the task_status table/sidecar are both updated (set_status), so file and
+        sidecar stay consistent, then the index rebuilds. Read-only root → 403.
+        """
+        from ..core import tasks as _tasks
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        root = _active_root.resolve()
+        repo = (body.get("repo") or "").strip()
+        slug = (body.get("slug") or "").strip()
+        status = body.get("status")
+        plan = body.get("plan")
+        base_mtime = body.get("base_mtime")
+
+        if not _tasks.valid_slug(slug):
+            _fail(400, {"ok": False, "error": "invalid_slug"})
+            return
+        if status is not None:
+            status = str(status).strip()
+            if status not in ("ongoing", "paused", "completed"):
+                _fail(400, {"ok": False, "error": "invalid_status"})
+                return
+        if plan is not None:
+            if not isinstance(plan, list):
+                _fail(400, {"ok": False, "error": "invalid_plan"})
+                return
+            norm_plan = []
+            for p in plan:
+                if not isinstance(p, dict):
+                    _fail(400, {"ok": False, "error": "invalid_plan"})
+                    return
+                norm_plan.append({"text": str(p.get("text", "")), "done": bool(p.get("done"))})
+            plan = norm_plan
+        if status is None and plan is None:
+            _fail(400, {"ok": False, "error": "nothing to edit"})
+            return
+
+        # Resolve the task dir under the active root, tolerating both layouts:
+        # scan root is a PARENT of the repo (root/<repo>/tasks/<slug>) or IS the
+        # repo itself (root/tasks/<slug>, where task_repo == root.name).
+        candidates = []
+        if repo and repo != "(root)":
+            candidates.append(root / repo / "tasks" / slug)
+        candidates.append(root / "tasks" / slug)
+        task_dir = None
+        for c in candidates:
+            rc = c.resolve()
+            if is_within(rc, root) and rc.is_dir():
+                task_dir = rc
+                break
+        if task_dir is None:
+            _fail(400, {"ok": False, "error": "invalid task"})
+            return
+        manifest = task_dir / "manifest.md"
+        if not manifest.is_file():
+            _fail(400, {"ok": False, "error": "no manifest"})
+            return
+
+        # Conflict rule: refuse if the file changed under the user since they read it.
+        try:
+            cur_mtime = manifest.stat().st_mtime
+        except OSError as e:
+            _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+            return
+        if base_mtime is not None:
+            try:
+                base = float(base_mtime)
+            except (TypeError, ValueError):
+                base = None
+            if base is not None and abs(cur_mtime - base) > 0.001:
+                _fail(409, {"ok": False, "error": "conflict", "mtime": cur_mtime})
+                return
+
+        try:
+            text = manifest.read_text(encoding="utf-8")
+        except OSError as e:
+            _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+            return
+        new_text = _tasks.rewrite_manifest(text, status=status, plan=plan)
+        if new_text != text:
+            try:
+                manifest.write_text(new_text, encoding="utf-8")
+            except OSError as e:
+                _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+                return
+
+        # Keep the sidecar/table in step with the file. seed_status_from_frontmatter
+        # only fills an EMPTY row (user toggle wins), so a status change must be
+        # pushed explicitly or the sidecar would drift from the file.
+        if status is not None:
+            try:
+                from ..core import db as _db
+                conn = _db.open_db(_DB_PATH)  # ensures schema/migrations exist
+                _db.set_status(conn, slug, repo, status)
+                conn.close()
+            except Exception as e:
+                import sys as _sys2
+                print(f"[manifest-edit] set_status failed: {e}", file=_sys2.stderr)
+
+        rel = manifest.relative_to(root).as_posix()
+        result = self._rebuild(_active_root)
+        if result.returncode != 0:
+            import sys as _sys2
+            print(result.stderr or result.stdout, file=_sys2.stderr)
+        try:
+            new_mtime = manifest.stat().st_mtime
+        except OSError:
+            new_mtime = cur_mtime
+        self._send(200, "application/json",
+                   json.dumps({"ok": True, "rel": rel, "mtime": new_mtime}).encode())
 
     def _save_draw(self, rel, scene, dir_=None, name=None) -> None:
         """Persist an Excalidraw scene into the vault.
