@@ -298,17 +298,16 @@ def _cmd_new_task(slug: str, target: Path, with_dirs: list[str] | None = None) -
     Re-running on an existing task is safe and creates any still-missing --with
     dirs, so it doubles as the "add these later" path.
     """
-    import re
-    if not re.match(r"^[a-z0-9][a-z0-9-]*$", slug):
+    from ..core import tasks as _tasks
+    if not _tasks.valid_slug(slug):
         print(f"  error: slug must be lowercase-hyphenated (got '{slug}')")
         sys.exit(1)
     task_dir = target / "tasks" / slug
     task_dir.mkdir(parents=True, exist_ok=True)
     manifest = task_dir / "manifest.md"
     if not manifest.exists():
-        title = _slugify_title(slug)
         manifest.write_text(
-            f"---\nstatus: ongoing\ntitle: {title}\n---\n\n# {title}\n",
+            _tasks.render_manifest(_slugify_title(slug)),
             encoding="utf-8",
         )
         print(f"  created  tasks/{slug}/manifest.md")
