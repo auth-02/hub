@@ -53,6 +53,11 @@ _DB_PATH = _state_dir() / "hub.db"
 # (/_set-root, /_rebuild, /_task-status) never run two writers at once.
 _REBUILD_LOCK = threading.Lock()
 
+# Hard cap on a single /_upload request body. base64 inflates ~33%, so this
+# comfortably admits several 64 MB files while refusing an absurd Content-Length
+# before we read it into memory (the per-file 64 MB guard is enforced after).
+_UPLOAD_REQUEST_CAP = 512 * 1024 * 1024
+
 
 def _get_lineage(abs_path: str) -> list:
     """Return lineage links for abs_path from hub.db (empty list if DB missing or file unknown)."""
@@ -226,6 +231,8 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 self._send(400, "text/plain", str(e).encode())
                 return
             self._new_task(body)
+        elif url_path == "/_upload":
+            self._upload()
         elif url_path == "/_task-status":
             length = int(self.headers.get("Content-Length", 0))
             try:
@@ -334,6 +341,86 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             print(result.stderr or result.stdout, file=_sys2.stderr)
         self._send(200, "application/json",
                    json.dumps({"ok": True, "rel": rel, "slug": slug}).encode())
+
+    def _upload(self) -> None:
+        """Write dropped files into `<repo>/tasks/<slug>/data/` — the 1d producer.
+
+        Body is JSON: ``{repo, slug, files:[{name, dataBase64}]}`` (a stdlib-only
+        multipart alternative — see the PR notes). Each file is base64-decoded
+        and handed to `tasks.accept_upload`, which enforces all three guards
+        server-side: the 64 MB per-file cap, the hub.toml extension allowlist,
+        and a basename-only filename (no separator / `..` / absolute path). Names
+        are preserved; a collision suffixes `-2`. Repo/slug reuse the same guards
+        as `/_new-task`. A read-only root → 403. A rebuild runs only when at least
+        one file was written; the response reports per-file accept/reject.
+        """
+        from ..core import tasks as _tasks
+        import base64
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length > _UPLOAD_REQUEST_CAP:
+            _fail(413, {"ok": False, "error": "too_large"})
+            return
+        try:
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError) as e:
+            _fail(400, {"ok": False, "error": "bad_json", "detail": str(e)})
+            return
+
+        root = _active_root.resolve()
+        repo = (body.get("repo") or "").strip()
+        slug = (body.get("slug") or "").strip()
+        files = body.get("files")
+
+        if not _tasks.valid_slug(slug):
+            _fail(400, {"ok": False, "error": "invalid_slug"})
+            return
+        if repo and repo != "(root)":
+            repo_root = (root / repo).resolve()
+            if not is_within(repo_root, root) or not repo_root.is_dir():
+                _fail(400, {"ok": False, "error": "invalid repo"})
+                return
+        else:
+            repo_root = root
+        task_dir = (repo_root / "tasks" / slug).resolve()
+        if not is_within(task_dir, root) or not task_dir.is_dir():
+            _fail(400, {"ok": False, "error": "invalid task"})
+            return
+        data_dir = task_dir / "data"
+
+        allowed = config.upload_exts(config.load_config())
+        results: list[dict] = []
+        written = 0
+        for f in files if isinstance(files, list) else []:
+            name = (f.get("name") if isinstance(f, dict) else "") or ""
+            b64 = (f.get("dataBase64") if isinstance(f, dict) else "") or ""
+            try:
+                raw = base64.b64decode(b64, validate=False)
+            except Exception:
+                results.append({"name": name, "ok": False, "reason": "could not decode"})
+                continue
+            try:
+                path, reason = _tasks.accept_upload(data_dir, name, raw, allowed)
+            except OSError as e:
+                _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+                return
+            if path is not None:
+                written += 1
+                results.append({"name": name, "ok": True,
+                                "rel": path.relative_to(root).as_posix()})
+            else:
+                results.append({"name": name, "ok": False, "reason": reason})
+
+        if written:
+            result = self._rebuild(_active_root)
+            if result.returncode != 0:
+                import sys as _sys2
+                print(result.stderr or result.stdout, file=_sys2.stderr)
+        self._send(200, "application/json",
+                   json.dumps({"ok": True, "written": written, "results": results}).encode())
 
     def _save_draw(self, rel, scene, dir_=None, name=None) -> None:
         """Persist an Excalidraw scene into the vault.

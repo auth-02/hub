@@ -768,7 +768,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
       {type:'action',write:true,id:'act:new-note',key:'C',ic:'✎',label:'New note',
        cli:'hub note <path>',prim:()=>{flash('New note lands in a later layer');}},
       {type:'action',write:true,id:'act:add-data',ic:'✎',label:'Add data',
-       cli:'hub data <path>',prim:()=>{flash('Add data lands in a later layer');}},
+       cli:'hub data <path>',prim:()=>openAddData(null)},
       {type:'action',write:true,id:'act:publish',ic:'✎',label:'Publish',
        cli:'hub publish',prim:()=>{flash('Publish lands in a later layer');}},
     ];
@@ -899,7 +899,9 @@ document.getElementById('rebuild').addEventListener('click',e=>{
   // ── palette open/close ──
   function openPalette(scopeChar){
     help.classList.remove('show');
-    ntScreen.classList.add('hidden');searchScreen.classList.remove('hidden');
+    ntScreen.classList.add('hidden');
+    if(adScreen) adScreen.classList.add('hidden');
+    searchScreen.classList.remove('hidden');
     scope=scopeChar&&SCOPE_TYPE[scopeChar]?scopeChar:'';
     pal.classList.add('show');
     palInput.value='';
@@ -973,6 +975,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     help.classList.remove('show');
     if(!pal.classList.contains('show')) pal.classList.add('show');
     searchScreen.classList.add('hidden');ntScreen.classList.remove('hidden');
+    const _ad=document.getElementById('pal-adddata-screen');if(_ad)_ad.classList.add('hidden');
     repoSel.innerHTML=repoList().map(r=>'<option value="'+esc(r)+'">'+esc(r)+'</option>').join('');
     titleInput.value=prefillTitle||'';
     planArea.value='';
@@ -1016,6 +1019,124 @@ document.getElementById('rebuild').addEventListener('click',e=>{
       }).catch(()=>{createBtn.disabled=false;flash('new task failed');});
   }
   createBtn.addEventListener('click',ntCreate);
+
+  // ── add-data screen (1d) ──────────────────────────────────────────────────
+  // Drop files anywhere on the index (or pick "Add data") → this screen. Files
+  // are staged with a client-side pre-check (✓/✕); the sole network call is
+  // POST /_upload, where the server re-enforces every guard.
+  const adScreen=document.getElementById('pal-adddata-screen');
+  const adTaskSel=document.getElementById('pal-ad-task');
+  const adDest=document.getElementById('pal-ad-dest');
+  const adDrop=document.getElementById('pal-ad-drop');
+  const adFileInput=document.getElementById('pal-ad-file');
+  const adList=document.getElementById('pal-ad-list');
+  const adAddBtn=document.getElementById('pal-ad-add');
+  const UPLOAD_EXTS=new Set((typeof UPLOAD_EXTS_DATA!=='undefined'&&UPLOAD_EXTS_DATA.length)
+    ? UPLOAD_EXTS_DATA : ['.pdf','.xlsx','.xls','.csv','.tsv','.json','.txt','.md']);
+  const UPLOAD_MAX=64*1024*1024;
+  let adStaged=[];  // {file,name,size,ext,ok,reason}
+
+  function fmtSize(n){
+    if(n<1024) return n+' B';
+    if(n<1024*1024) return (n/1024).toFixed(1)+' KB';
+    return (n/1024/1024).toFixed(1)+' MB';
+  }
+  function fileExt(name){const i=name.lastIndexOf('.');return i>=0?name.slice(i).toLowerCase():'';}
+  function validateStaged(s){
+    if(!UPLOAD_EXTS.has(s.ext)){s.ok=false;s.reason=(s.ext||'no extension')+' not allowed';return;}
+    if(s.size>UPLOAD_MAX){s.ok=false;s.reason='over the 64 MB guard';return;}
+    s.ok=true;s.reason='';
+  }
+  function stageFiles(fileList){
+    [...fileList].forEach(f=>{
+      const s={file:f,name:f.name,size:f.size,ext:fileExt(f.name),ok:true,reason:''};
+      validateStaged(s);adStaged.push(s);
+    });
+    adRender();
+  }
+  function adRender(){
+    const t=TASKS_DATA[+adTaskSel.value];
+    adDest.textContent = t ? ((t.rp&&t.rp!=='(root)'?t.rp+'/':'')+'tasks/'+t.sl+'/data/') : '';
+    adList.innerHTML = adStaged.length
+      ? adStaged.map((s,i)=>{
+          const meta = s.ok ? esc((s.ext||'file')+' · '+fmtSize(s.size)) : esc(s.reason);
+          return '<div class="pal-ad-item '+(s.ok?'ok':'bad')+'">'+
+            '<span class="pal-ad-mark">'+(s.ok?'✓':'✕')+'</span>'+
+            '<span class="pal-ad-name">'+esc(s.name)+'</span>'+
+            '<span class="pal-ad-meta">'+meta+'</span>'+
+            '<button class="pal-ad-rm" type="button" data-rm="'+i+'" title="remove">✕</button></div>';
+        }).join('')
+      : '<div class="pal-ad-empty">no files staged</div>';
+    const accepted=adStaged.filter(s=>s.ok).length;
+    adAddBtn.disabled = !(accepted>0 && t);
+    adAddBtn.textContent = accepted ? ('Add '+accepted+' file'+(accepted===1?'':'s')) : 'Add files';
+  }
+  function openAddData(files){
+    help.classList.remove('show');
+    if(!pal.classList.contains('show')) pal.classList.add('show');
+    searchScreen.classList.add('hidden');ntScreen.classList.add('hidden');
+    adScreen.classList.remove('hidden');
+    adStaged=[];
+    adTaskSel.innerHTML = TASKS_DATA.length
+      ? TASKS_DATA.map((t,i)=>'<option value="'+i+'">'+esc(t.rp+' · tasks/'+t.sl)+'</option>').join('')
+      : '<option value="">no tasks yet — create one first</option>';
+    if(files&&files.length) stageFiles(files); else adRender();
+    setTimeout(()=>{adDrop.focus();},0);
+  }
+  window._openAddData=openAddData;
+  function adBack(){adScreen.classList.add('hidden');searchScreen.classList.remove('hidden');openPalette('');}
+
+  function adUpload(){
+    const t=TASKS_DATA[+adTaskSel.value];
+    if(!t){flash('pick a task');return;}
+    const good=adStaged.filter(s=>s.ok);
+    if(!good.length){flash('no valid files to add');return;}
+    adAddBtn.disabled=true;
+    Promise.all(good.map(s=>new Promise((res,rej)=>{
+      const rd=new FileReader();
+      rd.onload=()=>{const r=String(rd.result);const c=r.indexOf(',');
+        res({name:s.name,dataBase64:c>=0?r.slice(c+1):r});};
+      rd.onerror=()=>rej(rd.error);
+      rd.readAsDataURL(s.file);
+    }))).then(payload=>fetch('/_upload',{method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({repo:t.rp,slug:t.sl,files:payload})}))
+      .then(r=>r.json().then(d=>({ok:r.ok,d:d})).catch(()=>({ok:r.ok,d:{}})))
+      .then(res=>{
+        const d=res.d||{};
+        if(res.ok&&d.written){flashSticky('adding '+d.written+' file'+(d.written===1?'':'s')+'…');softReload();return;}
+        adAddBtn.disabled=false;
+        const rej=(d.results||[]).filter(x=>!x.ok);
+        flash(rej.length?('rejected: '+rej.map(x=>x.reason).join('; ')):('upload failed'+(d.error?': '+d.error:'')));
+        adRender();
+      }).catch(()=>{adAddBtn.disabled=false;flash('upload failed');});
+  }
+
+  adTaskSel.addEventListener('change',adRender);
+  adFileInput.addEventListener('change',()=>{if(adFileInput.files&&adFileInput.files.length){stageFiles(adFileInput.files);adFileInput.value='';}});
+  adDrop.addEventListener('click',()=>adFileInput.click());
+  adDrop.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();adFileInput.click();}});
+  adDrop.addEventListener('dragenter',()=>adDrop.classList.add('over'));
+  adDrop.addEventListener('dragleave',()=>adDrop.classList.remove('over'));
+  adDrop.addEventListener('drop',()=>adDrop.classList.remove('over'));
+  adList.addEventListener('click',e=>{
+    const b=e.target.closest('.pal-ad-rm');if(!b)return;
+    adStaged.splice(+b.dataset.rm,1);adRender();
+  });
+  document.getElementById('pal-ad-back').addEventListener('click',adBack);
+  document.getElementById('pal-ad-cancel').addEventListener('click',closePalette);
+  adAddBtn.addEventListener('click',adUpload);
+
+  // Drop files anywhere on the page → open Add-data pre-scoped (or stage into it).
+  function hasFiles(e){return e.dataTransfer&&[...(e.dataTransfer.types||[])].indexOf('Files')>=0;}
+  document.addEventListener('dragover',e=>{if(hasFiles(e))e.preventDefault();});
+  document.addEventListener('drop',e=>{
+    if(!(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files.length))return;
+    e.preventDefault();
+    const files=e.dataTransfer.files;
+    if(adScreen&&!adScreen.classList.contains('hidden')) stageFiles(files);
+    else openAddData(files);
+  });
 
   // ── global hotkeys ──
   document.addEventListener('keydown',e=>{

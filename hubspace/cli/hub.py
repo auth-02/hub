@@ -72,6 +72,7 @@ EXCLUDE_DIRS = {
 }
 EXCLUDE_DIRS |= config.config_exclude_dirs(CONFIG)
 DEFAULT_VIEW = config.resolve_default_view(CONFIG)
+UPLOAD_EXTS = config.upload_exts(CONFIG)  # allowlist mirrored to the UI (1d)
 
 def log(msg: str) -> None:
     print(msg)
@@ -235,6 +236,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         tasks_json=tasks_json,
         server_origin_json=json.dumps(_SERVER_ORIGIN),
         default_view_json=json.dumps(DEFAULT_VIEW),
+        upload_exts_json=json.dumps(sorted(UPLOAD_EXTS)),
     )
 
 

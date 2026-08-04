@@ -29,6 +29,12 @@ from pathlib import Path
 
 _VALID_VIEWS = {"work", "list", "board", "calendar"}
 
+# Default extension allowlist for uploaded data files (roadmap 1d — Add data).
+# Mirrors scan.py DATA_EXTS (pdf/xlsx/xls/csv/tsv) plus the plain-text and
+# structured formats a task commonly attaches. Override via hub.toml
+# `upload_exts` (a list of extensions, with or without a leading dot).
+DEFAULT_UPLOAD_EXTS = {".pdf", ".xlsx", ".xls", ".csv", ".tsv", ".json", ".txt", ".md"}
+
 
 def state_dir() -> Path:
     """$XDG_STATE_HOME/hub, falling back to ~/.local/state/hub (created if absent)."""
@@ -128,6 +134,26 @@ def config_exclude_dirs(config: dict) -> set[str]:
     if isinstance(raw, list):
         return {d for d in raw if isinstance(d, str) and d}
     return set()
+
+
+def upload_exts(config: dict) -> set[str]:
+    """Allowed upload extensions (lowercased, dot-prefixed) for `POST /_upload`.
+
+    From hub.toml `upload_exts` (a list of str, each with or without a leading
+    dot); falls back to DEFAULT_UPLOAD_EXTS when the key is unset, not a list,
+    or yields no usable entries. This is the server-side allowlist enforced by
+    the upload guard — the UI mirrors it only for pre-check UX.
+    """
+    raw = config.get("upload_exts")
+    if isinstance(raw, list):
+        exts = set()
+        for e in raw:
+            if isinstance(e, str) and e.strip():
+                e = e.strip().lower()
+                exts.add(e if e.startswith(".") else "." + e)
+        if exts:
+            return exts
+    return set(DEFAULT_UPLOAD_EXTS)
 
 
 def resolve_default_view(config: dict) -> str:

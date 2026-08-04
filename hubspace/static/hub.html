@@ -166,6 +166,27 @@
         <button class="btn primary" id="pal-nt-create" type="button">Create task</button>
       </div>
     </div>
+    <div class="pal-screen hidden" id="pal-adddata-screen">
+      <div class="pal-nt-head">
+        <button class="pal-back" id="pal-ad-back" type="button">← back</button>
+        <span class="pal-nt-kicker">// ADD DATA</span>
+      </div>
+      <div class="pal-ad-body">
+        <label class="pal-nt-label">Task</label>
+        <select id="pal-ad-task" class="pal-nt-select"></select>
+        <div class="pal-ad-dest" id="pal-ad-dest"></div>
+        <div class="pal-ad-drop" id="pal-ad-drop" tabindex="0">
+          <span class="pal-ad-drop-main">Drop files here</span>
+          <span class="pal-ad-drop-sub">or click to browse · 64 MB max per file</span>
+          <input id="pal-ad-file" type="file" multiple hidden>
+        </div>
+        <div class="pal-ad-list" id="pal-ad-list"></div>
+      </div>
+      <div class="pal-nt-actions">
+        <button class="btn" id="pal-ad-cancel" type="button">Cancel</button>
+        <button class="btn primary" id="pal-ad-add" type="button" disabled>Add files</button>
+      </div>
+    </div>
   </div>
 </div>
 <div id="pal-help" class="pal-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
@@ -195,6 +216,7 @@ const LINEAGE_DATA={lineage_json};
 const TASK_STATUS_DATA={task_status_json};
 const TIMELINE_DATA={timeline_json};
 const TASKS_DATA={tasks_json};
+const UPLOAD_EXTS_DATA={upload_exts_json};
 const _currentRoot={scan_root_json};
 // ── Toast / clipboard ─────────────────────────────────────────────────────
 const SIDECAR={sidecar_json};
