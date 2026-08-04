@@ -106,7 +106,32 @@ document.querySelectorAll('.repo-name').forEach(el=>el.addEventListener('click',
 q.value=sessionStorage.getItem('docs_hub_q')||'';
 activeRepos=new Set((sessionStorage.getItem('docs_hub_repos')||'').split(',').filter(Boolean));
 
-function softReload(){location.reload();}
+// ── Preserve the open overlay + scroll across softReload()/manual refresh ───
+// A rebuild (watcher, any write, or the 120s tick) does a full location.reload();
+// without this, the open preview/trace/graph closes and you land back on the
+// index — "back to home". Capture what's open + scrollY, restore it on load.
+let _openPreviewAbs=null, _openTraceT=null;
+window._graphCurrent=null;
+function _captureViewState(){
+  try{
+    const pvEl=document.getElementById('preview');
+    const trEl=document.getElementById('trace');
+    const gcEl=document.getElementById('gcanvas');
+    let ov=null;
+    if(pvEl&&pvEl.classList.contains('open')&&_openPreviewAbs){
+      ov={k:'preview',abs:_openPreviewAbs};
+    }else if(trEl&&trEl.classList.contains('show')&&_openTraceT){
+      ov={k:'trace',sl:_openTraceT.sl,rp:_openTraceT.rp};
+    }else if(gcEl&&gcEl.classList.contains('show')&&window._graphCurrent){
+      ov={k:'graph',sl:window._graphCurrent.sl,rp:window._graphCurrent.rp};
+    }
+    sessionStorage.setItem('hub_view_state',
+      JSON.stringify({ov:ov,y:window.scrollY||window.pageYOffset||0}));
+  }catch(_){}
+}
+// beforeunload also covers a manual browser refresh, not just softReload().
+window.addEventListener('beforeunload',_captureViewState);
+function softReload(){_captureViewState();location.reload();}
 setInterval(()=>softReload(),120000);
 
 // ── Relative-time helper (used by board / work / timeline / trace) ─────────
@@ -135,6 +160,7 @@ function openPreview(row){
   pvTitle.textContent=row.querySelector('.path').textContent;
   pvOpen.href=row.href;
   const abs=row.dataset.abs||'';
+  _openPreviewAbs=abs;
   const links=LINEAGE_DATA[abs]||[];
   if(links.length){pvLineage.innerHTML=buildLineage(links);pvLineage.classList.add('show');}
   else pvLineage.classList.remove('show');
@@ -144,6 +170,7 @@ function openPreview(row){
 }
 
 function closePreview(){
+  _openPreviewAbs=null;
   preview.classList.remove('open');
   pvBody.classList.remove('iframe-mode');
   pvBody.innerHTML='';
@@ -663,6 +690,7 @@ async function saveManifest(t,patch){
 }
 
 function openTrace(t){
+  _openTraceT=t;
   const stMap=_ST_MAP;
   const editable=!!t.abs;  // an orphan (no manifest) stays read-only
 
@@ -842,6 +870,7 @@ function openTrace(t){
   traceEl.scrollTop=0;
 }
 function closeTrace(){
+  _openTraceT=null;
   traceEl.classList.remove('show');
 }
 document.getElementById('trace-back').addEventListener('click',closeTrace);
@@ -880,6 +909,33 @@ document.getElementById('trace-back').addEventListener('click',closeTrace);
 
 // Run apply after view toggle is wired
 apply();
+
+// Restore the overlay + scroll captured before the last softReload()/refresh,
+// so a rebuild leaves you exactly where you were instead of back on the index.
+// Deferred to a macrotask: the graph module assigns window._openGraphFor further
+// down this file, so restore must run AFTER the whole module has executed.
+setTimeout(function restoreViewState(){
+  let s=null;
+  try{s=JSON.parse(sessionStorage.getItem('hub_view_state')||'null');}catch(_){s=null;}
+  if(!s)return;
+  const ov=s.ov;
+  if(ov){
+    if(ov.k==='preview'){
+      const row=[...document.querySelectorAll('.row')].find(r=>r.dataset.abs===ov.abs);
+      if(row)openPreview(row);
+    }else if(ov.k==='trace'){
+      const t=(typeof TASKS_DATA!=='undefined')&&TASKS_DATA.find(x=>x.sl===ov.sl&&x.rp===ov.rp);
+      if(t)openTrace(t);
+    }else if(ov.k==='graph'){
+      const t=(typeof TASKS_DATA!=='undefined')&&TASKS_DATA.find(x=>x.sl===ov.sl&&x.rp===ov.rp);
+      if(t&&window._openGraphFor)window._openGraphFor(t);
+    }
+  }
+  // Restore scroll after layout settles (two rAFs: post-render, post-paint).
+  if(typeof s.y==='number'){
+    requestAnimationFrame(()=>requestAnimationFrame(()=>window.scrollTo(0,s.y)));
+  }
+},0);
 
 const REBUILD_CMD=`/usr/bin/python3 ${HUBPY}`;
 const toast=document.getElementById('toast');
@@ -1861,6 +1917,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     build();
     if(!t)t=window._graphTaskCtx||firstTaskWithGraph();
     if(!t){flash('no task timeline to graph yet');return;}
+    window._graphCurrent=t;
     const g=taskGraph(t);
     if(!g.nodes.length){flash('no events for '+tagName(t.sl));return;}
     ST={t:t,nodes:g.nodes,edges:g.edges,pos:{},sel:null,zoom:1,saved:false,
@@ -1873,7 +1930,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     el.hidden=false;el.classList.add('show');
     setZoom(1);render();
   }
-  function close(){if(el){el.hidden=true;el.classList.remove('show');}}
+  function close(){window._graphCurrent=null;if(el){el.hidden=true;el.classList.remove('show');}}
 
   window._openGraphFor=open;
 
