@@ -132,6 +132,49 @@ class TestServerHttp(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"Hello", body)
 
+    def test_timeline_save_draw(self):
+        """POST /timeline/save-draw derives the 2b graph, writes a valid
+        Excalidraw scene at tasks/<slug>/draws/timeline.excalidraw, and reuses the
+        /draw/save writer."""
+        import json
+        from hubspace.core import db, query
+        root = Path(self._scan_root)
+        (root / "tasks" / "tl" / "runs" / "2026-07-02").mkdir(parents=True, exist_ok=True)
+        (root / "tasks" / "tl" / "manifest.md").write_text("# tl\n", encoding="utf-8")
+        (root / "tasks" / "tl" / "runs" / "2026-07-02" / "r.md").write_text("run\n", encoding="utf-8")
+        dbp = Path(self._state) / "hub.db"
+        conn = db.open_db(dbp)
+        base = {"repo": "(root)", "ext": "md", "task_slug": "tl", "task_repo": "(root)",
+                "mtime": time.time(), "skill_slug": None, "skill_repo": None}
+        db.upsert(conn, {**base, "abs": str(root / "tasks/tl/manifest.md"),
+                         "rel": "tasks/tl/manifest.md", "kind": "task"}, "tl", "b")
+        db.upsert(conn, {**base, "abs": str(root / "tasks/tl/runs/2026-07-02/r.md"),
+                         "rel": "tasks/tl/runs/2026-07-02/r.md", "kind": "run"}, "r", "b")
+        conn.commit()
+        db.build_lineage(conn)
+        conn.close()
+        status, body = _post(self._port, "/timeline/save-draw",
+                             json.dumps({"slug": "tl", "repo": "(root)"}).encode())
+        self.assertEqual(status, 200)
+        out = json.loads(body)
+        self.assertTrue(out["rel"].endswith("tasks/tl/draws/timeline.excalidraw"))
+        target = root / "tasks" / "tl" / "draws" / "timeline.excalidraw"
+        self.assertTrue(target.exists())
+        scene = json.loads(target.read_text(encoding="utf-8"))
+        self.assertEqual(scene["type"], "excalidraw")
+        self.assertTrue(any(e["type"] == "arrow" for e in scene["elements"]))
+        # Re-save overwrites in place (owned) — no timeline-2.excalidraw.
+        status2, _ = _post(self._port, "/timeline/save-draw",
+                          json.dumps({"slug": "tl", "repo": "(root)"}).encode())
+        self.assertEqual(status2, 200)
+        self.assertFalse((root / "tasks" / "tl" / "draws" / "timeline-2.excalidraw").exists())
+
+    def test_timeline_save_draw_bad_slug(self):
+        import json
+        status, _ = _post(self._port, "/timeline/save-draw",
+                         json.dumps({"slug": "Bad Slug"}).encode())
+        self.assertEqual(status, 400)
+
     def test_post_set_root_valid_path(self):
         payload = self._scan_root.encode("utf-8")
         status, body = _post(self._port, "/_set-root", payload)

@@ -392,8 +392,14 @@ def _cmd_trace(path: str, as_json: bool) -> None:
             print(f"      {s['rel']} [{s['kind']}]")
 
 
-def _cmd_timeline(slug: str, as_json: bool, repo: str | None) -> None:
-    """hub timeline <slug> — print the 2b timeline (JSON) or a chronological list."""
+def _cmd_timeline(slug: str, as_json: bool, as_graph: bool, repo: str | None) -> None:
+    """hub timeline <slug> — the 2b timeline: chronological list, JSON, or graph.
+
+    `--graph` emits the same nodes/edges contract as `--json` (they describe the
+    same graph — layout and colours are the canvas's business, per 2b) and, when
+    a server port is configured, also prints the canvas URL that opens the
+    graph-order canvas for this task.
+    """
     from ..core import query
     conn = query.connect()
     try:
@@ -401,8 +407,15 @@ def _cmd_timeline(slug: str, as_json: bool, repo: str | None) -> None:
     finally:
         if conn is not None:
             conn.close()
-    if as_json:
+    if as_json or as_graph:
         print(json.dumps(result))
+        if as_graph:
+            port = config.resolve_port(CONFIG)
+            if port and result["nodes"]:
+                url = f"http://localhost:{port}/?graph={quote(slug)}"
+                if result.get("task") and repo:
+                    url += f"&repo={quote(repo)}"
+                print(f"# canvas: {url}", file=sys.stderr)
         return
     nodes = sorted(result["nodes"], key=lambda n: (n["at"], n["path"]))
     if not nodes:
@@ -411,6 +424,50 @@ def _cmd_timeline(slug: str, as_json: bool, repo: str | None) -> None:
     print(f"timeline: {result['task']}  ({len(nodes)} events)")
     for n in nodes:
         print(f"  {n['at']}  {n['kind']:9} {n['path']}")
+
+
+def _cmd_draw(name: str | None, task: str | None, repo: str | None) -> None:
+    """hub draw [--task <slug>] [--repo R] [name] — create a blank .excalidraw scene.
+
+    With `--task`, the scene lands in that task's `draws/` (created lazily) at
+    `tasks/<slug>/draws/<name>.excalidraw`; otherwise it is a top-level draw in
+    the scan root. Shares the slug guard with `hub new task` and the draw-stem
+    sanitiser with the server, and never clobbers an existing diagram (a colliding
+    name suffixes `-N`). This is the `D` palette row's CLI equivalent.
+    """
+    from ..core import tasks as _tasks, graph as _graph
+    from .server import _safe_draw_stem
+
+    root = ROOT
+    if repo:
+        if not _tasks.valid_slug(repo):
+            print(f"  error: bad repo '{repo}'")
+            sys.exit(1)
+        root = root / repo
+    if task is not None:
+        if not _tasks.valid_slug(task):
+            print(f"  error: task slug must be lowercase-hyphenated (got '{task}')")
+            sys.exit(1)
+        manifest = root / "tasks" / task / "manifest.md"
+        if not manifest.exists():
+            print(f"  error: not a task — no tasks/{task}/manifest.md under {root}")
+            sys.exit(1)
+        base = root / "tasks" / task / "draws"
+    else:
+        base = root
+    stem = _safe_draw_stem(name)
+    target = base / f"{stem}.excalidraw"
+    n = 2
+    while target.exists():
+        target = base / f"{stem}-{n}.excalidraw"
+        n += 1
+    base.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(_graph.blank_scene()), encoding="utf-8")
+    try:
+        shown = target.relative_to(ROOT).as_posix()
+    except ValueError:
+        shown = str(target)
+    print(f"  created  {shown}")
 
 
 def main() -> None:
@@ -473,7 +530,15 @@ def main() -> None:
     timeline_p = sub.add_parser("timeline", help="Show a task timeline (query.timeline)")
     timeline_p.add_argument("slug", help="Task slug (lowercase-hyphenated)")
     timeline_p.add_argument("--json", action="store_true", help="Emit the raw 2b JSON contract")
+    timeline_p.add_argument("--graph", action="store_true",
+                            help="Emit the 2b graph contract (nodes/edges) + canvas URL")
     timeline_p.add_argument("--repo", default=None, help="Owning repo (disambiguates a slug)")
+
+    # hub draw [--task <slug>] [--repo R] [name] — create a blank .excalidraw scene.
+    draw_p = sub.add_parser("draw", help="Create a blank Excalidraw scene (hub draw [--task <slug>] [name])")
+    draw_p.add_argument("name", nargs="?", default=None, help="Diagram name (default: timestamp slug)")
+    draw_p.add_argument("--task", default=None, help="Scope the draw to a task's draws/ folder")
+    draw_p.add_argument("--repo", default=None, help="Owning repo (a subdir of the scan root)")
 
     # hub agent {install|uninstall|status} — persistent launchd agent (macOS).
     # Reusable by both the package launchd script and the plugin daemon script;
@@ -519,7 +584,10 @@ def main() -> None:
         _cmd_trace(args.path, args.json)
         return
     if args.cmd == "timeline":
-        _cmd_timeline(args.slug, args.json, args.repo)
+        _cmd_timeline(args.slug, args.json, args.graph, args.repo)
+        return
+    if args.cmd == "draw":
+        _cmd_draw(args.name, args.task, args.repo)
         return
 
     if args.root:
@@ -560,11 +628,13 @@ def main() -> None:
     # S4a — per-task timeline (the "how this evolved" spine in Trace). Reuse the
     # 2b contract (query.timeline) so the client renders already-indexed lineage
     # with no new endpoint. Keyed by "<repo>\t<slug>" for O(1) client lookup.
+    # Bake the full 2b contract ({nodes, edges}) — S4a lists the nodes by date,
+    # S4b (2b) re-renders the same events + edges in graph order on the canvas.
     task_timelines: dict = {}
     for t in all_tasks:
-        nodes = query.timeline(conn, t["sl"], repo=t["rp"]).get("nodes", [])
-        if nodes:
-            task_timelines[f'{t["rp"]}\t{t["sl"]}'] = nodes
+        tl = query.timeline(conn, t["sl"], repo=t["rp"])
+        if tl.get("nodes"):
+            task_timelines[f'{t["rp"]}\t{t["sl"]}'] = {"nodes": tl["nodes"], "edges": tl.get("edges", [])}
     conn.close()
 
     for t in all_tasks:

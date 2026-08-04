@@ -272,9 +272,13 @@ const TL_EVENT_LABEL={task:'Task opened',artifact:'Artifact added',run:'Run logg
 
 // The 2b timeline nodes for a task, chronological (oldest first = evolution).
 // ISO `at` dates sort lexically, so no Date parsing needed.
+function taskGraph(t){
+  const g=(typeof TASK_TIMELINE_DATA!=='undefined'&&TASK_TIMELINE_DATA[t.rp+'\t'+t.sl])||null;
+  if(!g) return {nodes:[],edges:[]};
+  return {nodes:g.nodes||[],edges:g.edges||[]};
+}
 function taskTimelineEvents(t){
-  const nodes=(typeof TASK_TIMELINE_DATA!=='undefined'&&TASK_TIMELINE_DATA[t.rp+'\t'+t.sl])||[];
-  return nodes.slice().sort((a,b)=>(a.at<b.at?-1:a.at>b.at?1:0));
+  return taskGraph(t).nodes.slice().sort((a,b)=>(a.at<b.at?-1:a.at>b.at?1:0));
 }
 
 // Global scope: bucket a unix ts into today / yesterday / this-week (or null).
@@ -767,6 +771,17 @@ function openTrace(t){
   } else {
     tlHead.style.display='none';
   }
+  // Graph-order affordance (2b): re-render the same events by edge, not date.
+  let gbtn=document.getElementById('trace-tl-graph');
+  if(!gbtn){
+    gbtn=document.createElement('button');
+    gbtn.id='trace-tl-graph';gbtn.type='button';gbtn.className='trace-tl-copy';
+    document.getElementById('trace-tl-copy').insertAdjacentElement('beforebegin',gbtn);
+  }
+  gbtn.textContent='graph order →';
+  gbtn.style.display=n?'':'none';
+  gbtn.onclick=()=>{if(window._openGraphFor)window._openGraphFor(t);};
+  window._graphTaskCtx=t;  // last task in focus — the palette G row opens this
   document.getElementById('trace-tl-copy').onclick=()=>{
     const evs=taskTimelineEvents(t);
     const md=`# How "${tagName(t.sl)}" evolved\n\n`+evs.map(ev=>{
@@ -938,6 +953,8 @@ document.getElementById('rebuild').addEventListener('click',e=>{
        cli:'hub draw',prim:()=>{closePalette();window.open('/draw','_blank','noopener');}},
       {type:'action',write:true,id:'act:new-note',key:'C',ic:'✎',label:'New note',
        cli:'hub note <path>',prim:()=>openNewNote(null)},
+      {type:'action',id:'act:graph',key:'G',ic:'⌗',label:'Timeline · graph order',
+       cli:'hub timeline <slug> --graph',prim:()=>{closePalette();if(window._openGraphFor)window._openGraphFor(null);}},
       {type:'action',write:true,id:'act:add-data',ic:'✎',label:'Add data',
        cli:'hub data <path>',prim:()=>openAddData(null)},
       {type:'action',write:true,id:'act:publish',ic:'✎',label:'Publish',
@@ -1407,9 +1424,283 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     // with the existing j/k/Enter/Esc//' handler above).
     if(k==='n'){e.preventDefault();openPalette('');openNewTask('');}
     else if(k==='c'){e.preventDefault();openNewNote(null);}
+    else if(k==='g'){e.preventDefault();if(window._openGraphFor)window._openGraphFor(null);}
     else if(e.key==='?'){e.preventDefault();help.classList.add('show');}
     else if(k==='y'){e.preventDefault();if(window._toggleTimeline)window._toggleTimeline();}
     else if('1234'.includes(e.key)&&window._setView){
       e.preventDefault();window._setView(['work','list','board','calendar'][+e.key-1]);}
   });
+})();
+
+// ── Timeline · graph order canvas (2b / S4b) ───────────────────────────────
+// A second *rendering* of the per-task 2b timeline (same baked nodes/edges as
+// the Trace spine), laid out by edge/kind — NOT by date. Pure derivation from
+// the lineage Hub already holds: no model, no new store. Paper ground + dot-grid
+// (Hub's theme), oxblood for selection, deep-sea for navigation. Save-to-draws
+// turns the derived graph into an owned .excalidraw on the same paper ground.
+(function(){
+  const KIND_COL={task:0,prompt:1,run:2,artifact:3,note:4,doc:5,draw:6,data:7};
+  const KIND_COLOR={task:'#7A2828',doc:'#1E5A6B',artifact:'#5C4A7A',run:'#2F6B4F',data:'#2E7D8A',draw:'#B5651D',note:'#C15F3C',prompt:'#C99A20'};
+  const REL_LABEL={task_has_run:'run',task_has_artifact:'artifact',task_has_prompt:'prompt',task_has_doc:'doc',task_has_draw:'draw',task_has_data:'data',task_has_note:'note',belongs_to_task:'task'};
+  const COL_W=260,ROW_H=130,X0=40,Y0=40,CARD_W=200,CARD_H=84;
+  const colOf=k=>KIND_COL[k]!==undefined?KIND_COL[k]:8;
+  const colorOf=k=>KIND_COLOR[k]||'#8A8377';
+  // Deterministic graph-order layout — mirrors core/graph.py::layout so a saved
+  // diagram matches the canvas: kind columns, date order within a column.
+  function layout(nodes){
+    const cols={};
+    nodes.forEach(n=>{const c=colOf(n.kind);(cols[c]=cols[c]||[]).push(n);});
+    const pos={};
+    Object.keys(cols).forEach(c=>{
+      const items=cols[c].slice().sort((a,b)=>{
+        const ka=(a.at||'')+' '+(a.path||'')+' '+a.id;
+        const kb=(b.at||'')+' '+(b.path||'')+' '+b.id;
+        return ka<kb?-1:ka>kb?1:0;});
+      items.forEach((n,r)=>{pos[n.id]={x:X0+(+c)*COL_W,y:Y0+r*ROW_H};});
+    });
+    return pos;
+  }
+
+  let el=null;         // overlay root (built lazily)
+  let stage,svg,nodesLayer,inspector,zoomLbl,titleEl,replayIn,isolateIn,replayLbl;
+  let ST={t:null,nodes:[],edges:[],pos:{},sel:null,zoom:1,saved:false,dates:[],cut:null,isolate:false};
+
+  function build(){
+    if(el) return;
+    el=document.createElement('div');
+    el.id='gcanvas';el.className='gcanvas';
+    el.innerHTML=`
+      <div class="gc-head">
+        <div class="gc-head-l">
+          <div class="gc-kicker">// timeline · graph order</div>
+          <div class="gc-title"></div>
+        </div>
+        <div class="gc-tools">
+          <div class="gc-zoom">
+            <button data-a="zout" title="zoom out">−</button>
+            <span class="gc-zlbl">100%</span>
+            <button data-a="zin" title="zoom in">+</button>
+          </div>
+          <button class="gc-btn" data-a="regen">↻ regenerate</button>
+          <button class="gc-btn primary" data-a="save">save to draws/</button>
+          <button class="gc-btn" data-a="close">✕ close</button>
+        </div>
+      </div>
+      <div class="gc-replay">
+        <span class="gc-replay-lbl">replay</span>
+        <input type="range" class="gc-replay-in" min="0" max="0" value="0">
+        <span class="gc-replay-at">all</span>
+        <label class="gc-iso"><input type="checkbox" class="gc-iso-in"> isolate path</label>
+      </div>
+      <div class="gc-stage-wrap">
+        <div class="gc-stage">
+          <svg class="gc-edges"><defs>
+            <marker id="gc-arrow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+              <path d="M0,0 L7,3 L0,6 Z" fill="#8A8377"></path></marker>
+            <marker id="gc-arrow-sel" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+              <path d="M0,0 L7,3 L0,6 Z" fill="#7A2828"></path></marker>
+          </defs></svg>
+          <div class="gc-nodes"></div>
+        </div>
+      </div>
+      <div class="gc-inspector" hidden></div>`;
+    document.body.appendChild(el);
+    stage=el.querySelector('.gc-stage');
+    svg=el.querySelector('.gc-edges');
+    nodesLayer=el.querySelector('.gc-nodes');
+    inspector=el.querySelector('.gc-inspector');
+    zoomLbl=el.querySelector('.gc-zlbl');
+    titleEl=el.querySelector('.gc-title');
+    replayIn=el.querySelector('.gc-replay-in');
+    replayLbl=el.querySelector('.gc-replay-at');
+    isolateIn=el.querySelector('.gc-iso-in');
+    el.addEventListener('click',e=>{
+      const a=e.target.closest('[data-a]');if(!a)return;
+      const act=a.dataset.a;
+      if(act==='close')close();
+      else if(act==='zin')setZoom(ST.zoom+0.1);
+      else if(act==='zout')setZoom(ST.zoom-0.1);
+      else if(act==='regen')regen();
+      else if(act==='save')save();
+    });
+    el.addEventListener('click',e=>{if(e.target===el)close();});
+    replayIn.addEventListener('input',()=>{
+      const i=+replayIn.value;
+      ST.cut=(i>=ST.dates.length)?null:ST.dates[i];
+      replayLbl.textContent=ST.cut===null?'all':ST.cut;
+      applyDim();
+    });
+    isolateIn.addEventListener('change',()=>{ST.isolate=isolateIn.checked;applyDim();});
+    document.addEventListener('keydown',e=>{
+      if(!el||el.hidden)return;
+      if(e.key==='Escape'){e.preventDefault();close();}
+    });
+  }
+
+  function setZoom(z){
+    ST.zoom=Math.max(0.4,Math.min(2,Math.round(z*10)/10));
+    stage.style.transform='scale('+ST.zoom+')';
+    zoomLbl.textContent=Math.round(ST.zoom*100)+'%';
+  }
+
+  // Upstream (ancestor) set of a node, walking edges backwards — for isolate.
+  function upstream(id){
+    const inc={};ST.edges.forEach(e=>{(inc[e.to]=inc[e.to]||[]).push(e.from);});
+    const seen={},q=[id];
+    while(q.length){const cur=q.pop();(inc[cur]||[]).forEach(p=>{if(!seen[p]){seen[p]=1;q.push(p);}});}
+    seen[id]=1;return seen;
+  }
+
+  function applyDim(){
+    const upset=(ST.isolate&&ST.sel)?upstream(ST.sel):null;
+    ST.nodes.forEach(n=>{
+      const card=nodesLayer.querySelector('[data-id="'+n.id+'"]');if(!card)return;
+      let dim=false;
+      if(ST.cut!==null&&(n.at||'')>ST.cut) dim=true;      // replay: fold later events
+      if(upset&&!upset[n.id]) dim=true;                    // isolate: only ancestors
+      card.classList.toggle('dim',dim);
+    });
+    drawEdges();
+  }
+
+  function drawEdges(){
+    const sel=ST.sel;
+    const incident={};
+    if(sel)ST.edges.forEach(e=>{if(e.from===sel||e.to===sel)incident[e.from+'>'+e.to]=1;});
+    let h='';
+    ST.edges.forEach(e=>{
+      const a=ST.pos[e.from],b=ST.pos[e.to];if(!a||!b)return;
+      const x1=a.x+CARD_W,y1=a.y+CARD_H/2,x2=b.x,y2=b.y+CARD_H/2;
+      const mx=(x1+x2)/2;
+      const on=sel&&incident[e.from+'>'+e.to];
+      const cls='gc-edge'+(on?' sel':'');
+      h+=`<path class="${cls}" d="M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}" `
+        +`marker-end="url(#gc-arrow${on?'-sel':''})"></path>`;
+    });
+    const defs=svg.querySelector('defs');
+    svg.innerHTML='';svg.appendChild(defs);
+    svg.insertAdjacentHTML('beforeend',h);
+  }
+
+  function incomingRel(id){
+    const e=ST.edges.find(e=>e.to===id);
+    return e?(REL_LABEL[e.rel]||e.rel):'';
+  }
+
+  function render(){
+    const nodes=ST.nodes;
+    ST.pos=layout(nodes);
+    let maxX=0,maxY=0;
+    Object.keys(ST.pos).forEach(id=>{maxX=Math.max(maxX,ST.pos[id].x+CARD_W);maxY=Math.max(maxY,ST.pos[id].y+CARD_H);});
+    stage.style.width=(maxX+X0)+'px';stage.style.height=(maxY+Y0)+'px';
+    svg.setAttribute('width',String(maxX+X0));svg.setAttribute('height',String(maxY+Y0));
+    svg.setAttribute('viewBox','0 0 '+(maxX+X0)+' '+(maxY+Y0));
+    nodesLayer.innerHTML=nodes.map(n=>{
+      const p=ST.pos[n.id];const name=(n.path||'').split('/').pop()||n.id;
+      const rel=incomingRel(n.id);
+      return `<div class="gc-node k-${esc(n.kind||'doc')}" data-id="${esc(n.id)}"
+        style="left:${p.x}px;top:${p.y}px;--kc:${colorOf(n.kind)}">
+        <div class="gc-node-badge">${esc((n.kind||'').toUpperCase())}</div>
+        <div class="gc-node-name">${esc(name)}</div>
+        <div class="gc-node-meta">${esc(n.at||'')}${rel?' · '+esc(rel):''}</div>
+      </div>`;
+    }).join('');
+    nodesLayer.querySelectorAll('.gc-node').forEach(card=>{
+      card.addEventListener('click',ev=>{ev.stopPropagation();select(card.dataset.id);});
+    });
+    drawEdges();
+    applyDim();
+  }
+
+  function select(id){
+    ST.sel=id;
+    nodesLayer.querySelectorAll('.gc-node').forEach(c=>c.classList.toggle('sel',c.dataset.id===id));
+    const n=ST.nodes.find(x=>x.id===id);
+    if(!n){inspector.hidden=true;return;}
+    const derives=ST.edges.filter(e=>e.to===id).map(e=>ST.nodes.find(x=>x.id===e.from)).filter(Boolean);
+    const produced=ST.edges.filter(e=>e.from===id).map(e=>ST.nodes.find(x=>x.id===e.to)).filter(Boolean);
+    const li=arr=>arr.length?arr.map(x=>`<span class="gc-chip">${esc((x.path||'').split('/').pop())}</span>`).join(''):'<span class="gc-none">—</span>';
+    inspector.hidden=false;
+    inspector.innerHTML=`
+      <div class="gc-kicker">// selected node</div>
+      <div class="gc-ins-path">${esc(n.path||n.id)}</div>
+      <div class="gc-ins-row"><span class="gc-ins-lbl">derives from</span>${li(derives)}</div>
+      <div class="gc-ins-row"><span class="gc-ins-lbl">produced in</span>${li(produced)}</div>
+      <div class="gc-ins-actions">
+        <button class="gc-btn" data-ins="open">open</button>
+        <button class="gc-btn" data-ins="trace">trace</button>
+      </div>`;
+    inspector.querySelector('[data-ins="open"]').onclick=()=>{
+      const abs=nodeAbs(n);if(abs)window.open(fileHref(abs),'_blank','noopener');else flash('path not resolvable');
+    };
+    inspector.querySelector('[data-ins="trace"]').onclick=()=>{close();openTrace(ST.t);};
+    if(ST.isolate)applyDim();else drawEdges();
+  }
+
+  // Resolve a node's abs path from the file rows when possible (2b paths are
+  // scan-root-relative).
+  function nodeAbs(n){
+    const rel=n.path||'';
+    if(!rel)return null;
+    let hit=null;
+    rows.forEach(r=>{const a=r.dataset.abs;if(a&&a.replace(/\\/g,'/').endsWith('/'+rel))hit=hit||a;});
+    if(!hit&&ST.t&&ST.t.abs&&(n.kind==='task'))hit=ST.t.abs;
+    return hit;
+  }
+
+  function save(){
+    if(!ST.t){return;}
+    flashSticky('saving to draws/…');
+    fetch('/timeline/save-draw',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({slug:ST.t.sl,repo:ST.t.rp})})
+      .then(r=>r.ok?r.json():r.text().then(t=>Promise.reject(t)))
+      .then(o=>{ST.saved=true;flash('saved · '+(o.rel||'draws/timeline.excalidraw'));})
+      .catch(e=>flash('save failed: '+e));
+  }
+
+  function regen(){
+    if(ST.saved&&!confirm('A derived timeline draw was saved this session. Re-derive the layout and discard the on-canvas edits?'))return;
+    ST.sel=null;ST.isolate=false;isolateIn.checked=false;
+    ST.cut=null;replayIn.value=String(ST.dates.length);replayLbl.textContent='all';
+    inspector.hidden=true;
+    render();
+  }
+
+  function firstTaskWithGraph(){
+    if(typeof TASKS_DATA==='undefined')return null;
+    for(const t of TASKS_DATA){if(taskGraph(t).nodes.length)return t;}
+    return null;
+  }
+
+  function open(t){
+    build();
+    if(!t)t=window._graphTaskCtx||firstTaskWithGraph();
+    if(!t){flash('no task timeline to graph yet');return;}
+    const g=taskGraph(t);
+    if(!g.nodes.length){flash('no events for '+tagName(t.sl));return;}
+    ST={t:t,nodes:g.nodes,edges:g.edges,pos:{},sel:null,zoom:1,saved:false,
+        dates:[],cut:null,isolate:false};
+    ST.dates=[...new Set(g.nodes.map(n=>n.at||'').filter(Boolean))].sort();
+    titleEl.textContent=tagName(t.sl)+'  ·  '+t.rp;
+    replayIn.max=String(ST.dates.length);replayIn.value=String(ST.dates.length);
+    replayLbl.textContent='all';isolateIn.checked=false;
+    inspector.hidden=true;
+    el.hidden=false;el.classList.add('show');
+    setZoom(1);render();
+  }
+  function close(){if(el){el.hidden=true;el.classList.remove('show');}}
+
+  window._openGraphFor=open;
+
+  // Deep link: hub timeline <slug> --graph prints /?graph=<slug>[&repo=R].
+  (function(){
+    const q=new URLSearchParams(location.search);
+    const slug=q.get('graph');if(!slug)return;
+    const repo=q.get('repo');
+    const find=()=>{
+      if(typeof TASKS_DATA==='undefined')return null;
+      return TASKS_DATA.find(t=>t.sl===slug&&(!repo||t.rp===repo))||TASKS_DATA.find(t=>t.sl===slug)||null;
+    };
+    const t=find();if(t)setTimeout(()=>open(t),0);
+  })();
 })();
