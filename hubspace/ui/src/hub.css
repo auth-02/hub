@@ -240,6 +240,13 @@ footer{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-fa
 .task-name{font-family:var(--disp);font-weight:500;font-size:19px;letter-spacing:-.015em;line-height:1.15;}
 .task-loc{font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:.04em;margin-top:3px;}
 .task-loc .t-repo{color:var(--ink);}
+/* 1g — PUBLISHED marker (deep-sea chrome, on-theme). */
+.task-pub{display:inline-flex;align-items:center;gap:4px;margin-left:8px;vertical-align:middle;font-family:var(--mono);font-size:9px;letter-spacing:.1em;}
+.task-pub>a,.task-pub{color:var(--accent2);}
+.task-pub>a{text-decoration:none;border:1px solid var(--accent2);border-radius:3px;padding:1px 5px;}
+.task-pub>a:hover{background:var(--accent2);color:#fff;}
+.task-pub-act{background:none;border:1px solid var(--line);color:var(--mute);cursor:pointer;font-size:10px;line-height:1;padding:1px 4px;border-radius:3px;}
+.task-pub-act:hover{border-color:var(--accent2);color:var(--accent2);}
 .task-lin{font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:.04em;margin-top:6px;display:flex;gap:12px;flex-wrap:wrap;}
 .task-lin b{color:var(--accent);font-weight:500;}
 .task-when{font-family:var(--mono);font-size:10px;color:var(--mute);letter-spacing:.1em;text-transform:uppercase;flex-shrink:0;padding-top:4px;}

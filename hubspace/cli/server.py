@@ -280,6 +280,26 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                                        "detail": str(e)}).encode())
                 return
             self._publish(body)
+        elif url_path == "/_publish-bundle":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                self._send(400, "application/json",
+                           json.dumps({"ok": False, "error": "bad_json",
+                                       "detail": str(e)}).encode())
+                return
+            self._publish_bundle(body)
+        elif url_path == "/_publish-revoke":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                self._send(400, "application/json",
+                           json.dumps({"ok": False, "error": "bad_json",
+                                       "detail": str(e)}).encode())
+                return
+            self._publish_revoke(body)
         elif url_path == "/_task-status":
             length = int(self.headers.get("Content-Length", 0))
             try:
@@ -772,6 +792,103 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             "copy": str(publish_path) if publish_path != resolved else None,
             "dak_present": _dak.exists(),
         }).encode())
+
+    def _publish_bundle(self, body: dict) -> None:
+        """Freeze a task subtree to a self-contained bundle + return dak's command.
+
+        The UI twin of `hub publish --task` (roadmap 1g). Body is JSON
+        ``{slug, repo?, include_external?, redact?}``. Renders the bundle with
+        the same pure :func:`render.bundle.render_task_bundle` the CLI uses,
+        writes it under ``state_dir()/publish`` (NEVER the scan root), runs the
+        SAME S5a scan over the produced HTML, and returns the exact dak command
+        for the user to run — Hub opens no socket here. Refuses when private.
+        """
+        from ..core import publish as _publish
+        from ..core import query
+        from ..render import bundle as _bundle
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        if config.is_private(config.load_config()):
+            _fail(403, {"ok": False, "error": "private"})
+            return
+        slug = (body.get("slug") or "").strip()
+        repo = (body.get("repo") or "").strip() or None
+        include_external = bool(body.get("include_external"))
+        want_redact = bool(body.get("redact"))
+        if not slug:
+            _fail(400, {"ok": False, "error": "slug required"})
+            return
+
+        conn = query.connect()
+        try:
+            try:
+                html = _bundle.render_task_bundle(
+                    conn, repo, slug, include_external=include_external)
+            except ValueError as e:
+                _fail(404, {"ok": False, "error": "no_such_task", "detail": str(e)})
+                return
+        finally:
+            if conn is not None:
+                conn.close()
+
+        out_dir = config.state_dir() / "publish"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{(repo or 'root')}-{slug}.html"
+        try:
+            out_path.write_text(html, encoding="utf-8")
+        except OSError as e:
+            _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+            return
+
+        findings = _publish.scan(html)
+        publish_path = out_path
+        if want_redact and findings:
+            redacted = _publish.redact(html, findings)
+            publish_path = out_path.with_suffix(".redacted.html")
+            try:
+                publish_path.write_text(redacted, encoding="utf-8")
+            except OSError as e:
+                _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+                return
+
+        _dak = (_PKG_ROOT / "plugin" / "hub-agent" / "skills"
+                / "dak" / "scripts" / "dak.py")
+        cmd = ["python3", str(_dak), str(publish_path),
+               "--slug", slug, "--title", slug]
+        self._send(200, "application/json", json.dumps({
+            "ok": True,
+            "command": " ".join(cmd),
+            "bundle": str(out_path),
+            "findings": findings,
+            "dak_present": _dak.exists(),
+        }).encode())
+
+    def _publish_revoke(self, body: dict) -> None:
+        """Forget a task's published-state entry, then rebuild so the marker clears.
+
+        Body is JSON ``{slug, repo?}``. Local-only: Hub removes the sidecar entry
+        (the UI twin of `hub publish --task <slug> --revoke`) and makes no network
+        call. The rebuild re-bakes the (now smaller) published map into the page.
+        """
+        from ..core import publish as _publish
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        slug = (body.get("slug") or "").strip()
+        repo = (body.get("repo") or "").strip() or None
+        if not slug:
+            _fail(400, {"ok": False, "error": "slug required"})
+            return
+        removed = _publish.revoke_published(repo, slug)
+        result = self._rebuild(_active_root)
+        if result.returncode != 0:
+            import sys as _sys2
+            print(result.stderr or result.stdout, file=_sys2.stderr)
+        self._send(200, "application/json",
+                   json.dumps({"ok": True, "removed": removed}).encode())
 
     def _save_draw(self, rel, scene, dir_=None, name=None) -> None:
         """Persist an Excalidraw scene into the vault.

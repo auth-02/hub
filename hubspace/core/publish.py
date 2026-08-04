@@ -131,3 +131,73 @@ def summary(findings: list[dict]) -> str:
     parts = ", ".join(f'{f["kind"]} (L{f["line"]})' for f in findings)
     n = len(findings)
     return f"⚠ {n} finding{'s' if n != 1 else ''} — {parts}"
+
+
+# ── Published-state sidecar (roadmap 1g) ──────────────────────────────────────
+# A tiny JSON map recording which tasks have been published, so the hub can show
+# a PUBLISHED marker (URL + republish/revoke) on a task row. It lives beside the
+# other generated state under state_dir() and is keyed by "<repo>\t<slug>" — the
+# same tab-joined key the UI uses for O(1) lookup. Writing it makes no network
+# call; it only remembers what a successful `hub publish --task` already did.
+import json as _json
+from pathlib import Path as _Path
+
+
+def published_key(repo: str | None, slug: str) -> str:
+    """The stable "<repo>\\t<slug>" sidecar key (empty repo → "(root)")."""
+    return f"{repo or '(root)'}\t{slug}"
+
+
+def published_path():
+    """Location of the published-state sidecar (``state_dir()/published.json``)."""
+    from . import config
+    return config.state_dir() / "published.json"
+
+
+def load_published(path=None) -> dict:
+    """Read the published-state map, or ``{}`` if it is missing/unreadable."""
+    p = _Path(path) if path else published_path()
+    if not p.exists():
+        return {}
+    try:
+        data = _json.loads(p.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def record_published(repo: str | None, slug: str, url: str,
+                     mode: str = "snapshot", path=None) -> dict:
+    """Record a successful publish and return the updated map.
+
+    Idempotent per key: republishing overwrites the entry with a fresh
+    ``{url, at, mode}``. The ``at`` timestamp is a local ISO-ish string.
+    """
+    from datetime import datetime
+    p = _Path(path) if path else published_path()
+    data = load_published(p)
+    data[published_key(repo, slug)] = {
+        "url": url,
+        "at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "mode": mode,
+    }
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_json.dumps(data, indent=2), encoding="utf-8")
+    return data
+
+
+def revoke_published(repo: str | None, slug: str, path=None) -> bool:
+    """Forget a published entry locally. Returns True if an entry was removed.
+
+    Hub only forgets the local record here (the sidecar); un-publishing the
+    remote copy is dak's job and is invoked separately by the caller if desired.
+    """
+    p = _Path(path) if path else published_path()
+    data = load_published(p)
+    key = published_key(repo, slug)
+    if key not in data:
+        return False
+    del data[key]
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_json.dumps(data, indent=2), encoding="utf-8")
+    return True

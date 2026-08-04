@@ -162,7 +162,7 @@ def _first_run_html(root: Path) -> str:
     )
 
 
-def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]", timeline_json: str = "{}", tasks_json: str = "[]", task_timeline_json: str = "{}") -> str:
+def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]", timeline_json: str = "{}", tasks_json: str = "[]", task_timeline_json: str = "{}", published_json: str = "{}") -> str:
     total     = sum(len(v) for v in groups.values())
     md_total  = sum(1 for v in groups.values() for f in v if f["ext"] == "md")
     html_total = total - md_total
@@ -241,6 +241,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         default_view_json=json.dumps(DEFAULT_VIEW),
         upload_exts_json=json.dumps(sorted(UPLOAD_EXTS)),
         private_json=json.dumps(PRIVATE),
+        published_json=published_json,
     )
 
 
@@ -556,6 +557,102 @@ def _cmd_publish(path_arg: str, *, reviewed: bool, do_redact: bool,
     sys.exit(result.returncode)
 
 
+def _cmd_publish_task(slug: str, *, repo: str | None, include_external: bool,
+                      out: str | None, reviewed: bool, do_redact: bool,
+                      dry_run: bool, title: str | None, mode: str | None) -> None:
+    """hub publish --task <slug> — freeze a task subtree to self-contained HTML,
+    run the SAME S5a redaction gate over it, then hand off to dak (roadmap 1g).
+
+    Hub's work is pure local rendering (:mod:`render.bundle`) + the shared
+    privacy scan (:mod:`core.publish`); the upload is dak's job. The bundle is
+    written under ``state_dir()/publish/`` — NEVER into the scan root. On a real
+    (non-dry-run) publish that dak accepts, the published-state sidecar records
+    ``{url, at, mode}`` so the hub can show a PUBLISHED marker. ``[hub] private``
+    refuses entirely.
+    """
+    from ..core import publish as _publish
+    from ..core import query
+    from ..render import bundle as _bundle
+
+    if config.is_private(CONFIG):
+        print("  refusing: this workspace is private ([hub] private = true)")
+        sys.exit(2)
+
+    conn = query.connect()
+    try:
+        try:
+            html = _bundle.render_task_bundle(
+                conn, repo, slug, include_external=include_external)
+        except ValueError as e:
+            print(f"  error: {e}")
+            sys.exit(1)
+    finally:
+        if conn is not None:
+            conn.close()
+
+    # Write the bundle under state_dir()/publish — never into the scan root.
+    if out:
+        out_path = Path(out).expanduser()
+        if not out_path.is_absolute():
+            out_path = Path.cwd() / out_path
+    else:
+        stem = f"{(repo or 'root')}-{slug}"
+        out_path = config.state_dir() / "publish" / f"{stem}.html"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(html, encoding="utf-8")
+    print(f"  bundle → {out_path}")
+
+    # Same gate as `hub publish <path>`: scan the PRODUCED HTML.
+    findings = _publish.scan(html)
+    if findings:
+        print(f"  {_publish.summary(findings)}")
+    else:
+        print("  ✓ scan clean — no findings")
+
+    publishing = reviewed or do_redact
+    if not publishing:
+        sys.exit(1 if findings else 0)
+
+    publish_path = out_path
+    if do_redact and findings:
+        redacted = _publish.redact(html, findings)
+        publish_path = out_path.with_suffix(".redacted.html")
+        publish_path.write_text(redacted, encoding="utf-8")
+        print(f"  redacted copy → {publish_path}  (bundle untouched)")
+
+    dak = _dak_script()
+    cmd = ["python3", str(dak), str(publish_path)]
+    if mode:
+        cmd += ["--mode", mode]
+    cmd += ["--slug", slug, "--title", title or slug]
+    if dry_run:
+        cmd += ["--dry-run"]
+
+    if not dak.exists():
+        print("  dak not bundled here — run this to publish:")
+        print("    " + " ".join(cmd))
+        return
+    print("  handing off to dak:")
+    print("    " + " ".join(cmd))
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
+    # Record published-state only on a real, accepted publish (not dry-run).
+    if result.returncode == 0 and not dry_run:
+        import re
+        url = ""
+        for line in (result.stdout or "").splitlines():
+            m = re.search(r"https?://\S+", line)
+            if m:
+                url = m.group(0)
+                break
+        _publish.record_published(repo, slug, url, mode=mode or "snapshot")
+        print(f"  recorded published-state ({_publish.published_path()})")
+    sys.exit(result.returncode)
+
+
 def main() -> None:
     global ROOT
     ap = argparse.ArgumentParser(
@@ -628,8 +725,18 @@ def main() -> None:
 
     # hub publish <path> — privacy gate (scan → review/redact) + handoff to dak.
     # Hub does the local scan only; dak (a separate script) does the upload.
-    pub_p = sub.add_parser("publish", help="Scan + publish one asset via dak (hub publish <path>)")
-    pub_p.add_argument("path", help="File to publish (absolute or CWD-relative)")
+    pub_p = sub.add_parser("publish", help="Scan + publish an asset or a whole task via dak (hub publish <path> | --task <slug>)")
+    pub_p.add_argument("path", nargs="?", default=None,
+                       help="File to publish (absolute or CWD-relative). Omit with --task.")
+    # 1g — freeze a whole task subtree to a self-contained bundle and publish it.
+    pub_p.add_argument("--task", default=None,
+                       help="Publish a whole task subtree as one self-contained HTML bundle")
+    pub_p.add_argument("--include-external", dest="include_external", action="store_true",
+                       help="Inline cross-task lineage refs (default: mark them excluded)")
+    pub_p.add_argument("--out", default=None,
+                       help="Bundle output path (default: state_dir()/publish/<repo>-<slug>.html)")
+    pub_p.add_argument("--revoke", action="store_true",
+                       help="With --task: forget the local published-state entry and exit")
     gate = pub_p.add_mutually_exclusive_group()
     gate.add_argument("--redact-scan", action="store_true",
                       help="Only run the scan and exit non-zero if findings exist (default)")
@@ -641,6 +748,7 @@ def main() -> None:
     pub_p.add_argument("--title", default=None, help="Title for the published page")
     pub_p.add_argument("--mode", choices=["snapshot", "live"], default=None, help="dak publish mode")
     pub_p.add_argument("--slug", default=None, help="dak URL slug")
+    pub_p.add_argument("--repo", default=None, help="With --task: owning repo (disambiguates a slug)")
 
     # hub agent {install|uninstall|status} — persistent launchd agent (macOS).
     # Reusable by both the package launchd script and the plugin daemon script;
@@ -692,6 +800,27 @@ def main() -> None:
         _cmd_draw(args.name, args.task, args.repo)
         return
     if args.cmd == "publish":
+        if args.task:
+            if args.revoke:
+                from ..core import publish as _publish
+                removed = _publish.revoke_published(args.repo, args.task)
+                print("  revoked" if removed else "  no published-state entry to revoke")
+                return
+            _cmd_publish_task(
+                args.task,
+                repo=args.repo,
+                include_external=args.include_external,
+                out=args.out,
+                reviewed=args.reviewed,
+                do_redact=args.do_redact,
+                dry_run=args.dry_run,
+                title=args.title,
+                mode=args.mode,
+            )
+            return
+        if not args.path:
+            print("  error: give a file path or --task <slug>")
+            sys.exit(1)
         _cmd_publish(
             args.path,
             reviewed=args.reviewed,
@@ -765,8 +894,13 @@ def main() -> None:
     )
     task_timeline_json = json.dumps(task_timelines, separators=(",", ":"))
 
+    # 1g — bake the published-state sidecar so a published task row can show a
+    # PUBLISHED marker (URL + republish/revoke). Read-only; a missing file → {}.
+    from ..core import publish as _publish
+    published_json = json.dumps(_publish.load_published(), separators=(",", ":"))
+
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(render(groups, fts_json, lineage_json, task_status_json, activity_json, timeline_json, tasks_json, task_timeline_json), encoding="utf-8")
+    OUTPUT.write_text(render(groups, fts_json, lineage_json, task_status_json, activity_json, timeline_json, tasks_json, task_timeline_json, published_json), encoding="utf-8")
     total = sum(len(v) for v in groups.values())
     log(f"[hub] scanned {ROOT} -> {OUTPUT} ({total} files, {len(groups)} groups, {len(all_tasks)} tasks)")
 

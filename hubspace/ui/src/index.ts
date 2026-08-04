@@ -6,6 +6,13 @@ import "./hub.css";
 const ftsMap=new Map(FTS_DATA.map(d=>[d.a,d]));
 const STATUS_CYCLE=['ongoing','completed','paused'];
 
+// 1g — published-state lookup. PUBLISHED_DATA is the baked state_dir()/published.json
+// map keyed by "<repo>\t<slug>" → {url, at, mode}. Missing/undefined → not published.
+function publishedFor(t){
+  if(typeof PUBLISHED_DATA==='undefined'||!PUBLISHED_DATA) return null;
+  return PUBLISHED_DATA[(t.rp||'(root)')+'\t'+t.sl]||null;
+}
+
 // ── DOM refs ──────────────────────────────────────────────────────────────
 const q=document.getElementById('q');
 const rows=[...document.querySelectorAll('.row')];
@@ -508,6 +515,28 @@ function renderCalendar(){
 document.getElementById('cal-prev').addEventListener('click',()=>{calRef.setMonth(calRef.getMonth()-1);renderCalendar();});
 document.getElementById('cal-next').addEventListener('click',()=>{calRef.setMonth(calRef.getMonth()+1);renderCalendar();});
 
+// 1g — PUBLISHED marker actions (republish / revoke). Delegated once at module
+// scope so re-renders never stack listeners. Republish re-runs the bundle flow;
+// revoke forgets the local published-state entry (server: POST /_publish-revoke).
+document.addEventListener('click',e=>{
+  const row=e.target.closest&&e.target.closest('.task-row');
+  if(!row)return;
+  if(e.target.closest('[data-pub-republish]')){
+    e.preventDefault();e.stopPropagation();
+    if(window._publishBundle)window._publishBundle({sl:row.dataset.sl,rp:row.dataset.rp});
+    return;
+  }
+  if(e.target.closest('[data-pub-revoke]')){
+    e.preventDefault();e.stopPropagation();
+    fetch('/_publish-revoke',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({slug:row.dataset.sl,repo:row.dataset.rp})})
+      .then(r=>r.json()).then(d=>{
+        if(d&&d.ok){flash('revoked '+row.dataset.sl);location.reload();}
+        else flash('revoke failed');
+      }).catch(()=>flash('revoke failed'));
+  }
+});
+
 // ── Work view ─────────────────────────────────────────────────────────────
 function renderWorkView(){
   const raw=q.value.trim().toLowerCase();
@@ -558,10 +587,15 @@ function renderWorkView(){
       linParts.push(`plan ${done}/${t.plan.length}`);
     }
     const orphanBadge=t.orphan?`<span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--mute);border:1px solid var(--line);padding:1px 5px;margin-left:6px;vertical-align:middle">no manifest</span>`:'';
+    const pub=publishedFor(t);
+    const pubBadge=pub?`<span class="task-pub" title="published ${esc(pub.at||'')}">${
+      pub.url?`<a href="${esc(pub.url)}" target="_blank" rel="noopener">PUBLISHED</a>`:'PUBLISHED'
+    }<button class="task-pub-act" data-pub-republish title="Republish (re-render + hand off to dak)">↻</button>`+
+      `<button class="task-pub-act" data-pub-revoke title="Revoke (forget this published link)">✕</button></span>`:'';
     return `<div class="task-row" data-abs="${esc(t.abs||'')}" data-sl="${esc(t.sl)}" data-rp="${esc(t.rp)}">
       <span class="task-tick ${dotCls}"></span>
       <div class="task-body">
-        <div class="task-name">${esc(tagName(t.sl))}${orphanBadge}</div>
+        <div class="task-name">${esc(tagName(t.sl))}${orphanBadge}${pubBadge}</div>
         <div class="task-loc"><span class="t-repo">${esc(t.rp)}</span> · tasks/${esc(t.sl)}</div>
         ${linParts.length?`<div class="task-lin">${linParts.join(' · ')}</div>`:''}
       </div>
@@ -963,6 +997,10 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     if(typeof PRIVATE==='undefined' || !PRIVATE){
       a.push({type:'action',write:true,id:'act:publish',ic:'✎',label:'Publish',
        cli:'hub publish <path>',prim:()=>openPublish(null)});
+      // 1g — freeze the current/selected task's subtree to a self-contained
+      // bundle (its trace baked static) and hand off to dak. ⇧B in the comp.
+      a.push({type:'action',write:true,id:'act:bundle',key:'B',ic:'⌗',label:'Trace bundle',
+       cli:'hub publish --task <slug>',prim:()=>publishBundle(null)});
     }
     return a;
   }
@@ -1494,6 +1532,41 @@ document.getElementById('rebuild').addEventListener('click',e=>{
       }).catch(()=>{pubGoBtn.disabled=false;flash('publish failed');});
   }
 
+  // 1g — Trace bundle. Modest flow (no full sheet): resolve the current/selected
+  // task, POST /_publish-bundle (server renders the self-contained bundle + runs
+  // the same scan), and copy the exact dak command. Hub opens no socket — the
+  // upload is the user's dak run. A findings count is surfaced in the toast.
+  function currentTask(){
+    if(window._graphTaskCtx) return window._graphTaskCtx;
+    const el=document.querySelector('.task-card,[data-sl]');
+    if(el&&el.dataset&&el.dataset.sl){
+      const t=(typeof TASKS_DATA!=='undefined')&&TASKS_DATA.find(x=>x.sl===el.dataset.sl);
+      if(t) return t;
+    }
+    return (typeof TASKS_DATA!=='undefined'&&TASKS_DATA.length)?TASKS_DATA[0]:null;
+  }
+  function publishBundle(task){
+    if(typeof PRIVATE!=='undefined'&&PRIVATE){flash('this workspace is private');return;}
+    const t=task||currentTask();
+    if(!t){flash('no task to bundle');return;}
+    closePalette();
+    flash('rendering bundle for '+t.sl+'…');
+    fetch('/_publish-bundle',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({slug:t.sl,repo:t.rp})})
+      .then(r=>r.json().then(d=>({ok:r.ok,d:d})).catch(()=>({ok:r.ok,d:{}})))
+      .then(res=>{
+        const d=res.d||{};
+        if(res.ok&&d.command){
+          const n=(d.findings||[]).length;
+          const warn=n?(' — ⚠ '+n+' finding'+(n!==1?'s':'')+', review before publishing'):'';
+          copy(d.command,'dak command copied — run it to publish'+warn);
+          return;
+        }
+        flash(d.error==='private'?'this workspace is private':('bundle failed'+(d.error?': '+d.error:'')));
+      }).catch(()=>flash('bundle failed'));
+  }
+  window._publishBundle=publishBundle;
+
   pubFileSel.addEventListener('change',pubScan);
   pubListEl.addEventListener('change',e=>{
     const cb=e.target.closest('input[type=checkbox]');if(!cb)return;
@@ -1538,6 +1611,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     else if(k==='g'){e.preventDefault();if(window._openGraphFor)window._openGraphFor(null);}
     else if(e.key==='?'){e.preventDefault();help.classList.add('show');}
     else if(k==='y'){e.preventDefault();if(window._toggleTimeline)window._toggleTimeline();}
+    else if(k==='b'&&e.shiftKey){e.preventDefault();if(window._publishBundle)window._publishBundle(null);}
     else if('1234'.includes(e.key)&&window._setView){
       e.preventDefault();window._setView(['work','list','board','calendar'][+e.key-1]);}
   });
