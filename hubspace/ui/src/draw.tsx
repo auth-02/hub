@@ -29,6 +29,41 @@ const Excalidraw = lazy(() =>
   import("@excalidraw/excalidraw").then((m) => ({ default: m.Excalidraw })),
 );
 
+// Allow embedding Hub pages (localhost / same-origin) inside the canvas. Without
+// this, Excalidraw's built-in allowlist rejects http://localhost:PORT/… with
+// "Embedding this url is currently not allowed". Returning `undefined` for any
+// other host defers to Excalidraw's default allowlist (YouTube, etc.).
+function validateEmbeddable(link: string): boolean | undefined {
+  try {
+    const u = new URL(link, window.location.origin);
+    if (
+      u.origin === window.location.origin ||
+      u.hostname === "localhost" ||
+      u.hostname === "127.0.0.1" ||
+      u.hostname === "[::1]"
+    ) {
+      return true;
+    }
+  } catch {
+    /* not a parseable URL — let the default validator decide */
+  }
+  return undefined;
+}
+
+// Object hyperlinks: always open in a NEW tab so the canvas session survives.
+// Excalidraw's default treats a localhost/same-origin link as "local" and opens
+// it with target=_self (replacing the canvas). We preempt that: preventDefault
+// on the cancelable excalidraw-link event, then open the link ourselves.
+function onLinkOpen(
+  element: any,
+  event: CustomEvent<{ nativeEvent: MouseEvent | PointerEvent }>,
+): void {
+  const link: string | null = element && element.link;
+  if (!link) return;
+  event.preventDefault();
+  window.open(link, "_blank", "noopener,noreferrer");
+}
+
 function App() {
   const apiRef = useRef<any>(null);
   const relRef = useRef<string | null>(STATE.rel);
@@ -105,6 +140,8 @@ function App() {
       <Excalidraw
         excalidrawAPI={(api: any) => (apiRef.current = api)}
         initialData={STATE.data || undefined}
+        validateEmbeddable={validateEmbeddable}
+        onLinkOpen={onLinkOpen}
       />
       {naming && (
         <div
