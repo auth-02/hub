@@ -1904,13 +1904,15 @@ document.getElementById('rebuild').addEventListener('click',e=>{
   // window._openComposer (defined at module scope); there is no in-palette note
   // screen anymore. See the "Floating comment composer" block above.
 
-  // ── publish confirm sheet (1f) ─────────────────────────────────────────────
+  // ── publish confirm sheet (1f / S11) ───────────────────────────────────────
   // Publishing is deliberately high-friction: scan → review/redact → confirm.
   // It NEVER fires on ↵. The scan is computed server-side (POST /_publish-scan)
   // so the UI and the `hub publish` CLI share ONE scanner (core/publish.py). The
   // redact toggles below apply only to the published COPY — the source file is
-  // never modified. Publish hands off to dak (Hub makes no network call): the
-  // server returns the exact dak command via POST /_publish for the user to run.
+  // never modified. The Publish button is now ONE CLICK: POST /_publish, which
+  // hands off to the bundled dak SUBPROCESS (Hub itself opens no socket — the
+  // subprocess is the network edge), then shows the resulting URL inline. No
+  // copy-a-command / run-it-yourself step.
   const pubScreen=document.getElementById('pal-publish-screen');
   const pubFileSel=document.getElementById('pal-pub-file');
   const pubFileDD=themeSelect(pubFileSel);
@@ -1951,6 +1953,8 @@ document.getElementById('rebuild').addEventListener('click',e=>{
   }
   function pubScan(){
     const abs=pubFileSel.value;
+    const resEl=document.getElementById('pal-pub-result');
+    if(resEl){resEl.classList.add('hidden');resEl.innerHTML='';}
     pubFindings=[];pubKeep=[];
     if(!abs){pubScanEl.textContent='pick an asset';pubScanEl.className='pal-pub-scan';pubListEl.innerHTML='';pubGoBtn.disabled=true;return;}
     pubScanEl.textContent='scanning…';pubScanEl.className='pal-pub-scan';
@@ -1983,29 +1987,50 @@ document.getElementById('rebuild').addEventListener('click',e=>{
   window._openPublish=openPublish;
   function pubBack(){pubScreen.classList.add('hidden');searchScreen.classList.remove('hidden');openPalette('');}
 
+  // S11 — render the published URL inline in the sheet: a clickable mono link
+  // plus a small "copy URL" affordance. This replaces the old "copy this dak
+  // command / run it yourself" step — publishing is now one click.
+  function pubShowResult(url){
+    const el=document.getElementById('pal-pub-result');if(!el)return;
+    el.classList.remove('hidden');
+    el.innerHTML='<span class="pal-pub-live">✓ published</span>'+
+      '<a class="pal-pub-url" href="'+esc(url)+'" target="_blank" rel="noopener">'+esc(url)+'</a>'+
+      '<button class="pal-pub-copy" type="button" title="copy URL">copy</button>';
+    const cp=el.querySelector('.pal-pub-copy');
+    if(cp)cp.onclick=()=>copy(url,'URL copied');
+  }
   function pubPublish(){
     const abs=pubFileSel.value;
     if(!abs){flash('pick an asset');return;}
+    // Always send the reviewed redact set (even empty) — that opts past the
+    // findings gate. Default is redact-everything (see pubScan).
     const redact_indices=pubKeep.map((k,i)=>k?i:-1).filter(i=>i>=0);
-    pubGoBtn.disabled=true;
+    pubGoBtn.disabled=true;pubGoBtn.textContent='publishing…';
     fetch('/_publish',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({path:abs,redact_indices:redact_indices,title:pubTitle.value.trim()})})
+      body:JSON.stringify({path:abs,redact_indices:redact_indices,review:true,title:pubTitle.value.trim()})})
       .then(r=>r.json().then(d=>({ok:r.ok,d:d})).catch(()=>({ok:r.ok,d:{}})))
       .then(res=>{
-        pubGoBtn.disabled=false;
+        pubGoBtn.disabled=false;pubGoBtn.textContent='Publish';
         const d=res.d||{};
-        if(res.ok&&d.command){
-          copy(d.command,'dak command copied — run it to publish');
+        if(res.ok&&d.url){
+          pubShowResult(d.url);
+          flash('published · '+d.url);
           return;
         }
-        flash(d.error==='private'?'this workspace is private':('publish failed'+(d.error?': '+d.error:'')));
-      }).catch(()=>{pubGoBtn.disabled=false;flash('publish failed');});
+        const detail=d.detail?(': '+String(d.detail).split('\n').slice(-1)[0]):'';
+        flash(d.error==='private'?'this workspace is private':
+              d.error==='dak_unavailable'?'dak not set up — run its one-time setup':
+              ('publish failed'+detail));
+      }).catch(()=>{pubGoBtn.disabled=false;pubGoBtn.textContent='Publish';flash('publish failed');});
   }
 
-  // 1g — Trace bundle. Modest flow (no full sheet): resolve the current/selected
-  // task, POST /_publish-bundle (server renders the self-contained bundle + runs
-  // the same scan), and copy the exact dak command. Hub opens no socket — the
-  // upload is the user's dak run. A findings count is surfaced in the toast.
+  // 1g / S11 — Trace bundle, ONE CLICK. Resolve the current/selected task, POST
+  // /_publish-bundle (server renders the self-contained bundle, runs the same
+  // scan, then hands off to the dak SUBPROCESS which uploads — Hub opens no
+  // socket itself), and surface the resulting URL. We send redact:true so any
+  // findings in the bundle are sanitized before it leaves the machine. The
+  // server records published-state + rebuilds, so the row's PUBLISHED marker
+  // (republish / revoke) appears on the next render.
   function currentTask(){
     if(window._graphTaskCtx) return window._graphTaskCtx;
     const el=document.querySelector('.task-card,[data-sl]');
@@ -2020,20 +2045,26 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     const t=task||currentTask();
     if(!t){flash('no task to bundle');return;}
     closePalette();
-    flash('rendering bundle for '+t.sl+'…');
+    flashSticky('publishing bundle for '+t.sl+'…');
     fetch('/_publish-bundle',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({slug:t.sl,repo:t.rp})})
+      body:JSON.stringify({slug:t.sl,repo:t.rp,redact:true,review:true})})
       .then(r=>r.json().then(d=>({ok:r.ok,d:d})).catch(()=>({ok:r.ok,d:{}})))
       .then(res=>{
         const d=res.d||{};
-        if(res.ok&&d.command){
+        if(res.ok&&d.url){
           const n=(d.findings||[]).length;
-          const warn=n?(' — ⚠ '+n+' finding'+(n!==1?'s':'')+', review before publishing'):'';
-          copy(d.command,'dak command copied — run it to publish'+warn);
+          const red=n?(' · '+n+' finding'+(n!==1?'s':'')+' redacted'):'';
+          copy(d.url,'published · '+d.url+red);
+          // Server recorded published-state + rebuilt; reload so the row's
+          // PUBLISHED marker (republish/revoke) shows (matches revoke flow).
+          setTimeout(()=>location.reload(),700);
           return;
         }
-        flash(d.error==='private'?'this workspace is private':('bundle failed'+(d.error?': '+d.error:'')));
-      }).catch(()=>flash('bundle failed'));
+        const detail=d.detail?(': '+String(d.detail).split('\n').slice(-1)[0]):'';
+        flash(d.error==='private'?'this workspace is private':
+              d.error==='dak_unavailable'?'dak not set up — run its one-time setup':
+              ('publish failed'+detail));
+      }).catch(()=>flash('publish failed'));
   }
   window._publishBundle=publishBundle;
 

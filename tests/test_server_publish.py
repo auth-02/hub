@@ -1,13 +1,16 @@
-"""Tests for the 1f publish endpoints — POST /_publish-scan and POST /_publish.
+"""Tests for the 1f/S11 publish endpoints — POST /_publish-scan and /_publish.
 
 /_publish-scan runs the SAME core.publish scanner the CLI uses and guards the
-path (must resolve inside the active scan root). /_publish prepares the local
-publish (writes a sanitized copy for the redacted subset, original untouched)
-and returns the dak command string — Hub never makes a network call here.
+path (must resolve inside the active scan root). /_publish now performs a
+ONE-CLICK publish: it prepares the local (possibly redacted) copy — original
+untouched — then hands off to the bundled dak SUBPROCESS (the network edge; Hub
+itself opens no socket) and returns the resulting URL. These tests stub
+subprocess.run so they NEVER hit the network.
 """
 import json
 import os
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
@@ -20,7 +23,29 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from hubspace.cli import server
-from hubspace.core import db as _db
+from hubspace.core import db as _db, publish as _publish
+
+_FAKE_URL = "https://report-abc123.atharva-dak.workers.dev"
+
+
+def _fake_dak(url=_FAKE_URL, rc=0, stderr=""):
+    """A stand-in for subprocess.run: dak (last stdout line = URL) or rebuild.
+
+    Routes by command so a single patch covers BOTH the dak hand-off and the
+    server's own rebuild subprocess — neither ever touches the network.
+    """
+    calls = []
+
+    def _run(cmd, *a, **kw):
+        calls.append(list(cmd))
+        if any("dak.py" in str(c) for c in cmd):
+            out = "" if rc else f"staged (dry-run)\n{url}\n"
+            return subprocess.CompletedProcess(cmd, rc, stdout=out, stderr=stderr)
+        # anything else (e.g. the index rebuild) — succeed cheaply
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    _run.calls = calls
+    return _run
 
 
 def _free_port() -> int:
@@ -107,20 +132,58 @@ class TestPublishEndpoints(unittest.TestCase):
         status, d = _post(self._port, "/_publish-scan", {})
         self.assertEqual(status, 400)
 
-    def test_publish_returns_dak_command_and_writes_copy(self):
-        status, d = _post(self._port, "/_publish",
-                          {"path": "report.md", "redact_indices": [0, 1],
-                           "title": "My Report"})
+    def test_publish_runs_dak_and_returns_url(self):
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish",
+                              {"path": "report.md", "redact_indices": [0, 1],
+                               "title": "My Report", "dryRun": True})
         self.assertEqual(status, 200)
         self.assertTrue(d["ok"])
-        self.assertIn("dak.py", d["command"])
-        self.assertIn("--title", d["command"])
+        self.assertEqual(d["url"], _FAKE_URL)
+        # dak was invoked with the produced (redacted) copy path + the title
+        dak_cmd = next(c for c in fake.calls if any("dak.py" in str(x) for x in c))
+        self.assertIn("--title", dak_cmd)
+        self.assertIn("My Report", dak_cmd)
+        self.assertIn(d["copy"], dak_cmd)
         # original file is never modified
         self.assertIn("bob@corp.internal", self.asset.read_text(encoding="utf-8"))
-        # a sanitized copy was written and is what dak would receive
+        # a sanitized copy was written and is what dak received
         self.assertTrue(d["copy"])
         copy_text = Path(d["copy"]).read_text(encoding="utf-8")
         self.assertNotIn("bob@corp.internal", copy_text)
+        # published-state recorded for the asset, keyed by its path
+        pub = _publish.load_published(Path(self._state) / "published.json")
+        self.assertIn(_publish.published_asset_key(self.asset), pub)
+        self.assertEqual(pub[_publish.published_asset_key(self.asset)]["url"], _FAKE_URL)
+
+    def test_publish_gate_refuses_unreviewed_findings(self):
+        # No redact_indices key and no review flag → the findings gate refuses,
+        # and dak is never spawned.
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish", {"path": "report.md"})
+        self.assertEqual(status, 403)
+        self.assertEqual(d.get("error"), "unreviewed_findings")
+        self.assertTrue(d["findings"])
+        self.assertEqual(fake.calls, [])
+
+    def test_publish_dak_unavailable(self):
+        # Point _PKG_ROOT at a tree with no bundled dak → clean JSON error.
+        with patch.object(server, "_PKG_ROOT", Path(self._state)):
+            status, d = _post(self._port, "/_publish",
+                              {"path": "report.md", "review": True})
+        self.assertFalse(d.get("ok", True))
+        self.assertEqual(d.get("error"), "dak_unavailable")
+
+    def test_publish_dak_failure(self):
+        fake = _fake_dak(rc=1, stderr="Not configured. Run: dak setup\n")
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish",
+                              {"path": "report.md", "review": True})
+        self.assertFalse(d.get("ok", True))
+        self.assertEqual(d.get("error"), "publish_failed")
+        self.assertIn("Not configured", d.get("detail", ""))
 
     def test_publish_private_refuses(self):
         with patch.object(server.config, "load_config", lambda *a, **k: {"private": True}):

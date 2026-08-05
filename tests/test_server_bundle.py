@@ -1,15 +1,17 @@
-"""Tests for the 1g task-bundle endpoints — POST /_publish-bundle and
+"""Tests for the 1g/S11 task-bundle endpoints — POST /_publish-bundle and
 POST /_publish-revoke.
 
 /_publish-bundle renders a task subtree to a self-contained bundle under
-state_dir()/publish (NEVER the scan root), runs the same core.publish scan, and
-returns the dak command — Hub makes no network call. /_publish-revoke forgets a
-task's published-state entry locally and rebuilds. Both mirror `hub publish
---task` so the CLI and UI share one code path.
+state_dir()/publish (NEVER the scan root), runs the same core.publish scan, then
+hands off to the dak SUBPROCESS (the network edge — Hub itself opens no socket)
+and returns the resulting URL, recording published-state. /_publish-revoke
+forgets a task's published-state entry locally and rebuilds. These tests stub
+subprocess.run so they NEVER hit the network.
 """
 import json
 import os
 import socket
+import subprocess
 import sys
 import tempfile
 import threading
@@ -23,6 +25,23 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from hubspace.cli import server
 from hubspace.core import db as _db, publish as _publish
+
+_BUNDLE_URL = "https://auth-refactor-abc123.atharva-dak.workers.dev"
+
+
+def _fake_dak(url=_BUNDLE_URL, rc=0, stderr=""):
+    """Stand-in for subprocess.run covering BOTH dak and the index rebuild."""
+    calls = []
+
+    def _run(cmd, *a, **kw):
+        calls.append(list(cmd))
+        if any("dak.py" in str(c) for c in cmd):
+            out = "" if rc else f"staged\n{url}\n"
+            return subprocess.CompletedProcess(cmd, rc, stdout=out, stderr=stderr)
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    _run.calls = calls
+    return _run
 
 _TS = time.mktime((2026, 7, 22, 12, 0, 0, 0, 0, -1))
 
@@ -114,12 +133,22 @@ class TestBundleEndpoints(unittest.TestCase):
         shutil.rmtree(cls._scan_root, ignore_errors=True)
         shutil.rmtree(cls._state, ignore_errors=True)
 
-    def test_bundle_writes_under_state_and_returns_command(self):
-        status, d = _post(self._port, "/_publish-bundle",
-                          {"slug": "auth-refactor", "repo": "cortex"})
+    def test_bundle_writes_under_state_and_runs_dak(self):
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish-bundle",
+                              {"slug": "auth-refactor", "repo": "cortex",
+                               "dryRun": True})
         self.assertEqual(status, 200)
         self.assertTrue(d["ok"])
-        self.assertIn("dak.py", d["command"])
+        self.assertEqual(d["url"], _BUNDLE_URL)
+        # dak was spawned with the produced bundle path
+        dak_cmd = next(c for c in fake.calls if any("dak.py" in str(x) for x in c))
+        self.assertTrue(any("cortex-auth-refactor" in str(x) for x in dak_cmd))
+        # published-state recorded under the S5b sidecar key
+        pub = _publish.load_published(Path(self._state) / "published.json")
+        self.assertEqual(pub[_publish.published_key("cortex", "auth-refactor")]["url"],
+                         _BUNDLE_URL)
         produced = Path(self._state) / "publish" / "cortex-auth-refactor.html"
         self.assertTrue(produced.exists())
         html = produced.read_text(encoding="utf-8")
@@ -138,6 +167,20 @@ class TestBundleEndpoints(unittest.TestCase):
     def test_bundle_missing_slug_400(self):
         status, d = _post(self._port, "/_publish-bundle", {})
         self.assertEqual(status, 400)
+
+    def test_bundle_gate_refuses_unreviewed_findings(self):
+        # With findings and neither redact nor review, the gate refuses and dak
+        # is never spawned. Patch the shared scanner to surface one finding.
+        finding = [{"line": 1, "kind": "host",
+                    "text": "box.corp.internal", "span": [0, 17]}]
+        fake = _fake_dak()
+        with patch.object(_publish, "scan", lambda *_a, **_k: finding), \
+             patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish-bundle",
+                              {"slug": "auth-refactor", "repo": "cortex"})
+        self.assertEqual(status, 403)
+        self.assertEqual(d.get("error"), "unreviewed_findings")
+        self.assertEqual(fake.calls, [])
 
     def test_bundle_private_refuses(self):
         with patch.object(server.config, "load_config", lambda *a, **k: {"private": True}):

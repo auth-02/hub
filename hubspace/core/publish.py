@@ -186,6 +186,33 @@ def record_published(repo: str | None, slug: str, url: str,
     return data
 
 
+# ── Published-state for a single asset (roadmap 1f, S11) ───────────────────────
+# One-click asset publish records an equivalent entry in the SAME published.json
+# sidecar, keyed by the asset's absolute path (prefixed so it can never collide
+# with a "<repo>\t<slug>" task key). Recording it is local-only — no network call.
+
+
+def published_asset_key(path) -> str:
+    """Stable sidecar key for a single published asset (``asset\\t<abspath>``)."""
+    return f"asset\t{_Path(path).resolve()}"
+
+
+def record_published_asset(path, url: str, mode: str = "snapshot",
+                           sidecar=None) -> dict:
+    """Record a successful one-click asset publish and return the updated map."""
+    from datetime import datetime
+    p = _Path(sidecar) if sidecar else published_path()
+    data = load_published(p)
+    data[published_asset_key(path)] = {
+        "url": url,
+        "at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        "mode": mode,
+    }
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_json.dumps(data, indent=2), encoding="utf-8")
+    return data
+
+
 def revoke_published(repo: str | None, slug: str, path=None) -> bool:
     """Forget a published entry locally. Returns True if an entry was removed.
 

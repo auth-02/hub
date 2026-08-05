@@ -679,6 +679,54 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         self._send(200, "application/json",
                    json.dumps({"ok": True, "rel": rel, "mtime": new_mtime}).encode())
 
+    def _run_dak(self, publish_path, title: str, *, mode=None, slug=None,
+                 dry_run: bool = False):
+        """Spawn the bundled ``dak`` skill to upload ``publish_path``.
+
+        This is the ONE place Hub crosses the network boundary — and it does so
+        by handing off to a **subprocess** (dak reaches Cloudflare). Hub's own
+        code opens no socket; the invariant holds at the process edge.
+
+        Returns ``(url, None)`` on success, or ``(None, {"error", "detail"})``
+        on failure — ``dak_unavailable`` when the script is missing, or
+        ``publish_failed`` when dak exits non-zero / times out / prints no URL.
+        dak writes the final ``https://…workers.dev`` URL as the last non-empty
+        line of stdout. ``dry_run`` (or ``HUB_PUBLISH_DRYRUN=1``) passes
+        ``--dry-run`` so dak stages a URL without uploading — used by tests.
+        """
+        dak = (_PKG_ROOT / "plugin" / "hub-agent" / "skills"
+               / "dak" / "scripts" / "dak.py")
+        if not dak.exists():
+            return None, {"error": "dak_unavailable",
+                          "detail": f"dak script not found at {dak} — "
+                                    f"run its one-time setup"}
+        cmd = [sys.executable, str(dak), str(publish_path)]
+        if mode:
+            cmd += ["--mode", mode]
+        if slug:
+            cmd += ["--slug", slug]
+        cmd += ["--title", title]
+        if dry_run or os.environ.get("HUB_PUBLISH_DRYRUN") == "1":
+            cmd.append("--dry-run")
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=120)
+        except subprocess.TimeoutExpired:
+            return None, {"error": "publish_failed", "detail": "dak timed out"}
+        except OSError as e:
+            return None, {"error": "publish_failed", "detail": str(e)}
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-8:]
+            return None, {"error": "publish_failed",
+                          "detail": "\n".join(tail) or "dak exited non-zero"}
+        lines = [ln.strip() for ln in (proc.stdout or "").splitlines()
+                 if ln.strip()]
+        url = lines[-1] if lines else ""
+        if not url.startswith("http"):
+            return None, {"error": "publish_failed",
+                          "detail": "dak produced no URL"}
+        return url, None
+
     def _publish_scan(self, body: dict) -> None:
         """Run the shared redaction scanner for one path — the UI's publish gate.
 
@@ -722,15 +770,20 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                                "private": private}).encode())
 
     def _publish(self, body: dict) -> None:
-        """Prepare the local publish and return dak's command — never runs HTTP.
+        """One-click asset publish (roadmap 1f, S11): prepare, run dak, return URL.
 
-        Body is JSON ``{path, redact_indices?:[int], title?, mode?, slug?}``.
-        Re-runs the scan server-side (the client's finding list is advisory only)
-        and, for the ``redact_indices`` subset the user left toggled on, writes a
-        sanitized copy to ``state_dir()/publish`` (the ORIGINAL is never touched)
-        via the same core.publish.redact the CLI uses. Returns the exact `dak`
-        command for the user to run — Hub hands off, it does not upload. Refuses
-        when the workspace is private. This is the UI twin of `hub publish`.
+        Body is JSON ``{path, redact_indices?:[int], title?, mode?, slug?,
+        dryRun?}``. Re-runs the scan server-side (the client's finding list is
+        advisory only) and, for the ``redact_indices`` subset the user left
+        toggled on, writes a sanitized copy to ``state_dir()/publish`` (the
+        ORIGINAL is never touched) via the same core.publish.redact the CLI uses.
+
+        Then it hands off to the bundled **dak** subprocess (see :meth:`_run_dak`)
+        which performs the Cloudflare upload — Hub itself opens no socket — and
+        returns ``{ok, url}``, recording the published-state under the asset's
+        path. The gate is preserved: refuses when the workspace is private, and
+        refuses when the scan found things the client did not opt to review
+        (no ``redact_indices`` key and no ``review`` flag).
         """
         from ..core import publish as _publish
 
@@ -759,7 +812,16 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             return
 
         findings = _publish.scan(text)
+        # Gate: findings must be reviewed. Presence of the redact_indices key
+        # (even empty → "I looked, redact none") or a truthy `review` flag is
+        # the client's acknowledgement. Unreviewed findings → refuse.
         idx = body.get("redact_indices")
+        reviewed = ("redact_indices" in body) or bool(body.get("review"))
+        if findings and not reviewed:
+            _fail(403, {"ok": False, "error": "unreviewed_findings",
+                        "findings": findings})
+            return
+
         publish_path = resolved
         if isinstance(idx, list) and idx and findings:
             chosen = [findings[i] for i in idx
@@ -776,34 +838,37 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                     return
                 publish_path = copy
 
-        # Build the dak command (Hub never executes the upload from the UI path).
-        _dak = (_PKG_ROOT / "plugin" / "hub-agent" / "skills"
-                / "dak" / "scripts" / "dak.py")
         title = (body.get("title") or resolved.stem).strip() or resolved.stem
         mode = body.get("mode") if body.get("mode") in ("snapshot", "live") else None
-        slug = (body.get("slug") or "").strip()
-        cmd = ["python3", str(_dak), str(publish_path)]
-        if mode:
-            cmd += ["--mode", mode]
-        if slug:
-            cmd += ["--slug", slug]
-        cmd += ["--title", title]
+        slug = (body.get("slug") or "").strip() or None
+
+        # Hand off to the dak subprocess (the network edge). Hub opens no socket.
+        url, err = self._run_dak(publish_path, title, mode=mode, slug=slug,
+                                 dry_run=bool(body.get("dryRun")))
+        if err is not None:
+            _fail(200 if err["error"] == "dak_unavailable" else 502,
+                  {"ok": False, **err})
+            return
+        _publish.record_published_asset(resolved, url, mode or "snapshot")
         self._send(200, "application/json", json.dumps({
             "ok": True,
-            "command": " ".join(cmd),
+            "url": url,
             "copy": str(publish_path) if publish_path != resolved else None,
-            "dak_present": _dak.exists(),
         }).encode())
 
     def _publish_bundle(self, body: dict) -> None:
-        """Freeze a task subtree to a self-contained bundle + return dak's command.
+        """One-click task-bundle publish (roadmap 1g, S11): render, run dak, URL.
 
-        The UI twin of `hub publish --task` (roadmap 1g). Body is JSON
-        ``{slug, repo?, include_external?, redact?}``. Renders the bundle with
-        the same pure :func:`render.bundle.render_task_bundle` the CLI uses,
-        writes it under ``state_dir()/publish`` (NEVER the scan root), runs the
-        SAME S5a scan over the produced HTML, and returns the exact dak command
-        for the user to run — Hub opens no socket here. Refuses when private.
+        The UI twin of `hub publish --task`. Body is JSON
+        ``{slug, repo?, include_external?, redact?, review?, dryRun?}``. Renders
+        the bundle with the same pure :func:`render.bundle.render_task_bundle`
+        the CLI uses, writes it under ``state_dir()/publish`` (NEVER the scan
+        root), runs the SAME S5a scan over the produced HTML, then hands off to
+        the bundled **dak** subprocess for the upload (:meth:`_run_dak`) — Hub
+        opens no socket itself. On success it records the published-state in the
+        S5b ``published.json`` sidecar, rebuilds so the row marker updates, and
+        returns ``{ok, url}``. Refuses when private, and refuses when the scan
+        found things and the client neither redacted nor reviewed them.
         """
         from ..core import publish as _publish
         from ..core import query
@@ -845,6 +910,14 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             return
 
         findings = _publish.scan(html)
+        # Gate: refuse unreviewed findings (client must redact or explicitly
+        # review). One-click UI sends redact:true so task secrets are sanitized.
+        reviewed = want_redact or bool(body.get("review"))
+        if findings and not reviewed:
+            _fail(403, {"ok": False, "error": "unreviewed_findings",
+                        "findings": findings})
+            return
+
         publish_path = out_path
         if want_redact and findings:
             redacted = _publish.redact(html, findings)
@@ -855,16 +928,23 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
                 return
 
-        _dak = (_PKG_ROOT / "plugin" / "hub-agent" / "skills"
-                / "dak" / "scripts" / "dak.py")
-        cmd = ["python3", str(_dak), str(publish_path),
-               "--slug", slug, "--title", slug]
+        # Hand off to the dak subprocess (network edge); Hub opens no socket.
+        url, err = self._run_dak(publish_path, slug, slug=slug,
+                                 dry_run=bool(body.get("dryRun")))
+        if err is not None:
+            _fail(200 if err["error"] == "dak_unavailable" else 502,
+                  {"ok": False, "findings": findings, **err})
+            return
+        _publish.record_published(repo, slug, url, mode="snapshot")
+        # Re-bake the published map into the page so the row marker updates.
+        result = self._rebuild(_active_root)
+        if result.returncode != 0:
+            print(result.stderr or result.stdout, file=sys.stderr)
         self._send(200, "application/json", json.dumps({
             "ok": True,
-            "command": " ".join(cmd),
+            "url": url,
             "bundle": str(out_path),
             "findings": findings,
-            "dak_present": _dak.exists(),
         }).encode())
 
     def _publish_revoke(self, body: dict) -> None:

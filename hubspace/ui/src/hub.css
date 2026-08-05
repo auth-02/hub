@@ -496,6 +496,14 @@ background-image:radial-gradient(circle,#C9BFA3 .6px,transparent .6px);backgroun
 .pal-pub-text{flex:1;min-width:0;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .pal-pub-tog{flex-shrink:0;color:var(--mute);letter-spacing:.03em;font-size:9.5px;text-transform:uppercase;}
 .pal-pub-note{font-family:var(--mono);font-size:10px;color:var(--mute);font-style:italic;letter-spacing:.02em;border-left:2px solid var(--rust);padding-left:8px;}
+/* S11 one-click publish result — the resulting public URL, shown inline */
+.pal-pub-result{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:10px;border:1px solid var(--line);border-left:2px solid #2F6B4F;background:var(--bg);}
+.pal-pub-result.hidden{display:none;}
+.pal-pub-live{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;color:#2F6B4F;flex-shrink:0;}
+.pal-pub-url{flex:1;min-width:0;font-family:var(--mono);font-size:11px;color:var(--accent);text-decoration:underline dotted;text-underline-offset:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pal-pub-url:hover{color:var(--ink);}
+.pal-pub-copy{flex-shrink:0;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);background:none;border:1px solid var(--line);padding:3px 7px;cursor:pointer;}
+.pal-pub-copy:hover{color:var(--ink);border-color:var(--accent);}
 
 /* help panel */
 .pal-help{position:fixed;inset:0;background:rgba(26,26,26,.5);display:none;align-items:center;justify-content:center;z-index:95;}
