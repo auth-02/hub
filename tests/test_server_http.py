@@ -153,6 +153,65 @@ class TestServerHttp(unittest.TestCase):
         status, _ = _post(self._port, "/_unknown", b"")
         self.assertEqual(status, 404)
 
+    # ── /_list-dirs — directory picker backend ───────────────────────────────
+    def test_list_dirs_lists_sorted_subdirs(self):
+        import json
+        root = tempfile.mkdtemp()
+        try:
+            for name in ("Zebra", "alpha", "mid"):
+                (Path(root) / name).mkdir()
+            (Path(root) / "a_file.md").write_text("x", encoding="utf-8")
+            status, body = _get(self._port, "/_list-dirs?path=" + root)
+            self.assertEqual(status, 200)
+            data = json.loads(body)
+            names = [d["name"] for d in data["dirs"]]
+            # subdirs only (file omitted), sorted case-insensitively
+            self.assertEqual(names, ["alpha", "mid", "Zebra"])
+            # child paths are absolute and point back into the (normalized) root
+            rroot = str(Path(root).resolve())
+            for d in data["dirs"]:
+                self.assertTrue(d["path"].startswith(rroot))
+            # parent is the containing dir (root has one here)
+            self.assertEqual(data["parent"], str(Path(root).resolve().parent))
+            self.assertEqual(data["path"], rroot)
+        finally:
+            import shutil
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_list_dirs_omits_hidden_dirs(self):
+        import json
+        root = tempfile.mkdtemp()
+        try:
+            (Path(root) / "visible").mkdir()
+            (Path(root) / ".hidden").mkdir()
+            status, body = _get(self._port, "/_list-dirs?path=" + root)
+            self.assertEqual(status, 200)
+            names = [d["name"] for d in json.loads(body)["dirs"]]
+            self.assertIn("visible", names)
+            self.assertNotIn(".hidden", names)
+        finally:
+            import shutil
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_list_dirs_bad_path_returns_error_not_500(self):
+        import json
+        status, body = _get(self._port, "/_list-dirs?path=/no/such/dir/xyz123")
+        self.assertEqual(status, 400)
+        data = json.loads(body)
+        self.assertIn("error", data)
+        self.assertIn("path", data)
+
+    def test_list_dirs_default_path_is_valid(self):
+        import json
+        # No ?path → server defaults to the current scan root; must return a
+        # valid listing (never an error) with an absolute normalized path.
+        status, body = _get(self._port, "/_list-dirs")
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertNotIn("error", data)
+        self.assertTrue(data["path"].startswith("/"))
+        self.assertIn("dirs", data)
+
     def test_concurrent_requests(self):
         # Fire 5 rebuild requests concurrently — server must not crash
         results = []

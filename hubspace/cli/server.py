@@ -25,7 +25,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from urllib.parse import quote, unquote
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 # ── Scan root resolution (shared with hub.py via config.py) ─────────────────
 _HERE = Path(__file__).resolve().parent
@@ -116,6 +116,12 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         # Rebuild trigger
         if url_path == "/_rebuild":
             self._run_rebuild()
+            return
+
+        # Directory picker backend (read-only listing for the set-root modal)
+        if url_path == "/_list-dirs":
+            qs = parse_qs(urlparse(self.path).query)
+            self._list_dirs((qs.get("path") or [""])[0])
             return
 
         # Blank Excalidraw canvas (new, unsaved diagram)
@@ -938,6 +944,64 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             return
         out_rel = target.relative_to(root).as_posix()
         self._send(200, "application/json", json.dumps({"ok": True, "rel": out_rel}).encode())
+
+    def _list_dirs(self, raw: str) -> None:
+        """List immediate subdirectories of a path — the set-root picker backend.
+
+        Read-only: never writes, never scans file contents, just enumerates dirs
+        so the browser can navigate the server's filesystem (a native folder
+        picker can't hand the server a real path). Query param ``?path=<abs>``;
+        empty → the current scan root (falling back to ``$HOME`` if that isn't a
+        readable dir). Returns JSON::
+
+            {"path": "<abs, normalized>",
+             "parent": "<abs or null at fs root>",
+             "dirs": [{"name": "...", "path": "<abs child>"}, ...]}
+
+        Subdirectories only, sorted case-insensitively. Skips non-dirs, hidden
+        dirs (leading dot), and any entry the process can't read. A bad or
+        unreadable ``path`` returns ``{"error": ..., "path": ...}`` with 400 —
+        never a traceback/500.
+        """
+        raw = (raw or "").strip()
+        if raw:
+            base = Path(raw).expanduser()
+        else:
+            base = _active_root
+            if not base.is_dir():
+                base = Path.home()
+        try:
+            p = base.resolve()
+        except OSError as e:
+            self._send(400, "application/json",
+                       json.dumps({"error": str(e), "path": raw}).encode())
+            return
+        if not p.is_dir():
+            self._send(400, "application/json",
+                       json.dumps({"error": "not a directory", "path": str(p)}).encode())
+            return
+
+        dirs = []
+        try:
+            with os.scandir(p) as it:
+                for entry in it:
+                    if entry.name.startswith("."):
+                        continue
+                    try:
+                        if not entry.is_dir(follow_symlinks=True):
+                            continue
+                    except OSError:
+                        continue
+                    dirs.append({"name": entry.name, "path": str(p / entry.name)})
+        except (PermissionError, OSError) as e:
+            self._send(400, "application/json",
+                       json.dumps({"error": str(e), "path": str(p)}).encode())
+            return
+
+        dirs.sort(key=lambda d: d["name"].lower())
+        parent = None if p.parent == p else str(p.parent)
+        self._send(200, "application/json",
+                   json.dumps({"path": str(p), "parent": parent, "dirs": dirs}).encode())
 
     def _run_rebuild(self) -> None:
         result = self._rebuild(_active_root)

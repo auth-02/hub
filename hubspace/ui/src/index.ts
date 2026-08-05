@@ -1254,10 +1254,96 @@ async function copy(text,msg){
 // ── Modal ─────────────────────────────────────────────────────────────────
 const modal=document.getElementById('modal');
 const modalInput=document.getElementById('modal-input');
-function openModal(){modalInput.value=_currentRoot;modal.classList.add('show');setTimeout(()=>{modalInput.focus();modalInput.select();},0);}
+const pickerCrumbs=document.getElementById('picker-crumbs');
+const pickerList=document.getElementById('picker-list');
+// Server-backed directory picker: the browser navigates the server's filesystem
+// via GET /_list-dirs (a native folder picker can't hand the server a real path).
+// _pickerPath is the currently-browsed dir — that's what SAVE posts to /_set-root.
+let _pickerPath='';       // absolute path currently browsed (from server's normalized `path`)
+let _pickerRows=[];       // [{kind:'up'|'dir', path, name}] in display order
+let _pickerSel=-1;        // keyboard-selected row index into _pickerRows
+
+function openModal(){
+  modalInput.value='';
+  modal.classList.add('show');
+  navigatePicker('');     // empty → server defaults to the current scan root
+  setTimeout(()=>{pickerList.focus();},0);
+}
 function closeModal(){modal.classList.remove('show');}
+
+function navigatePicker(path){
+  const url='/_list-dirs'+(path?('?path='+encodeURIComponent(path)):'');
+  fetch(url)
+    .then(r=>r.json())
+    .then(data=>{
+      if(data.error){
+        pickerCrumbs.textContent='';
+        pickerList.innerHTML='<div class="picker-error">can’t open: '+escPicker(data.error)+'</div>';
+        return;
+      }
+      _pickerPath=data.path;
+      renderPicker(data);
+    })
+    .catch(()=>{pickerList.innerHTML='<div class="picker-error">listing failed</div>';});
+}
+
+function escPicker(s){const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
+
+function renderPicker(data){
+  // Breadcrumb — each segment jumps to that ancestor; the last one is "here".
+  const parts=String(data.path).split('/').filter(Boolean);
+  const crumbs=[{label:'/',path:'/'}];
+  let acc='';
+  for(const part of parts){acc+='/'+part;crumbs.push({label:part,path:acc});}
+  pickerCrumbs.innerHTML='';
+  crumbs.forEach((c,i)=>{
+    const last=i===crumbs.length-1;
+    const span=document.createElement('span');
+    span.className='crumb'+(last?' here':'');
+    span.textContent=c.label;
+    if(!last)span.addEventListener('click',()=>navigatePicker(c.path));
+    pickerCrumbs.appendChild(span);
+    if(!last){const sep=document.createElement('span');sep.className='sep';sep.textContent=parts.length&&i===0?'':' / ';pickerCrumbs.appendChild(sep);}
+  });
+
+  // Rows: optional ".." (up), then each subdirectory.
+  _pickerRows=[];
+  if(data.parent)_pickerRows.push({kind:'up',path:data.parent,name:'..'});
+  (data.dirs||[]).forEach(d=>_pickerRows.push({kind:'dir',path:d.path,name:d.name}));
+  _pickerSel=-1;
+
+  pickerList.innerHTML='';
+  if(!_pickerRows.length){
+    pickerList.innerHTML='<div class="picker-empty">no subdirectories here</div>';
+    return;
+  }
+  _pickerRows.forEach((row,idx)=>{
+    const el=document.createElement('div');
+    el.className='picker-row'+(row.kind==='up'?' up':'');
+    el.dataset.idx=String(idx);
+    const glyph=document.createElement('span');
+    glyph.className='glyph';
+    glyph.textContent=row.kind==='up'?'↑':'📁';
+    const label=document.createElement('span');
+    label.textContent=row.kind==='up'?'.. (up)':row.name;
+    el.appendChild(glyph);el.appendChild(label);
+    el.addEventListener('click',()=>navigatePicker(row.path));
+    pickerList.appendChild(el);
+  });
+}
+
+function pickerSelect(idx){
+  const rows=pickerList.querySelectorAll('.picker-row');
+  if(!rows.length)return;
+  _pickerSel=Math.max(0,Math.min(idx,rows.length-1));
+  rows.forEach((r,i)=>r.classList.toggle('active',i===_pickerSel));
+  rows[_pickerSel].scrollIntoView({block:'nearest'});
+}
+
 function submitModal(){
-  const p=modalInput.value.trim();
+  // A typed path (power-user fallback) wins; otherwise save the browsed dir.
+  const typed=modalInput.value.trim();
+  const p=typed||_pickerPath;
   if(!p){closeModal();return;}
   closeModal();
   flashSticky('saving & rebuilding…');
@@ -1270,7 +1356,18 @@ document.getElementById('setroot').addEventListener('click',e=>{e.preventDefault
 document.getElementById('modal-cancel').addEventListener('click',closeModal);
 document.getElementById('modal-ok').addEventListener('click',submitModal);
 modal.addEventListener('click',e=>{if(e.target===modal)closeModal();});
-modalInput.addEventListener('keydown',e=>{if(e.key==='Enter')submitModal();else if(e.key==='Escape')closeModal();});
+// Type-a-path fallback: Enter navigates the picker there; Esc closes.
+modalInput.addEventListener('keydown',e=>{
+  if(e.key==='Enter'){e.preventDefault();const v=modalInput.value.trim();if(v){navigatePicker(v);modalInput.value='';pickerList.focus();}}
+  else if(e.key==='Escape')closeModal();
+});
+// Keyboard nav within the list: ↑↓ move, Enter descends, Esc closes.
+pickerList.addEventListener('keydown',e=>{
+  if(e.key==='ArrowDown'){e.preventDefault();pickerSelect(_pickerSel+1);}
+  else if(e.key==='ArrowUp'){e.preventDefault();pickerSelect(_pickerSel-1);}
+  else if(e.key==='Enter'){e.preventDefault();const row=_pickerRows[_pickerSel];if(row)navigatePicker(row.path);}
+  else if(e.key==='Escape')closeModal();
+});
 document.getElementById('rebuild').addEventListener('click',e=>{
   e.preventDefault();
   flashSticky('rebuilding…');

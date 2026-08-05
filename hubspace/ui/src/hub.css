@@ -18,6 +18,25 @@ header{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:8px
 .modal input{width:100%;font-family:var(--mono);font-size:13px;padding:10px 12px;border:1px solid var(--line);background:var(--alt);color:var(--ink);outline:none;}
 .modal input:focus{border-color:var(--accent);}
 .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px;}
+.picker-crumbs{font-family:var(--mono);font-size:11px;color:var(--mute);letter-spacing:.04em;margin-bottom:8px;display:flex;flex-wrap:wrap;align-items:center;gap:2px;word-break:break-all;}
+.picker-crumbs .crumb{color:var(--accent2);cursor:pointer;padding:1px 3px;}
+.picker-crumbs .crumb:hover{background:var(--deep);color:var(--ink);}
+.picker-crumbs .crumb.here{color:var(--ink);cursor:default;}
+.picker-crumbs .crumb.here:hover{background:none;}
+.picker-crumbs .sep{color:var(--line);}
+.picker-list{border:1px solid var(--line);background:var(--alt);max-height:280px;overflow-y:auto;margin-bottom:12px;outline:none;}
+.picker-list:focus{border-color:var(--accent);}
+.picker-row{display:flex;align-items:center;gap:8px;padding:7px 12px;font-family:var(--mono);font-size:12.5px;color:var(--ink);cursor:pointer;border-bottom:1px solid var(--line);user-select:none;}
+.picker-row:last-child{border-bottom:none;}
+.picker-row .glyph{color:var(--mute);flex:0 0 auto;}
+.picker-row:hover{background:var(--deep);}
+.picker-row.active{background:var(--accent);color:#fff;}
+.picker-row.active .glyph{color:#fff;}
+.picker-row.up{color:var(--accent2);}
+.picker-row.up .glyph{color:var(--accent2);}
+.picker-row.up.active,.picker-row.up:hover{color:#fff;}
+.picker-empty{padding:10px 12px;font-family:var(--mono);font-size:11px;color:var(--mute);}
+.picker-error{padding:10px 12px;font-family:var(--mono);font-size:11px;color:var(--accent);}
 .btn{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;padding:8px 14px;border:1px solid var(--line);background:var(--alt);color:var(--ink);cursor:pointer;}
 .btn:hover{border-color:var(--ink);}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}

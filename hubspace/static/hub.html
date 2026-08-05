@@ -125,7 +125,9 @@
   <div class="modal-card">
     <div class="modal-kicker">// SET HUB DIRECTORY</div>
     <h2 class="modal-title">Point the hub at a new directory.</h2>
-    <input id="modal-input" type="text" placeholder="/absolute/path" autocomplete="off" spellcheck="false">
+    <div id="picker-crumbs" class="picker-crumbs" aria-label="Current path"></div>
+    <div id="picker-list" class="picker-list" role="listbox" tabindex="0" aria-label="Subdirectories"></div>
+    <input id="modal-input" type="text" placeholder="or type a path — Enter to go" autocomplete="off" spellcheck="false">
     <div class="modal-actions">
       <button class="btn" id="modal-cancel">Cancel</button>
       <button class="btn primary" id="modal-ok">Save &amp; Rebuild</button>
