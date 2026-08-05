@@ -96,7 +96,14 @@
 </div>
 <div id="trace">
   <div class="trace-wrap">
-    <button class="trace-back" id="trace-back">← back</button>
+    <div class="trace-topbar">
+      <button class="trace-back" id="trace-back">← back</button>
+      <div class="trace-modeseg" id="trace-modeseg" role="group" aria-label="trace view mode">
+        <button class="trace-mode active" id="trace-mode-list" data-mode="list" type="button">list</button>
+        <span class="trace-mode-sep">|</span>
+        <button class="trace-mode" id="trace-mode-graph" data-mode="graph" type="button">graph <span class="trace-mode-key">· g</span></button>
+      </div>
+    </div>
     <div class="trace-crumb" id="trace-crumb"></div>
     <div class="trace-title" id="trace-title"></div>
     <div class="trace-status" id="trace-status"></div>
@@ -106,9 +113,9 @@
     <ul class="trace-decisions" id="trace-decisions"></ul>
     <div class="trace-tl-head" id="trace-tl-head" style="display:none">
       <span class="trace-section-label" id="trace-tl-label"></span>
-      <button class="trace-tl-copy" id="trace-tl-copy" type="button">Copy as markdown</button>
     </div>
     <div class="trace-timeline" id="trace-timeline"></div>
+    <div class="trace-linfoot" id="trace-linfoot"></div>
     <div class="trace-lineage" id="trace-lineage"></div>
     <div class="trace-actions" id="trace-actions"></div>
   </div>

@@ -118,12 +118,14 @@ function _captureViewState(){
     const trEl=document.getElementById('trace');
     const gcEl=document.getElementById('gcanvas');
     let ov=null;
-    if(pvEl&&pvEl.classList.contains('open')&&_openPreviewAbs){
+    // Graph is checked first: it overlays the Trace (both can be `show` at once),
+    // so an open graph must win the restore.
+    if(gcEl&&gcEl.classList.contains('show')&&window._graphCurrent){
+      ov={k:'graph',sl:window._graphCurrent.sl,rp:window._graphCurrent.rp};
+    }else if(pvEl&&pvEl.classList.contains('open')&&_openPreviewAbs){
       ov={k:'preview',abs:_openPreviewAbs};
     }else if(trEl&&trEl.classList.contains('show')&&_openTraceT){
       ov={k:'trace',sl:_openTraceT.sl,rp:_openTraceT.rp};
-    }else if(gcEl&&gcEl.classList.contains('show')&&window._graphCurrent){
-      ov={k:'graph',sl:window._graphCurrent.sl,rp:window._graphCurrent.rp};
     }
     sessionStorage.setItem('hub_view_state',
       JSON.stringify({ov:ov,y:window.scrollY||window.pageYOffset||0}));
@@ -394,6 +396,7 @@ document.addEventListener('keydown',e=>{
   if(tag==='INPUT'||tag==='TEXTAREA') return;
   if(document.getElementById('trace').classList.contains('show')){
     if(e.key==='Escape') closeTrace();
+    else if((e.key==='g'||e.key==='G')&&_openTraceT){e.preventDefault();if(window._openGraphFor)window._openGraphFor(_openTraceT);}
     return;
   }
   if(e.key==='j'||e.key==='ArrowDown'){e.preventDefault();selectRow(selIdx<0?0:selIdx+1);}
@@ -513,6 +516,31 @@ function themeSelect(sel){
 // navigation kinds (structure you move through) read deep-sea --accent2.
 const TL_AUTHOR=new Set(['artifact','run','note','draw','data']);
 const TL_EVENT_LABEL={task:'Task opened',artifact:'Artifact added',run:'Run logged',note:'Note',prompt:'Prompt written',doc:'Doc written',draw:'Diagram',data:'Data added'};
+// Shared kind → card colour (the graph canvas + the Trace spine both read this,
+// so the two renderings stay chromatically identical). Authoring kinds skew
+// oxblood/warm; navigation kinds skew deep-sea/cool.
+const KIND_COLOR={task:'#7A2828',doc:'#1E5A6B',artifact:'#5C4A7A',run:'#2F6B4F',data:'#2E7D8A',draw:'#B5651D',note:'#C15F3C',prompt:'#C99A20'};
+const colorForKind=k=>KIND_COLOR[k]||'#8A8377';
+const _MON3=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+// "2026-07-22" → "JUL 22"; anything unparseable is passed through untouched.
+function fmtEventDate(at){
+  const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(String(at||''));
+  if(!m) return String(at||'');
+  return _MON3[(+m[2]-1)%12]+' '+(+m[3]);
+}
+// A task node's path lives under tasks/<slug>/ ; anything else the timeline pulls
+// in is "outside the task" (a referenced doc, a cross-task file).
+function nodeInTask(path,slug){return String(path||'').indexOf('tasks/'+slug+'/')>=0;}
+// One short, human descriptor per event, matching the comp's spine cards.
+function eventDesc(ev,t){
+  const kind=ev.kind||'doc';
+  const name=(ev.path||'').split('/').pop()||'';
+  if(kind==='task'){
+    const n=(t&&t.plan&&t.plan.length)||0;
+    return 'task opened'+(n?' · '+n+' plan item'+(n>1?'s':''):'');
+  }
+  return name||(TL_EVENT_LABEL[kind]||kind);
+}
 
 // The 2b timeline nodes for a task, chronological (oldest first = evolution).
 // ISO `at` dates sort lexically, so no Date parsing needed.
@@ -542,14 +570,13 @@ function renderTimeline(mount,scope,task){
     const evs=taskTimelineEvents(task);
     mount.innerHTML=evs.map(ev=>{
       const kind=ev.kind||'doc';
-      const label=TL_EVENT_LABEL[kind]||kind.toUpperCase();
-      const name=(ev.path||'').split('/').pop()||label;
-      return `<div class="tlx-item ${TL_AUTHOR.has(kind)?'tlx-author':'tlx-nav'}">
-        <span class="tlx-dot"></span>
-        <div class="tlx-body">
-          <div class="tlx-title"><span class="tlx-kind">${esc(label)}</span> ${esc(name)}</div>
-          <div class="tlx-meta">${esc(ev.at||'')}</div>
-        </div>
+      const ext=!nodeInTask(ev.path,task.sl);
+      const desc=eventDesc(ev,task);
+      return `<div class="tlx-item ${TL_AUTHOR.has(kind)?'tlx-author':'tlx-nav'}${ext?' tlx-ext':''}">
+        <span class="tlx-when">${esc(fmtEventDate(ev.at))}</span>
+        <span class="tlx-dot" style="--kc:${colorForKind(kind)}"></span>
+        <span class="tlx-badge" style="--kc:${colorForKind(kind)}">${esc((kind||'').toUpperCase())}</span>
+        <span class="tlx-desc">${esc(desc)}</span>
       </div>`;
     }).join('');
     return evs.length;
@@ -899,6 +926,38 @@ async function saveManifest(t,patch){
   }catch(e){flash('save failed');return false;}
 }
 
+// Resolve a scan-root-relative node path to an abs path via the file rows.
+function resolveNodeAbs(rel){
+  if(!rel) return null;
+  let hit=null;
+  rows.forEach(r=>{const a=r.dataset.abs;if(a&&a.replace(/\\/g,'/').endsWith('/'+rel))hit=hit||a;});
+  return hit;
+}
+// The edges that leave a task: timeline edges with exactly one endpoint outside
+// tasks/<slug>/. Returns [{inName, extPath, extAbs}] (inner filename ← outside path).
+function taskExternalEdges(t){
+  const g=taskGraph(t);
+  const byId={};g.nodes.forEach(n=>{byId[n.id]=n;});
+  const out=[];
+  (g.edges||[]).forEach(e=>{
+    const a=byId[e.from],b=byId[e.to];if(!a||!b)return;
+    const aIn=nodeInTask(a.path,t.sl),bIn=nodeInTask(b.path,t.sl);
+    if(aIn===bIn) return;                       // both inside or both outside — not a boundary
+    const inside=aIn?a:b, outside=aIn?b:a;
+    const extPath=outside.path||outside.id;
+    out.push({inName:(inside.path||'').split('/').pop()||inside.id,
+              extPath:extPath,extAbs:resolveNodeAbs(outside.path)});
+  });
+  return out;
+}
+// list|graph segmented toggle state (transient — never persisted).
+function setTraceMode(m){
+  const seg=document.getElementById('trace-modeseg');
+  if(!seg) return;
+  seg.querySelectorAll('.trace-mode').forEach(b=>b.classList.toggle('active',b.dataset.mode===m));
+}
+window._setTraceMode=setTraceMode;
+
 function openTrace(t){
   _openTraceT=t;
   const stMap=_ST_MAP;
@@ -1038,23 +1097,42 @@ function openTrace(t){
   const tlLabel=document.getElementById('trace-tl-label');
   const n=renderTimeline(document.getElementById('trace-timeline'),'task',t);
   if(n){
-    tlLabel.textContent=`// how this evolved · ${n} event${n>1?'s':''}`;
+    tlLabel.textContent=`// how this task got here · ${n} event${n>1?'s':''}`;
     tlHead.style.display='flex';
   } else {
     tlHead.style.display='none';
   }
-  // Graph-order affordance (2b): re-render the same events by edge, not date.
-  let gbtn=document.getElementById('trace-tl-graph');
-  if(!gbtn){
-    gbtn=document.createElement('button');
-    gbtn.id='trace-tl-graph';gbtn.type='button';gbtn.className='trace-tl-copy';
-    document.getElementById('trace-tl-copy').insertAdjacentElement('beforebegin',gbtn);
-  }
-  gbtn.textContent='graph order →';
-  gbtn.style.display=n?'':'none';
-  gbtn.onclick=()=>{if(window._openGraphFor)window._openGraphFor(t);};
   window._graphTaskCtx=t;  // last task in focus — the palette G row opens this
-  document.getElementById('trace-tl-copy').onclick=()=>{
+
+  // The list|graph toggle always lands on `list` when the Trace (re)opens; the
+  // graph canvas overlays and hands the mode back to `list` when it closes.
+  setTraceMode('list');
+
+  // LINEAGE footer (2b) — the edges that *leave* this task: any timeline edge
+  // touching a node whose path lives outside tasks/<slug>/ (a referenced doc or
+  // cross-task file). Rendered as `<inner> ← <outside>`. Actions: publish the
+  // task's dak bundle, or copy the spine as a markdown list.
+  const foot=document.getElementById('trace-linfoot');
+  const ext=taskExternalEdges(t);
+  let fh=`<div class="linfoot-label">LINEAGE — ${ext.length} edge${ext.length===1?'':'s'} leave${ext.length===1?'s':''} this task</div>`;
+  if(ext.length){
+    fh+='<div class="linfoot-edges">'+ext.map(e=>
+      `<div class="linfoot-edge"><span class="lf-in">${esc(e.inName)}</span>`+
+      `<span class="lf-arr">←</span>`+
+      (e.extAbs?`<a class="lf-ext" href="${fileHref(e.extAbs)}" target="_blank" rel="noopener" title="${esc(e.extPath)}">${esc(e.extPath)}</a>`
+               :`<span class="lf-ext" title="${esc(e.extPath)}">${esc(e.extPath)}</span>`)+
+      `</div>`).join('')+'</div>';
+  } else {
+    fh+='<div class="linfoot-none">self-contained — nothing outside the task feeds it</div>';
+  }
+  fh+='<div class="linfoot-acts">';
+  if(t.abs&&(typeof PRIVATE==='undefined'||!PRIVATE))
+    fh+='<button class="trace-btn primary" id="linfoot-pub" type="button">↗ Publish task</button>';
+  fh+='<button class="trace-btn" id="linfoot-copy" type="button">Copy as markdown</button></div>';
+  foot.innerHTML=fh;
+  const pubBtn=document.getElementById('linfoot-pub');
+  if(pubBtn)pubBtn.onclick=()=>{if(window._publishBundle)window._publishBundle(t);};
+  document.getElementById('linfoot-copy').onclick=()=>{
     const evs=taskTimelineEvents(t);
     const md=`# How "${tagName(t.sl)}" evolved\n\n`+evs.map(ev=>{
       const label=TL_EVENT_LABEL[ev.kind||'doc']||(ev.kind||'').toUpperCase();
@@ -1091,6 +1169,15 @@ function closeTrace(){
   traceEl.classList.remove('show');
 }
 document.getElementById('trace-back').addEventListener('click',closeTrace);
+// list|graph toggle: `graph` overlays the S4b canvas for this task; `list`
+// closes the canvas and returns to the spine. Two renderings of one task.
+document.getElementById('trace-mode-list').addEventListener('click',()=>{
+  setTraceMode('list');
+  if(window._graphCurrent&&window._closeGraph)window._closeGraph();
+});
+document.getElementById('trace-mode-graph').addEventListener('click',()=>{
+  if(_openTraceT&&window._openGraphFor)window._openGraphFor(_openTraceT);
+});
 
 // ── View toggle ───────────────────────────────────────────────────────────
 (function(){
@@ -1907,15 +1994,15 @@ document.getElementById('rebuild').addEventListener('click',e=>{
 // A second *rendering* of the per-task 2b timeline (same baked nodes/edges as
 // the Trace spine), laid out by edge/kind — NOT by date. Pure derivation from
 // the lineage Hub already holds: no model, no new store. Paper ground + dot-grid
-// (Hub's theme), oxblood for selection, deep-sea for navigation. Save-to-draws
-// turns the derived graph into an owned .excalidraw on the same paper ground.
+// (Hub's theme), oxblood for selection, deep-sea for navigation. The graph is
+// PURELY derived — never saved into a draw; the `list · g` control returns to
+// the Trace spine (the two are one task, toggled).
 (function(){
   const KIND_COL={task:0,prompt:1,run:2,artifact:3,note:4,doc:5,draw:6,data:7};
-  const KIND_COLOR={task:'#7A2828',doc:'#1E5A6B',artifact:'#5C4A7A',run:'#2F6B4F',data:'#2E7D8A',draw:'#B5651D',note:'#C15F3C',prompt:'#C99A20'};
   const REL_LABEL={task_has_run:'run',task_has_artifact:'artifact',task_has_prompt:'prompt',task_has_doc:'doc',task_has_draw:'draw',task_has_data:'data',task_has_note:'note',belongs_to_task:'task'};
   const COL_W=260,ROW_H=130,X0=40,Y0=40,CARD_W=200,CARD_H=84;
   const colOf=k=>KIND_COL[k]!==undefined?KIND_COL[k]:8;
-  const colorOf=k=>KIND_COLOR[k]||'#8A8377';
+  const colorOf=colorForKind;  // shared with the Trace spine — one palette
   // Deterministic graph-order layout — mirrors core/graph.py::layout so a saved
   // diagram matches the canvas: kind columns, date order within a column.
   function layout(nodes){
@@ -1933,8 +2020,8 @@ document.getElementById('rebuild').addEventListener('click',e=>{
   }
 
   let el=null;         // overlay root (built lazily)
-  let stage,svg,nodesLayer,inspector,zoomLbl,titleEl,replayIn,isolateIn,replayLbl;
-  let ST={t:null,nodes:[],edges:[],pos:{},sel:null,zoom:1,saved:false,dates:[],cut:null,isolate:false};
+  let stage,svg,nodesLayer,inspector,zoomLbl,titleEl,replayIn,isolateIn,replayLbl,rangeLbl;
+  let ST={t:null,nodes:[],edges:[],pos:{},sel:null,zoom:1,dates:[],cut:null,isolate:false};
 
   function build(){
     if(el) return;
@@ -1947,13 +2034,16 @@ document.getElementById('rebuild').addEventListener('click',e=>{
           <div class="gc-title"></div>
         </div>
         <div class="gc-tools">
+          <div class="gc-modeseg" title="back to the trace list (g)">
+            <button class="gc-mode" data-a="tolist">list <span class="gc-mode-key">· g</span></button>
+            <span class="gc-mode-sep">|</span>
+            <span class="gc-mode active">graph</span>
+          </div>
           <div class="gc-zoom">
             <button data-a="zout" title="zoom out">−</button>
             <span class="gc-zlbl">100%</span>
             <button data-a="zin" title="zoom in">+</button>
           </div>
-          <button class="gc-btn" data-a="regen">↻ regenerate</button>
-          <button class="gc-btn primary" data-a="save">save to draws/</button>
           <button class="gc-btn" data-a="close">✕ close</button>
         </div>
       </div>
@@ -1961,6 +2051,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
         <span class="gc-replay-lbl">replay</span>
         <input type="range" class="gc-replay-in" min="0" max="0" value="0">
         <span class="gc-replay-at">all</span>
+        <span class="gc-replay-hint">· drag to fold the graph back in time</span>
         <label class="gc-iso"><input type="checkbox" class="gc-iso-in"> isolate path</label>
       </div>
       <div class="gc-stage-wrap">
@@ -1984,15 +2075,15 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     titleEl=el.querySelector('.gc-title');
     replayIn=el.querySelector('.gc-replay-in');
     replayLbl=el.querySelector('.gc-replay-at');
+    rangeLbl=el.querySelector('.gc-replay-lbl');
     isolateIn=el.querySelector('.gc-iso-in');
     el.addEventListener('click',e=>{
       const a=e.target.closest('[data-a]');if(!a)return;
       const act=a.dataset.a;
       if(act==='close')close();
+      else if(act==='tolist')toList();
       else if(act==='zin')setZoom(ST.zoom+0.1);
       else if(act==='zout')setZoom(ST.zoom-0.1);
-      else if(act==='regen')regen();
-      else if(act==='save')save();
     });
     el.addEventListener('click',e=>{if(e.target===el)close();});
     replayIn.addEventListener('input',()=>{
@@ -2066,14 +2157,18 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     stage.style.width=(maxX+X0)+'px';stage.style.height=(maxY+Y0)+'px';
     svg.setAttribute('width',String(maxX+X0));svg.setAttribute('height',String(maxY+Y0));
     svg.setAttribute('viewBox','0 0 '+(maxX+X0)+' '+(maxY+Y0));
+    const slug=ST.t?ST.t.sl:'';
     nodesLayer.innerHTML=nodes.map(n=>{
       const p=ST.pos[n.id];const name=(n.path||'').split('/').pop()||n.id;
       const rel=incomingRel(n.id);
-      return `<div class="gc-node k-${esc(n.kind||'doc')}" data-id="${esc(n.id)}"
+      // Nodes whose path lives outside tasks/<slug>/ are drawn dashed — they are
+      // referenced from the task, not owned by it (the comp's DOC treatment).
+      const ext=!nodeInTask(n.path,slug);
+      return `<div class="gc-node k-${esc(n.kind||'doc')}${ext?' ext':''}" data-id="${esc(n.id)}"
         style="left:${p.x}px;top:${p.y}px;--kc:${colorOf(n.kind)}">
         <div class="gc-node-badge">${esc((n.kind||'').toUpperCase())}</div>
         <div class="gc-node-name">${esc(name)}</div>
-        <div class="gc-node-meta">${esc(n.at||'')}${rel?' · '+esc(rel):''}</div>
+        <div class="gc-node-meta">${esc(fmtEventDate(n.at))}${rel?' · '+esc(rel):''}</div>
       </div>`;
     }).join('');
     nodesLayer.querySelectorAll('.gc-node').forEach(card=>{
@@ -2091,20 +2186,34 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     const derives=ST.edges.filter(e=>e.to===id).map(e=>ST.nodes.find(x=>x.id===e.from)).filter(Boolean);
     const produced=ST.edges.filter(e=>e.from===id).map(e=>ST.nodes.find(x=>x.id===e.to)).filter(Boolean);
     const li=arr=>arr.length?arr.map(x=>`<span class="gc-chip">${esc((x.path||'').split('/').pop())}</span>`).join(''):'<span class="gc-none">—</span>';
+    // S6 — surface the changelog skill's provenance ("written by …") when the
+    // selected artifact carries it, plus a short derivation line.
+    const abs=nodeAbs(n);
+    const prov=(abs&&typeof PROVENANCE_DATA!=='undefined'&&PROVENANCE_DATA)?PROVENANCE_DATA[abs]:null;
+    let provH='';
+    if(prov&&prov.generated_by){
+      provH=`<div class="gc-ins-prov">written by <b>${esc(prov.generated_by)}</b>`+
+        (prov.commit_range?` · reads git range <b>${esc(prov.commit_range)}</b>`:'')+`</div>`;
+    }
     inspector.hidden=false;
     inspector.innerHTML=`
       <div class="gc-kicker">// selected node</div>
       <div class="gc-ins-path">${esc(n.path||n.id)}</div>
+      ${provH}
       <div class="gc-ins-row"><span class="gc-ins-lbl">derives from</span>${li(derives)}</div>
       <div class="gc-ins-row"><span class="gc-ins-lbl">produced in</span>${li(produced)}</div>
       <div class="gc-ins-actions">
         <button class="gc-btn" data-ins="open">open</button>
-        <button class="gc-btn" data-ins="trace">trace</button>
+        <button class="gc-btn" data-ins="isolate">isolate path</button>
       </div>`;
     inspector.querySelector('[data-ins="open"]').onclick=()=>{
-      const abs=nodeAbs(n);if(abs)window.open(fileHref(abs),'_blank','noopener');else flash('path not resolvable');
+      const a=nodeAbs(n);if(a)window.open(fileHref(a),'_blank','noopener');else flash('path not resolvable');
     };
-    inspector.querySelector('[data-ins="trace"]').onclick=()=>{close();openTrace(ST.t);};
+    // Isolate the path feeding THIS node: turn on the isolate flag (mirrors the
+    // header checkbox) and dim everything that is not an ancestor.
+    inspector.querySelector('[data-ins="isolate"]').onclick=()=>{
+      ST.isolate=!ST.isolate;isolateIn.checked=ST.isolate;applyDim();
+    };
     if(ST.isolate)applyDim();else drawEdges();
   }
 
@@ -2119,22 +2228,12 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     return hit;
   }
 
-  function save(){
-    if(!ST.t){return;}
-    flashSticky('saving to draws/…');
-    fetch('/timeline/save-draw',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({slug:ST.t.sl,repo:ST.t.rp})})
-      .then(r=>r.ok?r.json():r.text().then(t=>Promise.reject(t)))
-      .then(o=>{ST.saved=true;flash('saved · '+(o.rel||'draws/timeline.excalidraw'));})
-      .catch(e=>flash('save failed: '+e));
-  }
-
-  function regen(){
-    if(ST.saved&&!confirm('A derived timeline draw was saved this session. Re-derive the layout and discard the on-canvas edits?'))return;
-    ST.sel=null;ST.isolate=false;isolateIn.checked=false;
-    ST.cut=null;replayIn.value=String(ST.dates.length);replayLbl.textContent='all';
-    inspector.hidden=true;
-    render();
+  // The `list · g` control: close the derived graph and return to the Trace
+  // spine for the same task (the two are one task, toggled).
+  function toList(){
+    const t=ST.t;
+    close();
+    if(t)openTrace(t);
   }
 
   function firstTaskWithGraph(){
@@ -2150,19 +2249,29 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     window._graphCurrent=t;
     const g=taskGraph(t);
     if(!g.nodes.length){flash('no events for '+tagName(t.sl));return;}
-    ST={t:t,nodes:g.nodes,edges:g.edges,pos:{},sel:null,zoom:1,saved:false,
+    ST={t:t,nodes:g.nodes,edges:g.edges,pos:{},sel:null,zoom:1,
         dates:[],cut:null,isolate:false};
     ST.dates=[...new Set(g.nodes.map(n=>n.at||'').filter(Boolean))].sort();
     titleEl.textContent=tagName(t.sl)+'  ·  '+t.rp;
+    // Replay label carries the date range the slider folds through.
+    rangeLbl.textContent=ST.dates.length
+      ? fmtEventDate(ST.dates[0]).toLowerCase()+' → '+fmtEventDate(ST.dates[ST.dates.length-1]).toLowerCase()
+      : 'replay';
     replayIn.max=String(ST.dates.length);replayIn.value=String(ST.dates.length);
     replayLbl.textContent='all';isolateIn.checked=false;
     inspector.hidden=true;
     el.hidden=false;el.classList.add('show');
+    if(window._setTraceMode)window._setTraceMode('graph');
     setZoom(1);render();
   }
-  function close(){window._graphCurrent=null;if(el){el.hidden=true;el.classList.remove('show');}}
+  function close(){
+    window._graphCurrent=null;
+    if(el){el.hidden=true;el.classList.remove('show');}
+    if(window._setTraceMode)window._setTraceMode('list');
+  }
 
   window._openGraphFor=open;
+  window._closeGraph=close;
 
   // Deep link: hub timeline <slug> --graph prints /?graph=<slug>[&repo=R].
   (function(){

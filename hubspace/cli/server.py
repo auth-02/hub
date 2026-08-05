@@ -225,13 +225,6 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 self._save_draw(body.get("rel"), body.get("scene"), body.get("dir"), body.get("name"))
             except (ValueError, KeyError) as e:
                 self._send(400, "text/plain", str(e).encode())
-        elif url_path == "/timeline/save-draw":
-            length = int(self.headers.get("Content-Length", 0))
-            try:
-                body = json.loads(self.rfile.read(length).decode("utf-8"))
-                self._save_timeline_draw(body.get("slug"), body.get("repo"))
-            except (ValueError, KeyError) as e:
-                self._send(400, "text/plain", str(e).encode())
         elif url_path == "/_new-task":
             length = int(self.headers.get("Content-Length", 0))
             try:
@@ -945,44 +938,6 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             return
         out_rel = target.relative_to(root).as_posix()
         self._send(200, "application/json", json.dumps({"ok": True, "rel": out_rel}).encode())
-
-    def _save_timeline_draw(self, slug, repo) -> None:
-        """Derive the 2b graph for a task and save it as an owned task draw.
-
-        The graph-order canvas is *derived by default* (client-side, from the
-        baked lineage) — this is the "owned on first touch" step: we re-derive the
-        same graph server-side with the single tested converter (core.graph) and
-        persist it at ``tasks/<slug>/draws/timeline.excalidraw`` (on paper ground)
-        by reusing the exact ``/draw/save`` writer. Re-saving an existing timeline
-        diagram overwrites it in place (it is now an ordinary owned draw).
-        """
-        from ..core import query, graph
-        from ..core import tasks as _tasks
-        if not slug or not _tasks.valid_slug(slug):
-            self._send(400, "text/plain", b"bad slug")
-            return
-        conn = query.connect()
-        try:
-            tl = query.timeline(conn, slug, repo=repo)
-        finally:
-            if conn is not None:
-                conn.close()
-        if not tl.get("nodes"):
-            self._send(404, "text/plain", b"no such task")
-            return
-        scene = graph.to_excalidraw(tl["nodes"], tl.get("edges", []))
-        # Node paths are repo-relative; a real sub-repo prefixes the vault-relative
-        # draws dir, but the synthetic "(root)" repo (files directly under the scan
-        # root) does not.
-        prefix = f"{repo}/" if repo and repo != "(root)" else ""
-        draws_rel = f"{prefix}tasks/{slug}/draws"
-        existing = (_active_root / draws_rel / "timeline.excalidraw").resolve()
-        if existing.exists() and is_within(existing, _active_root.resolve()):
-            # Owned: overwrite in place via rel (never spawns timeline-2).
-            rel = existing.relative_to(_active_root.resolve()).as_posix()
-            self._save_draw(rel, scene, None, None)
-        else:
-            self._save_draw(None, scene, draws_rel, "timeline")
 
     def _run_rebuild(self) -> None:
         result = self._rebuild(_active_root)
