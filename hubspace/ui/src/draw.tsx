@@ -29,25 +29,21 @@ const Excalidraw = lazy(() =>
   import("@excalidraw/excalidraw").then((m) => ({ default: m.Excalidraw })),
 );
 
-// Allow embedding Hub pages (localhost / same-origin) inside the canvas. Without
-// this, Excalidraw's built-in allowlist rejects http://localhost:PORT/… with
-// "Embedding this url is currently not allowed". Returning `undefined` for any
-// other host defers to Excalidraw's default allowlist (YouTube, etc.).
+// Allow embedding ANY url inside the canvas — Hub pages (localhost/same-origin)
+// AND arbitrary sites (e.g. https://en.wikipedia.org/…). Excalidraw's built-in
+// allowlist otherwise only permits a few hosts (YouTube, Vimeo, …) and rejects
+// everything else with "Embedding this url is currently not allowed". We return
+// `true` for anything that parses as a URL so Hub imposes no host restriction.
+// (Sites that send X-Frame-Options: DENY / CSP frame-ancestors are still blocked
+// by the browser itself — that is the target site's choice, not Hub's.)
 function validateEmbeddable(link: string): boolean | undefined {
   try {
-    const u = new URL(link, window.location.origin);
-    if (
-      u.origin === window.location.origin ||
-      u.hostname === "localhost" ||
-      u.hostname === "127.0.0.1" ||
-      u.hostname === "[::1]"
-    ) {
-      return true;
-    }
+    new URL(link, window.location.origin);
+    return true;
   } catch {
-    /* not a parseable URL — let the default validator decide */
+    /* not a parseable URL — let Excalidraw's default validator decide */
+    return undefined;
   }
-  return undefined;
 }
 
 // Object hyperlinks: always open in a NEW tab so the canvas session survives.
