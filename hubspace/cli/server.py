@@ -492,15 +492,16 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                    json.dumps({"ok": True, "written": written, "results": results}).encode())
 
     def _note(self, body: dict) -> None:
-        """Write one note into `<repo>/tasks/<slug>/comments/` — the 1e producer.
+        """Append one comment to `<repo>/tasks/<slug>/comments/notes.jsonl` (1e/S7).
 
-        Body is JSON ``{repo, slug, target, range?, body, author?}``. Writes
-        exactly one `comments/<date>-<note-slug>.md` (see docs/HUB-LAYOUT.md §2),
-        anchored to `target` (a task-relative path that must resolve inside the
-        task). Reuses the same repo/slug guards as `/_new-task` and `/_upload`;
-        `tasks.write_note` enforces the target-escape guard and never overwrites
-        (collision → `-N`). A read-only root → 403. On success, rebuilds so the
-        note appears on reload — no DB row is written directly.
+        Body is JSON ``{repo, slug, target, range?, body, author?}``. Appends
+        exactly one JSON line to the task's append-only comment log (see
+        docs/HUB-LAYOUT.md §2), anchored to `target` (a task-relative path that
+        must resolve inside the task). Reuses the same repo/slug guards as
+        `/_new-task` and `/_upload`; `tasks.write_note` enforces the
+        target-escape guard and never rewrites existing lines. A read-only root
+        → 403. On success, rebuilds so the comment appears on reload — no DB row
+        is written directly.
         """
         from ..core import tasks as _tasks
 
@@ -537,8 +538,8 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             return
 
         try:
-            path = _tasks.write_note(repo_root, slug, target, note_body,
-                                     author=author, range_=range_)
+            path, rec = _tasks.write_note(repo_root, slug, target, note_body,
+                                          author=author, range_=range_)
         except _tasks.SlugError as e:
             _fail(400, {"ok": False, "error": "invalid_target", "detail": str(e)})
             return
@@ -555,7 +556,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             import sys as _sys2
             print(result.stderr or result.stdout, file=_sys2.stderr)
         self._send(200, "application/json",
-                   json.dumps({"ok": True, "rel": rel}).encode())
+                   json.dumps({"ok": True, "rel": rel, "id": rec["id"]}).encode())
 
     def _manifest_edit(self, body: dict) -> None:
         """Rewrite ONLY a manifest's `status:` + `## Plan` block — the 1i producer.

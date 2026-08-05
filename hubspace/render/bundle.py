@@ -115,7 +115,46 @@ def _render_file(abs_path: str, kind: str, rel: str) -> str:
         return _render_xlsx(Path(abs_path))
     if ext == ".excalidraw":
         return _render_draw_static(abs_path)
+    if ext == ".jsonl":
+        return _render_notes_jsonl(abs_path)
     return f"<pre><code>{esc_html(_read(abs_path))}</code></pre>"
+
+
+def _render_notes_jsonl(abs_path: str) -> str:
+    """Render a comments/notes.jsonl log as a list of comment cards (S7).
+
+    Each line is one comment ``{target,range?,author,created,body}``; malformed
+    lines are skipped. Offline-safe, no external refs.
+    """
+    import json
+    parts = ['<ul class="bundle-notes">']
+    for line in _read(abs_path).splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(rec, dict):
+            continue
+        anchor = esc_html(str(rec.get("target", "")))
+        rng = rec.get("range")
+        if rng:
+            anchor += " · " + esc_html(str(rng))
+        meta = " · ".join(
+            x for x in (esc_html(str(rec.get("author", ""))),
+                        esc_html(str(rec.get("created", "")))) if x
+        )
+        parts.append(
+            '<li class="bundle-note">'
+            f'<div class="bundle-note-head"><code>{anchor}</code>'
+            f'<span class="bundle-note-meta">{meta}</span></div>'
+            f'<div class="bundle-note-body">{esc_html(str(rec.get("body", "")))}</div>'
+            '</li>'
+        )
+    parts.append('</ul>')
+    return "".join(parts)
 
 
 def _render_draw_static(abs_path: str) -> str:

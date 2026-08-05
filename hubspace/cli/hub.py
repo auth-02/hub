@@ -357,16 +357,17 @@ def _cmd_note(path_arg: str, message: str, range_: str | None = None) -> None:
     except Exception:
         author = None
     try:
-        note = _tasks.write_note(repo_root, slug, target_rel, message,
-                                 author=author, range_=range_)
+        note_file, rec = _tasks.write_note(repo_root, slug, target_rel, message,
+                                           author=author, range_=range_)
     except (_tasks.SlugError, ValueError) as e:
         print(f"  error: {e}")
         sys.exit(1)
     try:
-        rel = note.relative_to(repo_root).as_posix()
+        rel = note_file.relative_to(repo_root).as_posix()
     except ValueError:
-        rel = str(note)
-    print(f"  created  {rel}")
+        rel = str(note_file)
+    # One line appended to the task's append-only comment log.
+    print(f"  appended  {rel}  (comment {rec['id']} → {rec['target']})")
 
 
 def _cmd_trace(path: str, as_json: bool) -> None:

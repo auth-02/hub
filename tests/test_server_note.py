@@ -1,9 +1,9 @@
-"""Integration tests for POST /_note — the 1e Comments/annotations producer.
+"""Integration tests for POST /_note — the 1e/S7 Comments producer.
 
-Asserts the endpoint writes exactly one `comments/<date>-<slug>.md` with the
-correct front-matter anchor (target/range/author/created) + body, and enforces
-the guards: bad slug, unknown task, target escaping the task, collision → -N,
-and a read-only root → 403.
+Asserts the endpoint APPENDS exactly one JSON line to the task's append-only
+`comments/notes.jsonl` (target/range/author/created/body), never rewrites prior
+lines, and enforces the guards: bad slug, unknown task, target escaping the
+task, empty body, and a read-only root → 403.
 """
 import json
 import os
@@ -101,37 +101,45 @@ class TestNoteEndpoint(unittest.TestCase):
         return _post(self._port, "/_note", json.dumps(body).encode("utf-8"))
 
     @property
-    def _comments_dir(self) -> Path:
-        return Path(self._scan_root) / "tasks" / "demo" / "comments"
+    def _jsonl(self) -> Path:
+        return Path(self._scan_root) / "tasks" / "demo" / "comments" / "notes.jsonl"
 
-    def test_writes_one_note_with_frontmatter(self):
-        before = set(self._comments_dir.glob("*.md")) if self._comments_dir.exists() else set()
+    def _lines(self):
+        if not self._jsonl.exists():
+            return []
+        return [ln for ln in self._jsonl.read_text(encoding="utf-8").splitlines() if ln.strip()]
+
+    def test_appends_one_json_line(self):
+        before = len(self._lines())
         status, body = self._note(
             target="artifacts/flow.html", range="L41-L48",
             author="atharva", body="rotation window feels short please fix")
         self.assertEqual(status, 200)
         out = json.loads(body)
         self.assertTrue(out["ok"])
-        # exactly one NEW note file written by this single POST
-        after = set(self._comments_dir.glob("*.md"))
-        new = after - before
-        self.assertEqual(len(new), 1)
-        f = new.pop()
-        self.assertTrue(f.name.startswith(date.today().isoformat() + "-"))
-        self.assertEqual(out["rel"], f.relative_to(Path(self._scan_root)).as_posix())
-        text = f.read_text(encoding="utf-8")
-        self.assertIn("target: artifacts/flow.html", text)
-        self.assertIn("range: L41-L48", text)
-        self.assertIn("author: atharva", text)
-        self.assertIn("created: " + date.today().isoformat(), text)
-        self.assertIn("rotation window feels short", text)
+        self.assertTrue(out["id"])
+        self.assertEqual(out["rel"], self._jsonl.relative_to(Path(self._scan_root)).as_posix())
+        # exactly ONE new line appended by this single POST
+        lines = self._lines()
+        self.assertEqual(len(lines), before + 1)
+        obj = json.loads(lines[-1])
+        self.assertEqual(obj["target"], "artifacts/flow.html")
+        self.assertEqual(obj["range"], "L41-L48")
+        self.assertEqual(obj["author"], "atharva")
+        self.assertIn(date.today().isoformat(), obj["created"])
+        self.assertIn("rotation window feels short", obj["body"])
+        self.assertEqual(obj["id"], out["id"])
 
-    def test_collision_suffixes(self):
-        self._note(target="manifest.md", body="collision phrase example one")
-        self._note(target="manifest.md", body="collision phrase example one")
-        matches = list(self._comments_dir.glob("*collision-phrase-example-one*.md"))
-        self.assertEqual(len(matches), 2)
-        self.assertTrue(any(re.search(r"-2\.md$", m.name) for m in matches))
+    def test_second_post_appends_leaving_prior_lines_intact(self):
+        self._note(target="manifest.md", body="append-only comment one")
+        first = self._jsonl.read_bytes()
+        self._note(target="manifest.md", body="append-only comment two")
+        after = self._jsonl.read_bytes()
+        # prior line(s) are the exact prefix — nothing rewritten/reordered
+        self.assertTrue(after.startswith(first))
+        bodies = [json.loads(ln)["body"] for ln in self._lines()]
+        self.assertIn("append-only comment one", bodies)
+        self.assertIn("append-only comment two", bodies)
 
     def test_rejects_bad_slug(self):
         status, body = self._note(slug="../evil", target="manifest.md", body="x")

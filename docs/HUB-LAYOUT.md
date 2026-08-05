@@ -49,7 +49,7 @@ The differentiated structure. A task is a directory under `<repo>/tasks/<slug>/`
 ├── draws/               (optional, created on demand)
 │   └── <name>.excalidraw ← DRAW
 ├── comments/            (optional, created on demand)
-│   └── <date>-<slug>.md ← NOTE
+│   └── notes.jsonl      ← NOTE (append-only; one JSON comment per line)
 └── data/                (optional, created on demand)
     └── <name>.{xlsx,csv,json,…}  ← DATA
 ```
@@ -70,12 +70,17 @@ The differentiated structure. A task is a directory under `<repo>/tasks/<slug>/`
   the other subdirs, DRAW is resolved by extension, not by this path (§3), so a
   `.excalidraw` file anywhere is still a DRAW — `draws/` is where the UI's *New
   draw* action and the `hub draw` verb put one when scoped to a task.
-- `comments/` holds **notes** — one markdown file per note, `<date>-<slug>.md`,
-  flat and created on demand. Each note carries a small front-matter anchor
-  (`target:` — the task-relative file it is about, may be `manifest.md`; optional
-  `range:` line range) followed by the note body. A note is a real, diffable,
-  git-tracked file at a predictable path — untouched by `rm hub.db`. Written by
-  `hub note <path>` or the "New note" palette row; hub never scaffolds it.
+- `comments/` holds **notes** in a single append-only log, `notes.jsonl`,
+  created on demand. Each line is one JSON comment object
+  (`{id, target, range?, author, created, body}`): `target` is the task-relative
+  file the comment is about (defaults to `manifest.md` for a general comment),
+  `range` is an optional line range (`L41-L48`, omitted for general comments),
+  and `id` is a short, stable, deterministic id. Adding a comment **appends one
+  line** and never rewrites or reorders existing lines. The log is a real,
+  diffable, git-tracked, agent-readable file at a predictable path — untouched by
+  `rm hub.db` (the JSONL is the source of truth). Written by `hub note <path>`,
+  the floating comment composer (`c`), or the `POST /_note` endpoint; hub never
+  scaffolds it.
 
 > **`prompts/` is not part of the task unit.** The PROMPT kind (§3) is owned by
 > any pre-existing `prompts/` folder a repo or task already keeps for its own
@@ -99,7 +104,7 @@ Kind is derived purely from path. First match wins, top to bottom:
 | `<repo>/tasks/<slug>/artifacts/**`        | ARTIFACT |
 | `<repo>/tasks/<slug>/prompts/**`          | PROMPT   |
 | `<repo>/tasks/<slug>/data/**`             | DATA     |
-| `<repo>/tasks/<slug>/comments/**`         | NOTE     |
+| `<repo>/tasks/<slug>/comments/notes.jsonl` | NOTE    |
 | `<repo>/docs/**.md`                       | DOC      |
 | any other `.md` / `.html`                 | MD       |
 
@@ -223,9 +228,9 @@ Producers must not use these for content; hub owns or ignores them:
 - The hub state directory (`$XDG_STATE_HOME/hub` or `~/.local/state/hub`) — never
   inside the scan root.
 - `manifest.md`, `runs/`, `artifacts/`, `draws/`, `prompts/`, `data/`,
-  `comments/` — structural, as defined above. (`prompts/` is reserved when
-  present, but never created by hub; `comments/` is created on demand by
-  `hub note`.)
+  `comments/`, `comments/notes.jsonl` — structural, as defined above.
+  (`prompts/` is reserved when present, but never created by hub; `comments/`
+  and its `notes.jsonl` log are created on demand by `hub note` / the composer.)
 
 ---
 

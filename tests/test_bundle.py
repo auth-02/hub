@@ -60,8 +60,10 @@ class _Base(unittest.TestCase):
                      "# Run\nbenchmark SENTINEL_RUN output\n")
         art = _write("tasks/auth-refactor/artifacts/report.md",
                      "# Report\nfinal SENTINEL_ARTIFACT report\n")
-        note = _write("tasks/auth-refactor/comments/2026-07-22-thought.md",
-                      "# Note\na SENTINEL_NOTE thought\n")
+        note = _write(
+            "tasks/auth-refactor/comments/notes.jsonl",
+            '{"id":"n1","target":"manifest.md","author":"you",'
+            '"created":"2026-07-22T09:00:00","body":"a SENTINEL_NOTE thought"}\n')
 
         db.upsert(self.conn, _meta(str(man), "tasks/auth-refactor/manifest.md",
                                    "task"), "Auth Refactor", "prose")
@@ -72,8 +74,8 @@ class _Base(unittest.TestCase):
                   "tasks/auth-refactor/artifacts/report.md", "artifact"),
                   "Report", "report")
         db.upsert(self.conn, _meta(str(note),
-                  "tasks/auth-refactor/comments/2026-07-22-thought.md", "note"),
-                  "Note", "thought")
+                  "tasks/auth-refactor/comments/notes.jsonl", "note"),
+                  "1 comment", "a SENTINEL_NOTE thought")
         self.conn.commit()
         db.build_lineage(self.conn)
 

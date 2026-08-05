@@ -12,6 +12,7 @@ EXTS = {".md", ".html", ".htm"}
 PROMPT_EXTS = {".txt"}
 DATA_EXTS = {".pdf", ".xlsx", ".xls", ".csv", ".tsv"}
 DRAW_EXTS = {".excalidraw"}  # Excalidraw diagrams — first-class vault docs, any dir
+NOTE_EXTS = {".jsonl"}  # comment logs — only inside a task's comments/ (see below)
 
 
 def _included(path: Path) -> bool:
@@ -23,6 +24,10 @@ def _included(path: Path) -> bool:
     if ext in PROMPT_EXTS and "/prompts/" in path.as_posix():
         return True
     if ext in DATA_EXTS and "/data/" in path.as_posix():
+        return True
+    # A .jsonl is swept in ONLY when it lives under a comments/ dir (the
+    # append-only comment log, S7); a stray .jsonl elsewhere is ignored.
+    if ext in NOTE_EXTS and "/comments/" in path.as_posix():
         return True
     return False
 

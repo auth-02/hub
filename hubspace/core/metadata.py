@@ -59,8 +59,34 @@ def read_safe(path: str) -> str:
         return ""
 
 
+def _jsonl_notes(text: str) -> list:
+    """Parse a comments/notes.jsonl body into a list of comment dicts (S7).
+
+    One JSON object per line; malformed/non-object lines are skipped. Used to
+    surface a comment count in the title and the comment bodies for FTS.
+    """
+    import json
+
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(rec, dict):
+            out.append(rec)
+    return out
+
+
 def extract_title(path: str, text: str) -> str:
     """Return first # heading, frontmatter title:, or filename stem."""
+    # A comment log (comments/notes.jsonl) has no heading — surface its count.
+    if Path(path).suffix.lower() == ".jsonl":
+        n = len(_jsonl_notes(text))
+        return f"{n} comment{'' if n == 1 else 's'}"
     # Only look at the top of the file for frontmatter / headings.
     head = text[:2000]
     if head.startswith("---"):
@@ -145,6 +171,13 @@ def extract_body(path: str, text: str, max_chars: int = 2000) -> str:
     if ext == ".excalidraw":
         # JSON scene graph — don't index raw JSON. (Phase 04 may extract labels.)
         return ""
+    if ext == ".jsonl":
+        # A comment log: index the comment bodies (not the JSON syntax) so a
+        # note's text is full-text searchable.
+        bodies = " ".join(
+            str(r.get("body", "")) for r in _jsonl_notes(text[:_READ_LIMIT])
+        )
+        return _WHITESPACE.sub(" ", bodies).strip()[:max_chars]
     if ext == ".xlsx":
         return _extract_xlsx_body(path, max_chars)
     if ext in (".csv", ".tsv"):

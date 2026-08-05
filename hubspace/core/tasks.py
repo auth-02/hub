@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 import re
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from ..utils.paths import is_within
@@ -158,49 +158,72 @@ def accept_upload(
     return target, None
 
 
-# ── comments / notes (roadmap 1e — Comments & annotations) ──────────────────
-# A note is ONE markdown file at `<repo>/tasks/<slug>/comments/<date>-<slug>.md`
-# with a small front-matter anchor pointing at the file it is about. The writer
-# below is shared by the `hub note` CLI verb and the `POST /_note` endpoint so
-# both emit the identical shape (verb-parity, roadmap 2c). Like write_manifest()
-# it touches no DB — the watcher/rebuild reconcile the new file on their tick.
+# ── comments / notes (roadmap 1e — Comments & annotations, S7 revision) ──────
+# Comments are an append-only JSONL log: ONE file per task at
+# `<repo>/tasks/<slug>/comments/notes.jsonl`, one JSON object per line, one line
+# per comment (see docs/HUB-LAYOUT.md §2). Adding a comment appends exactly one
+# line and never rewrites or reorders existing lines — the file is the source of
+# truth (`rm hub.db` loses nothing). The writer below is shared by the `hub
+# note` CLI verb and the `POST /_note` endpoint so both emit the identical shape
+# (verb-parity, roadmap 2c). Like write_manifest() it touches no DB — the
+# watcher/rebuild reconcile the file on their tick.
+
+NOTES_FILE = "notes.jsonl"
 
 
-def note_stem(body: str, target: str = "", max_words: int = 6) -> str:
-    """A short kebab slug for a note filename, from the body then the target.
+def notes_path(repo_root: Path, slug: str) -> Path:
+    """Where a task's comment log lives: `<slug>/comments/notes.jsonl`."""
+    return repo_root / "tasks" / slug / "comments" / NOTES_FILE
 
-    Takes the first few words of the note body; if that yields nothing usable,
-    falls back to the target file's stem, then to a bare ``note``. Capped so the
-    filename stays short.
+
+def note_id(target: str, body: str, created: str, range_: str | None = None,
+            existing: set[str] | None = None) -> str:
+    """A short, stable, deterministic id for one comment line.
+
+    Derived from a content hash of the note's fields (NOT time/random) so a given
+    comment always hashes to the same id and tests stay stable. Disambiguated
+    with a ``-N`` suffix only if that hash already appears in `existing` (the ids
+    already present in the file), which keeps ids unique per file.
     """
-    from ..utils.text import slugify
+    import hashlib
 
-    base = slugify(" ".join((body or "").split()[:max_words]))
-    if not base and target:
-        base = slugify(Path(target).stem)
-    return (base[:60].strip("-")) or "note"
+    base = "\x1f".join([created or "", target or "", range_ or "", body or ""])
+    h = hashlib.sha1(base.encode("utf-8")).hexdigest()[:8]
+    existing = existing or set()
+    nid, n = h, 2
+    while nid in existing:
+        nid = f"{h}-{n}"
+        n += 1
+    return nid
 
 
-def render_note(
-    target: str,
-    body: str,
-    author: str | None = None,
-    range_: str | None = None,
-    created: str | None = None,
-) -> str:
-    """Return a note's markdown: a small front-matter anchor + the body.
+def read_notes(task_dir: Path) -> list[dict]:
+    """Parse a task's `comments/notes.jsonl` into a list of comment dicts.
 
-    `range` and `author` are emitted only when given; `target` and `created`
-    always appear. See docs/HUB-LAYOUT.md §2 (comments/).
+    Reads `<task_dir>/comments/notes.jsonl`, one JSON object per line. A missing
+    file yields ``[]``; a malformed or non-object line is skipped rather than
+    raising, so a partially-corrupt log still reads. Order is preserved (append
+    order = chronological).
     """
-    lines = ["---", f"target: {target}"]
-    if range_:
-        lines.append(f"range: {range_}")
-    if author:
-        lines.append(f"author: {author}")
-    lines.append(f"created: {created or date.today().isoformat()}")
-    lines += ["---", "", (body or "").strip()]
-    return "\n".join(lines) + "\n"
+    import json
+
+    path = Path(task_dir) / "comments" / NOTES_FILE
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    out: list[dict] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except (ValueError, TypeError):
+            continue  # skip a malformed line without crashing
+        if isinstance(rec, dict):
+            out.append(rec)
+    return out
 
 
 def write_note(
@@ -211,18 +234,20 @@ def write_note(
     author: str | None = None,
     range_: str | None = None,
     created: str | None = None,
-) -> Path:
-    """Write exactly one note into `<repo_root>/tasks/<slug>/comments/`.
+) -> tuple[Path, dict]:
+    """Append exactly one comment line to `<slug>/comments/notes.jsonl`.
 
-    The single note writer shared by `hub note` and `POST /_note`. The file is
-    `comments/<date>-<note-slug>.md` — markdown whose front matter anchors it to
-    `target` (the task-relative path the note is about) with an optional line
-    `range`. `comments/` is created lazily; a colliding filename suffixes `-N`
-    and an existing note is never overwritten. Raises `SlugError` on an unsafe
-    slug or a `target` that escapes the task, `ValueError` on an empty
-    target/body, and lets `OSError` propagate on a read-only root. Returns the
-    written path.
+    The single comment writer shared by `hub note` and `POST /_note`. Appends ONE
+    JSON object (`{id,target,range?,author,created,body}`) as a new line; it never
+    rewrites or reorders existing lines, so prior comments stay byte-identical.
+    `comments/notes.jsonl` is created lazily on the first comment. `target` is
+    task-relative (defaults to the manifest for a general comment) and must
+    resolve inside the task. Raises `SlugError` on an unsafe slug or an escaping
+    `target`, `ValueError` on an empty target/body, and lets `OSError` propagate
+    on a read-only root. Returns ``(notes_path, appended_record)``.
     """
+    import json
+
     if not valid_slug(slug):
         raise SlugError(f"invalid slug: {slug!r}")
     task_dir = (repo_root / "tasks" / slug).resolve()
@@ -240,22 +265,27 @@ def write_note(
         raise SlugError(f"target escapes task: {target!r}")
     if not is_within((task_dir / target).resolve(), task_dir):
         raise SlugError(f"target escapes task: {target!r}")
-    created = created or date.today().isoformat()
-    stem = note_stem(body, target)
-    comments_dir = task_dir / "comments"
-    path = comments_dir / f"{created}-{stem}.md"
-    n = 2
-    while path.exists():  # never clobber an existing note
-        path = comments_dir / f"{created}-{stem}-{n}.md"
-        n += 1
+
+    created = created or datetime.now().isoformat(timespec="seconds")
+    range_ = (range_ or "").strip() or None
+    existing = {r.get("id") for r in read_notes(task_dir) if isinstance(r, dict)}
+    rec: dict = {"id": note_id(target, body, created, range_, existing),
+                 "target": target}
+    if range_:
+        rec["range"] = range_
+    rec["author"] = (author or "").strip() or "you"
+    rec["created"] = created
+    rec["body"] = body
+
+    path = task_dir / "comments" / NOTES_FILE
     # Defence in depth: the resolved write must stay inside the task dir.
     if not is_within(path.resolve(), task_dir):
         raise SlugError("note path escapes task")
-    comments_dir.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        render_note(target, body, author, range_, created), encoding="utf-8"
-    )
-    return path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(rec, ensure_ascii=False)
+    with path.open("a", encoding="utf-8") as fh:  # append-only: never rewrites
+        fh.write(line + "\n")
+    return path, rec
 
 
 def find_task_for(path: Path) -> tuple[Path, str, str] | None:

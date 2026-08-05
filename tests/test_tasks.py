@@ -1,4 +1,5 @@
 """Unit tests for the shared task manifest writer (hubspace.core.tasks)."""
+import json
 import os
 import sys
 import tempfile
@@ -78,48 +79,74 @@ class TestWriteManifest(unittest.TestCase):
 
 
 class TestWriteNote(unittest.TestCase):
+    """S7 — comments are an append-only JSONL log (comments/notes.jsonl)."""
+
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
         (self.root / "tasks" / "demo").mkdir(parents=True)
         (self.root / "tasks" / "demo" / "manifest.md").write_text(
             "# Demo\n", encoding="utf-8")
 
-    def test_writes_one_note_with_frontmatter(self):
-        p = tasks.write_note(
+    def _jsonl(self):
+        return self.root / "tasks" / "demo" / "comments" / "notes.jsonl"
+
+    def test_appends_one_json_line(self):
+        p, rec = tasks.write_note(
             self.root, "demo", "artifacts/token-flow.html",
             "The rotation window feels short — can we make it configurable?",
-            author="atharva", range_="L41-L48", created="2026-08-04")
+            author="atharva", range_="L41-L48", created="2026-08-05T10:00:00")
+        self.assertEqual(os.path.realpath(p), os.path.realpath(self._jsonl()))
         self.assertTrue(p.exists())
         self.assertEqual(p.parent.name, "comments")
-        self.assertTrue(p.name.startswith("2026-08-04-"))
-        self.assertTrue(p.name.endswith(".md"))
-        text = p.read_text(encoding="utf-8")
-        self.assertIn("target: artifacts/token-flow.html", text)
-        self.assertIn("range: L41-L48", text)
-        self.assertIn("author: atharva", text)
-        self.assertIn("created: 2026-08-04", text)
-        self.assertIn("rotation window feels short", text)
+        # exactly one line, and it is valid JSON with the S7 schema
+        lines = p.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 1)
+        obj = json.loads(lines[0])
+        self.assertEqual(obj, rec)
+        self.assertEqual(obj["target"], "artifacts/token-flow.html")
+        self.assertEqual(obj["range"], "L41-L48")
+        self.assertEqual(obj["author"], "atharva")
+        self.assertEqual(obj["created"], "2026-08-05T10:00:00")
+        self.assertIn("rotation window feels short", obj["body"])
+        self.assertTrue(obj["id"])
         # comments/ is created lazily inside the existing task dir
         self.assertEqual(os.path.realpath(p.parent),
                          os.path.realpath(self.root / "tasks" / "demo" / "comments"))
 
-    def test_optional_fields_omitted(self):
-        p = tasks.write_note(self.root, "demo", "manifest.md", "Looks good.",
-                             created="2026-08-04")
-        text = p.read_text(encoding="utf-8")
-        self.assertNotIn("range:", text)
-        self.assertNotIn("author:", text)
-        self.assertIn("target: manifest.md", text)
+    def test_optional_range_omitted_author_defaults(self):
+        _, rec = tasks.write_note(self.root, "demo", "manifest.md", "Looks good.",
+                                  created="2026-08-05T10:00:00")
+        self.assertNotIn("range", rec)          # omitted for a general comment
+        self.assertEqual(rec["author"], "you")  # default author
+        self.assertEqual(rec["target"], "manifest.md")
 
-    def test_collision_suffixes_dashN(self):
-        a = tasks.write_note(self.root, "demo", "manifest.md", "same words here",
-                             created="2026-08-04")
-        b = tasks.write_note(self.root, "demo", "manifest.md", "same words here",
-                             created="2026-08-04")
-        self.assertNotEqual(a.name, b.name)
-        self.assertRegex(b.name, r"-2\.md$")
-        # first note untouched
-        self.assertIn("same words here", a.read_text())
+    def test_second_comment_appends_and_leaves_first_byte_identical(self):
+        p, _ = tasks.write_note(self.root, "demo", "manifest.md", "first comment",
+                                created="2026-08-05T10:00:00")
+        first_bytes = p.read_bytes()
+        p2, _ = tasks.write_note(self.root, "demo", "manifest.md", "second comment",
+                                 created="2026-08-05T11:00:00")
+        self.assertEqual(p, p2)
+        all_bytes = p.read_bytes()
+        # append-only: the first line's bytes are the exact prefix of the file
+        self.assertTrue(all_bytes.startswith(first_bytes))
+        lines = p.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(json.loads(lines[0])["body"], "first comment")
+        self.assertEqual(json.loads(lines[1])["body"], "second comment")
+
+    def test_ids_unique_even_for_identical_content(self):
+        _, a = tasks.write_note(self.root, "demo", "manifest.md", "same words",
+                                created="2026-08-05T10:00:00")
+        _, b = tasks.write_note(self.root, "demo", "manifest.md", "same words",
+                                created="2026-08-05T10:00:00")
+        self.assertNotEqual(a["id"], b["id"])  # disambiguated with -N suffix
+
+    def test_id_is_deterministic(self):
+        # Same fields (with no pre-existing ids) → same hash-derived id.
+        i1 = tasks.note_id("manifest.md", "hello", "2026-08-05T10:00:00")
+        i2 = tasks.note_id("manifest.md", "hello", "2026-08-05T10:00:00")
+        self.assertEqual(i1, i2)
 
     def test_invalid_slug_raises(self):
         with self.assertRaises(tasks.SlugError):
@@ -141,6 +168,27 @@ class TestWriteNote(unittest.TestCase):
         (self.root / "tasks" / "demo" / "comments").write_text("x", encoding="utf-8")
         with self.assertRaises(OSError):
             tasks.write_note(self.root, "demo", "manifest.md", "hi")
+
+
+class TestReadNotes(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        self.task = self.root / "tasks" / "demo"
+        (self.task / "comments").mkdir(parents=True)
+
+    def test_missing_file_is_empty(self):
+        self.assertEqual(tasks.read_notes(self.task), [])
+
+    def test_parses_lines_and_skips_malformed(self):
+        (self.task / "comments" / "notes.jsonl").write_text(
+            '{"id":"a","target":"manifest.md","body":"one"}\n'
+            'this is not json\n'
+            '\n'
+            '{"id":"b","target":"manifest.md","body":"two"}\n'
+            '["not","an","object"]\n',
+            encoding="utf-8")
+        recs = tasks.read_notes(self.task)
+        self.assertEqual([r["body"] for r in recs], ["one", "two"])
 
 
 class TestFindTaskFor(unittest.TestCase):
@@ -165,20 +213,6 @@ class TestFindTaskFor(unittest.TestCase):
         f.parent.mkdir(parents=True)
         f.write_text("x", encoding="utf-8")
         self.assertIsNone(tasks.find_task_for(f))
-
-
-class TestNoteStem(unittest.TestCase):
-    def test_from_body(self):
-        self.assertEqual(
-            tasks.note_stem("The rotation window feels short", "manifest.md"),
-            "the-rotation-window-feels-short")
-
-    def test_falls_back_to_target(self):
-        self.assertEqual(tasks.note_stem("!!!", "artifacts/token-flow.html"),
-                         "token-flow")
-
-    def test_ultimate_fallback(self):
-        self.assertEqual(tasks.note_stem("", ""), "note")
 
 
 # A realistic manifest with frontmatter, prose, an editable Plan, and Decisions.

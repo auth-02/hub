@@ -213,6 +213,20 @@ rows.forEach(r=>r.addEventListener('click',e=>{
 
 document.getElementById('pv-close').addEventListener('click',closePreview);
 
+// Modest preview affordance: comment on the previewed file (opens the composer).
+(function(){
+  const acts=document.querySelector('#preview .pv-actions');
+  if(!acts) return;
+  const b=document.createElement('button');
+  b.className='pv-btn';b.id='pv-comment';b.type='button';
+  b.title='write a comment about this file (⌘↵)';b.textContent='💬';
+  b.addEventListener('click',()=>{
+    const ctx=(_openPreviewAbs&&_ctxForAbs(_openPreviewAbs))||composerContext();
+    if(window._openComposer)window._openComposer(ctx);
+  });
+  acts.insertBefore(b,document.getElementById('pv-close'));
+})();
+
 // ── Floating windows ──────────────────────────────────────────────────────
 const FLOAT_WINS=new Map();
 let floatZ=60,floatN=0;
@@ -275,6 +289,104 @@ rows.forEach(r=>r.addEventListener('dblclick',e=>{
   e.preventDefault();
   openFloat(r.dataset.abs,r.querySelector('.path').textContent,r.href);
 }));
+
+// ── Floating comment composer (S7 · 1e) ─────────────────────────────────────
+// Pressing `c` (or the preview/trace "write a comment…" affordance, or the
+// palette's New-note row) opens a compact floating box — NOT the palette. It is
+// anchored to the current context: the open preview/trace/graph file+task, else
+// the selected row's file, else the first task's manifest. ⌘↵/Ctrl↵ appends the
+// comment (POST /_note → one JSONL line) then softReloads; esc cancels. The box
+// is transient UI — deliberately NOT part of hub_view_state, so it never
+// interferes with the overlay-restore logic.
+function _taskDirOf(t){return (t&&t.abs||'').replace(/\/manifest\.md$/,'');}
+function _ctxForAbs(abs){
+  if(!abs||typeof TASKS_DATA==='undefined') return null;
+  for(const t of TASKS_DATA){
+    const dir=_taskDirOf(t);
+    if(dir&&(abs===dir||abs.indexOf(dir+'/')===0)){
+      return {task:t,target:abs===dir?'manifest.md':abs.slice(dir.length+1)};
+    }
+  }
+  return null;
+}
+function composerContext(){
+  // 1) an open trace / 2) an open graph → that task, general (manifest) target.
+  if(_openTraceT) return {task:_openTraceT,target:'manifest.md'};
+  if(window._graphCurrent&&typeof TASKS_DATA!=='undefined'){
+    const g=window._graphCurrent;
+    const t=TASKS_DATA.find(x=>x.sl===g.sl&&x.rp===g.rp);
+    if(t) return {task:t,target:'manifest.md'};
+  }
+  // 3) an open preview → the previewed file's owning task + task-relative target.
+  if(_openPreviewAbs){const c=_ctxForAbs(_openPreviewAbs);if(c) return c;}
+  // 4) the selected list row's file.
+  if(selIdx>=0&&selRows[selIdx]){const c=_ctxForAbs(selRows[selIdx].dataset.abs);if(c) return c;}
+  // 5) fall back to the first task's manifest.
+  const t0=(typeof TASKS_DATA!=='undefined'&&TASKS_DATA.length)?TASKS_DATA[0]:null;
+  return t0?{task:t0,target:'manifest.md'}:null;
+}
+let _composerEl=null,_composerCtx=null;
+function _buildComposer(){
+  if(_composerEl) return;
+  const el=document.createElement('div');
+  el.id='composer';el.className='composer';
+  el.innerHTML=
+    '<div class="composer-head"><span class="composer-title" id="cmp-title">comment</span>'+
+    '<button class="composer-x" id="cmp-x" type="button" title="cancel (esc)">✕</button></div>'+
+    '<div class="composer-dest" id="cmp-dest"></div>'+
+    '<input class="composer-range" id="cmp-range" type="text" autocomplete="off" '+
+    'spellcheck="false" placeholder="range — L41-L48 (optional, inline)">'+
+    '<textarea class="composer-body" id="cmp-body" rows="4" '+
+    'placeholder="write a comment…"></textarea>'+
+    '<div class="composer-foot"><span class="composer-hint">⌘↵ save · esc cancel</span>'+
+    '<button class="composer-save" id="cmp-save" type="button">Comment</button></div>';
+  document.body.appendChild(el);
+  _composerEl=el;
+  const body=el.querySelector('#cmp-body');
+  el.querySelector('#cmp-x').addEventListener('click',closeComposer);
+  el.querySelector('#cmp-save').addEventListener('click',_composerSave);
+  function onKey(e){
+    if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();_composerSave();}
+    else if(e.key==='Escape'){e.preventDefault();closeComposer();}
+    e.stopPropagation();  // don't leak keys to the global hotkey handler
+  }
+  body.addEventListener('keydown',onKey);
+  el.querySelector('#cmp-range').addEventListener('keydown',onKey);
+}
+function openComposer(ctx){
+  ctx=ctx||composerContext();
+  if(!ctx||!ctx.task){flash('no task to comment on — create one first');return;}
+  _buildComposer();
+  _composerCtx=ctx;
+  const t=ctx.task,tgt=ctx.target||'manifest.md';
+  _composerEl.querySelector('#cmp-title').textContent='comment on '+tgt;
+  _composerEl.querySelector('#cmp-dest').textContent=
+    (t.rp&&t.rp!=='(root)'?t.rp+'/':'')+'tasks/'+t.sl+'/comments/notes.jsonl';
+  _composerEl.querySelector('#cmp-range').value='';
+  _composerEl.querySelector('#cmp-body').value='';
+  _composerEl.classList.add('show');
+  setTimeout(()=>_composerEl.querySelector('#cmp-body').focus(),0);
+}
+function closeComposer(){if(_composerEl)_composerEl.classList.remove('show');_composerCtx=null;}
+function _composerSave(){
+  if(!_composerCtx){closeComposer();return;}
+  const t=_composerCtx.task;
+  const body=(_composerEl.querySelector('#cmp-body').value||'').trim();
+  if(!body){flash('comment body required');return;}
+  const target=_composerCtx.target||'manifest.md';
+  const range=(_composerEl.querySelector('#cmp-range').value||'').trim();
+  const saveBtn=_composerEl.querySelector('#cmp-save');saveBtn.disabled=true;
+  fetch('/_note',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({repo:t.rp,slug:t.sl,target:target,range:range,body:body})})
+    .then(r=>r.json().then(d=>({ok:r.ok,d:d})).catch(()=>({ok:r.ok,d:{}})))
+    .then(res=>{
+      if(res.ok){closeComposer();flashSticky('comment saved…');softReload();return;}
+      saveBtn.disabled=false;
+      const d=res.d||{};
+      flash('comment failed: '+(d.detail||d.error||'unknown'));
+    }).catch(()=>{saveBtn.disabled=false;flash('comment failed');});
+}
+window._openComposer=openComposer;
 
 // ── Keyboard nav ──────────────────────────────────────────────────────────
 document.addEventListener('keydown',e=>{
@@ -883,6 +995,13 @@ function openTrace(t){
     a.textContent='Open manifest';
     actionsEl.appendChild(a);
   }
+  // Modest affordance: comment on this task (opens the floating composer, 1e/S7).
+  const cbtn=document.createElement('button');
+  cbtn.type='button';cbtn.className='trace-btn';
+  cbtn.textContent='write a comment… ⌘↵';
+  cbtn.title='comment on this task (c)';
+  cbtn.onclick=()=>{if(window._openComposer)window._openComposer({task:t,target:'manifest.md'});};
+  actionsEl.appendChild(cbtn);
 
   traceEl.classList.add('show');
   traceEl.scrollTop=0;
@@ -1059,8 +1178,8 @@ document.getElementById('rebuild').addEventListener('click',e=>{
        cli:'hub new task <slug>',prim:()=>openNewTask('')},
       {type:'action',write:true,id:'act:new-draw',key:'D',ic:'✎',label:'New draw',
        cli:'hub draw',prim:()=>{closePalette();window.open('/draw','_blank','noopener');}},
-      {type:'action',write:true,id:'act:new-note',key:'C',ic:'✎',label:'New note',
-       cli:'hub note <path>',prim:()=>openNewNote(null)},
+      {type:'action',write:true,id:'act:new-note',key:'C',ic:'✎',label:'New comment',
+       cli:'hub note <path>',prim:()=>{closePalette();if(window._openComposer)window._openComposer();}},
       {type:'action',id:'act:graph',key:'G',ic:'⌗',label:'Timeline · graph order',
        cli:'hub timeline <slug> --graph',prim:()=>{closePalette();if(window._openGraphFor)window._openGraphFor(null);}},
       {type:'action',write:true,id:'act:add-data',ic:'✎',label:'Add data',
@@ -1206,7 +1325,6 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     help.classList.remove('show');
     ntScreen.classList.add('hidden');
     if(adScreen) adScreen.classList.add('hidden');
-    if(noteScreen) noteScreen.classList.add('hidden');
     searchScreen.classList.remove('hidden');
     scope=scopeChar&&SCOPE_TYPE[scopeChar]?scopeChar:'';
     pal.classList.add('show');
@@ -1282,7 +1400,6 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     if(!pal.classList.contains('show')) pal.classList.add('show');
     searchScreen.classList.add('hidden');ntScreen.classList.remove('hidden');
     const _ad=document.getElementById('pal-adddata-screen');if(_ad)_ad.classList.add('hidden');
-    const _nt=document.getElementById('pal-note-screen');if(_nt)_nt.classList.add('hidden');
     repoSel.innerHTML=repoList().map(r=>'<option value="'+esc(r)+'">'+esc(r)+'</option>').join('');
     titleInput.value=prefillTitle||'';
     planArea.value='';
@@ -1382,7 +1499,6 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     help.classList.remove('show');
     if(!pal.classList.contains('show')) pal.classList.add('show');
     searchScreen.classList.add('hidden');ntScreen.classList.add('hidden');
-    if(noteScreen)noteScreen.classList.add('hidden');
     adScreen.classList.remove('hidden');
     adStaged=[];
     adTaskSel.innerHTML = TASKS_DATA.length
@@ -1435,79 +1551,10 @@ document.getElementById('rebuild').addEventListener('click',e=>{
   document.getElementById('pal-ad-cancel').addEventListener('click',closePalette);
   adAddBtn.addEventListener('click',adUpload);
 
-  // ── new-note screen (1e) ──────────────────────────────────────────────────
-  // A note is one markdown file at tasks/<slug>/comments/<date>-<slug>.md with a
-  // front-matter anchor (target/range). The sole network call is POST /_note,
-  // where the server re-enforces the guards (repo/slug/target-escape/collision).
-  const noteScreen=document.getElementById('pal-note-screen');
-  const noteTaskSel=document.getElementById('pal-note-task');
-  const noteTarget=document.getElementById('pal-note-target');
-  const noteRange=document.getElementById('pal-note-range');
-  const noteText=document.getElementById('pal-note-text');
-  const noteDest=document.getElementById('pal-note-dest');
-  const noteSaveBtn=document.getElementById('pal-note-save');
-
-  function noteRender(){
-    const t=TASKS_DATA[+noteTaskSel.value];
-    const tgt=(noteTarget.value||'').trim()||'manifest.md';
-    noteDest.textContent = t
-      ? ((t.rp&&t.rp!=='(root)'?t.rp+'/':'')+'tasks/'+t.sl+'/comments/  ← target: '+tgt)
-      : '';
-    noteSaveBtn.disabled=!(t && noteText.value.trim());
-  }
-  function openNewNote(prefill){
-    help.classList.remove('show');
-    if(!pal.classList.contains('show')) pal.classList.add('show');
-    searchScreen.classList.add('hidden');ntScreen.classList.add('hidden');
-    if(adScreen)adScreen.classList.add('hidden');
-    noteScreen.classList.remove('hidden');
-    noteTaskSel.innerHTML = TASKS_DATA.length
-      ? TASKS_DATA.map((t,i)=>'<option value="'+i+'">'+esc(t.rp+' · tasks/'+t.sl)+'</option>').join('')
-      : '<option value="">no tasks yet — create one first</option>';
-    // A prefill may pin the task + target (e.g. from a file row's dataset).
-    if(prefill&&prefill.slug){
-      const idx=TASKS_DATA.findIndex(t=>t.sl===prefill.slug&&(!prefill.repo||t.rp===prefill.repo));
-      if(idx>=0)noteTaskSel.value=String(idx);
-    }
-    noteTarget.value=(prefill&&prefill.target)||'';
-    noteRange.value='';
-    noteText.value='';
-    noteRender();
-    setTimeout(()=>{(prefill&&prefill.target?noteText:noteTarget).focus();},0);
-  }
-  window._openNewNote=openNewNote;
-  function noteBack(){noteScreen.classList.add('hidden');searchScreen.classList.remove('hidden');openPalette('');}
-
-  function noteSave(){
-    const t=TASKS_DATA[+noteTaskSel.value];
-    if(!t){flash('pick a task');return;}
-    const bodyText=noteText.value.trim();
-    if(!bodyText){flash('note body required');return;}
-    const target=(noteTarget.value||'').trim()||'manifest.md';
-    const range=(noteRange.value||'').trim();
-    noteSaveBtn.disabled=true;
-    fetch('/_note',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({repo:t.rp,slug:t.sl,target:target,range:range,body:bodyText})})
-      .then(r=>r.json().then(d=>({ok:r.ok,d:d})).catch(()=>({ok:r.ok,d:{}})))
-      .then(res=>{
-        if(res.ok){flashSticky('saving note…');softReload();return;}
-        noteSaveBtn.disabled=false;
-        const d=res.d||{};
-        flash('note failed: '+(d.detail||d.error||'unknown'));
-      }).catch(()=>{noteSaveBtn.disabled=false;flash('note failed');});
-  }
-
-  noteTaskSel.addEventListener('change',noteRender);
-  noteTarget.addEventListener('input',noteRender);
-  noteText.addEventListener('input',noteRender);
-  noteText.addEventListener('keydown',e=>{
-    if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();noteSave();}
-    else if(e.key==='Escape'){e.preventDefault();noteBack();}
-  });
-  noteTarget.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();noteBack();}});
-  document.getElementById('pal-nt-note-back').addEventListener('click',noteBack);
-  document.getElementById('pal-note-cancel').addEventListener('click',closePalette);
-  noteSaveBtn.addEventListener('click',noteSave);
+  // ── comments — the floating composer (S7) replaces the old palette note
+  // screen. The palette "New comment" row and the `c` hotkey both call
+  // window._openComposer (defined at module scope); there is no in-palette note
+  // screen anymore. See the "Floating comment composer" block above.
 
   // ── publish confirm sheet (1f) ─────────────────────────────────────────────
   // Publishing is deliberately high-friction: scan → review/redact → confirm.
@@ -1572,7 +1619,6 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     if(!pal.classList.contains('show')) pal.classList.add('show');
     searchScreen.classList.add('hidden');ntScreen.classList.add('hidden');
     if(adScreen)adScreen.classList.add('hidden');
-    if(noteScreen)noteScreen.classList.add('hidden');
     pubScreen.classList.remove('hidden');
     const opts=pubFileOptions();
     pubFileSel.innerHTML=opts.length
@@ -1681,7 +1727,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     // Single-key global shortcuts (n/c/? are new; 1–4/y are additive, no conflict
     // with the existing j/k/Enter/Esc//' handler above).
     if(k==='n'){e.preventDefault();openPalette('');openNewTask('');}
-    else if(k==='c'){e.preventDefault();openNewNote(null);}
+    else if(k==='c'){e.preventDefault();if(window._openComposer)window._openComposer();}
     else if(k==='g'){e.preventDefault();if(window._openGraphFor)window._openGraphFor(null);}
     else if(e.key==='?'){e.preventDefault();help.classList.add('show');}
     else if(k==='y'){e.preventDefault();if(window._toggleTimeline)window._toggleTimeline();}

@@ -183,6 +183,33 @@ footer{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-fa
 .float-body{flex:1;position:relative;}
 .float-body iframe{position:absolute;inset:0;width:100%;height:100%;border:none;}
 
+/* ── Floating comment composer (S7 · 1e) ───────────────────────────────── */
+/* A compact authoring box — oxblood --accent = authoring, paper --bg ground,
+   --mono metadata. Lighter than #modal/palette; anchored bottom-right. */
+.composer{position:fixed;right:24px;bottom:24px;width:360px;max-width:calc(100vw - 48px);
+  background:var(--bg);border:1px solid var(--line);border-top:3px solid var(--accent);
+  box-shadow:0 18px 40px rgba(0,0,0,.20);z-index:80;display:none;flex-direction:column;
+  padding:14px 15px 12px;}
+.composer.show{display:flex;}
+.composer-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
+.composer-title{flex:1;font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--accent);overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+.composer-x{border:none;background:none;color:var(--mute);cursor:pointer;font-size:13px;line-height:1;padding:2px 4px;}
+.composer-x:hover{color:var(--ink);}
+.composer-dest{font-family:var(--mono);font-size:10px;color:var(--mute);letter-spacing:.04em;
+  margin-bottom:8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
+.composer-range{width:100%;box-sizing:border-box;font-family:var(--mono);font-size:11px;
+  padding:7px 9px;border:1px solid var(--line);background:var(--alt);color:var(--ink);outline:none;margin-bottom:7px;}
+.composer-range:focus{border-color:var(--accent);}
+.composer-body{width:100%;box-sizing:border-box;font-family:var(--mono);font-size:12px;line-height:1.5;
+  padding:9px 10px;border:1px solid var(--line);background:var(--alt);color:var(--ink);outline:none;resize:vertical;}
+.composer-body:focus{border-color:var(--accent);}
+.composer-foot{display:flex;align-items:center;justify-content:space-between;margin-top:9px;}
+.composer-hint{font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--mute);text-transform:uppercase;}
+.composer-save{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  padding:7px 14px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;}
+.composer-save:disabled{opacity:.5;cursor:default;}
+
 /* ── Board / calendar ──────────────────────────────────────────────────── */
 #board{display:none;gap:16px;margin-top:18px;align-items:flex-start;}
 #board.show{display:flex;}
@@ -381,8 +408,6 @@ background-image:radial-gradient(circle,#C9BFA3 .6px,transparent .6px);backgroun
 /* add-data screen (1d) */
 .pal-ad-body{padding:16px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;min-height:0;}
 .pal-ad-dest{font-family:var(--mono);font-size:10px;color:var(--mute);letter-spacing:.02em;word-break:break-all;min-height:13px;}
-.pal-note-body{padding:16px;display:flex;flex-direction:column;gap:8px;overflow-y:auto;min-height:0;}
-.pal-note-dest{font-family:var(--mono);font-size:10px;color:var(--mute);letter-spacing:.02em;word-break:break-all;min-height:13px;border-left:2px solid var(--rust);padding-left:8px;}
 .pal-ad-drop{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:26px 16px;border:1px dashed var(--line);background:var(--alt);cursor:pointer;text-align:center;transition:border-color .12s,background .12s;}
 .pal-ad-drop:hover,.pal-ad-drop:focus{border-color:var(--accent);outline:none;}
 .pal-ad-drop.over{border-color:var(--accent);border-style:solid;background:var(--bg);}

@@ -37,10 +37,11 @@ class TestClassify(unittest.TestCase):
         p = Path("/repo/tasks/slug/data/input.csv")
         self.assertEqual(scan._classify(p, "tasks/slug/data/input.csv"), "data")
 
-    def test_inside_comments_dir_returns_note(self):
-        p = Path("/repo/tasks/slug/comments/2026-08-04-rotation.md")
+    def test_comments_notes_jsonl_returns_note(self):
+        # S7 — the append-only comment log classifies as kind:note.
+        p = Path("/repo/tasks/slug/comments/notes.jsonl")
         self.assertEqual(
-            scan._classify(p, "tasks/slug/comments/2026-08-04-rotation.md"), "note")
+            scan._classify(p, "tasks/slug/comments/notes.jsonl"), "note")
 
     def test_inside_prompts_dir_at_repo_root_returns_none(self):
         # Top-level prompts/ is not in the spec; only tasks/<slug>/prompts/** → prompt
@@ -228,6 +229,15 @@ class TestIncluded(unittest.TestCase):
     def test_excalidraw_included_anywhere(self):
         self.assertTrue(scan._included(Path("/repo/diagram.excalidraw")))
         self.assertTrue(scan._included(Path("/repo/deep/nested/flow.excalidraw")))
+
+    def test_jsonl_in_comments_dir_included(self):
+        # S7 — the comment log is swept in only under a comments/ dir.
+        self.assertTrue(scan._included(Path("/repo/tasks/slug/comments/notes.jsonl")))
+
+    def test_jsonl_outside_comments_dir_excluded(self):
+        # A stray .jsonl anywhere else is NOT indexed.
+        self.assertFalse(scan._included(Path("/repo/data/events.jsonl")))
+        self.assertFalse(scan._included(Path("/repo/notes.jsonl")))
 
 
 class TestSkillSlug(unittest.TestCase):

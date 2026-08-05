@@ -146,6 +146,11 @@ def get_task(conn: sqlite3.Connection | None, slug: str,
     plan = [{"text": p["t"], "done": p["d"]} for p in metadata.extract_plan(text)]
     notes = metadata.extract_decisions(text)
 
+    # Comments (S7) — parsed from the task's append-only comments/notes.jsonl.
+    # Each line is one comment {id,target,range?,author,created,body}.
+    from . import tasks as _tasks
+    comments = _tasks.read_notes(Path(abs_path).parent)
+
     def _children(kind: str) -> list[dict]:
         try:
             rows = conn.execute(
@@ -168,6 +173,7 @@ def get_task(conn: sqlite3.Connection | None, slug: str,
         "title": title or slug,
         "plan": plan,
         "notes": notes,
+        "comments": comments,
         "runs": _children("run"),
         "artifacts": _children("artifact"),
         "path": abs_path,
@@ -274,7 +280,7 @@ def timeline(conn: sqlite3.Connection | None, slug: str,
     else:
         task_repo = row[3]
 
-    sql = ("SELECT id, rel, kind, mtime FROM files WHERE task_slug=?")
+    sql = ("SELECT id, rel, kind, mtime, abs FROM files WHERE task_slug=?")
     params: list = [slug]
     if task_repo:
         sql += " AND task_repo=?"
@@ -291,16 +297,37 @@ def timeline(conn: sqlite3.Connection | None, slug: str,
         return (0 if r[2] == "task" else 1, r[2] or "", r[1] or "")
     rows.sort(key=_order)
 
-    node_id: dict = {}  # file id -> "nN"
-    for i, (fid, rel, kind, mtime) in enumerate(rows, start=1):
-        nid = f"n{i}"
-        node_id[fid] = nid
-        result["nodes"].append(
-            {"id": nid, "kind": kind or "", "path": rel,
-             "at": _node_at(rel, mtime)}
-        )
+    # A file id maps to one node — EXCEPT a comments/notes.jsonl file (kind
+    # 'note'), which expands into one NOTE node per comment LINE (S7): each line
+    # is its own timeline event carrying its own `created` date. So node_ids maps
+    # file id -> [nid, ...].
+    from . import tasks as _tasks
+    node_ids: dict = {}
+    counter = 0
+    for fid, rel, kind, mtime, abs_path in rows:
+        if kind == "note":
+            # abs_path is <task_dir>/comments/notes.jsonl → task_dir is two up.
+            recs = _tasks.read_notes(Path(abs_path).parent.parent)
+            nids = []
+            for rec in recs:
+                counter += 1
+                nid = f"n{counter}"
+                at = (str(rec.get("created") or "")[:10]) or _iso_date(mtime)
+                result["nodes"].append(
+                    {"id": nid, "kind": "note", "path": rel, "at": at}
+                )
+                nids.append(nid)
+            node_ids[fid] = nids
+        else:
+            counter += 1
+            nid = f"n{counter}"
+            result["nodes"].append(
+                {"id": nid, "kind": kind or "", "path": rel,
+                 "at": _node_at(rel, mtime)}
+            )
+            node_ids[fid] = [nid]
 
-    ids = list(node_id.keys())
+    ids = list(node_ids.keys())
     placeholders = ",".join("?" for _ in ids)
     try:
         edge_rows = conn.execute(
@@ -311,12 +338,15 @@ def timeline(conn: sqlite3.Connection | None, slug: str,
     except sqlite3.Error:
         edge_rows = []
     for src, dst, rel_type in edge_rows:
-        if src in node_id and dst in node_id:
-            result["edges"].append({
-                "from": node_id[src], "to": node_id[dst],
-                "rel": rel_type,
-                # Lineage is built per-task, so every edge here is internal; the
-                # flag is part of the contract for cross-task graphs later.
-                "external": False,
-            })
+        # A single task_has_note edge (manifest → notes.jsonl) fans out to one
+        # edge per expanded comment-line node.
+        for s_nid in node_ids.get(src, []):
+            for d_nid in node_ids.get(dst, []):
+                result["edges"].append({
+                    "from": s_nid, "to": d_nid,
+                    "rel": rel_type,
+                    # Lineage is built per-task, so every edge here is internal;
+                    # the flag is part of the contract for cross-task graphs.
+                    "external": False,
+                })
     return result

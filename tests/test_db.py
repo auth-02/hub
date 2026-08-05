@@ -218,10 +218,10 @@ class TestBuildLineage(unittest.TestCase):
                   _fake_meta("/r/tasks/slug/manifest.md", kind="task", task_slug="slug"),
                   "Manifest", "")
         db.upsert(self.conn,
-                  _fake_meta("/r/tasks/slug/comments/2026-08-04-x.md",
-                             rel="tasks/slug/comments/2026-08-04-x.md",
+                  _fake_meta("/r/tasks/slug/comments/notes.jsonl",
+                             rel="tasks/slug/comments/notes.jsonl",
                              kind="note", task_slug="slug"),
-                  "Note", "")
+                  "1 comment", "")
         self.conn.commit()
         db.build_lineage(self.conn)
         rel_types = {r[0] for r in self.conn.execute("SELECT rel_type FROM lineage").fetchall()}
