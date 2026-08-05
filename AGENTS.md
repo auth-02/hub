@@ -133,7 +133,7 @@ Placeholders: `{favicon}`, `{scan_root}`, `{scan_root_json}`, `{sidecar_json}`,
 `{hubpy_json}`, `{server_origin_json}`, `{total}`, `{md_total}`, `{html_total}`,
 `{repo_count}`, `{built}`, `{body}`, `{repo_chips}`, `{fts_json}`, `{lineage_json}`,
 `{default_view_json}`, `{task_timeline_json}`, `{upload_exts_json}`, `{private_json}`,
-`{published_json}`, `{provenance_json}`.
+`{published_json}`, `{provenance_json}`, `{notes_json}`.
 
 After any template change: `HUB_SERVER_PORT=8787 python3 -m hubspace.cli.hub` to catch format errors.
 

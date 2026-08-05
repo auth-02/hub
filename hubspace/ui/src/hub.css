@@ -149,6 +149,20 @@ footer{margin-top:40px;border-top:1px solid var(--line);padding-top:12px;font-fa
 a.lf-ext:hover{color:var(--ink);}
 .linfoot-none{font-family:var(--mono);font-size:11px;color:var(--mute);font-style:italic;margin-bottom:12px;}
 .linfoot-acts{display:flex;gap:12px;}
+/* // NOTES — stored comment cards in the Trace overlay (S12). */
+.trace-notes{margin:6px 0 4px;}
+.notes-list{display:flex;flex-direction:column;gap:10px;margin-bottom:8px;}
+.note-card{background:var(--alt);border:1px solid var(--line);border-left:3px solid var(--accent);padding:10px 14px;}
+.note-card.agent{border-left-color:var(--accent2);}
+.note-meta{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;font-family:var(--mono);font-size:10px;letter-spacing:.04em;margin-bottom:6px;}
+.note-author{color:var(--accent);font-weight:500;}
+.note-author.agent{color:var(--accent2);}
+.note-time{color:var(--mute);}
+.note-on{color:var(--mute);}
+.note-body{font-family:var(--body);font-size:13px;color:var(--ink);line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;}
+.notes-empty{font-family:var(--mono);font-size:11px;color:var(--mute);font-style:italic;margin-bottom:8px;}
+.note-add-link{background:none;border:none;padding:0;font-family:var(--mono);font-size:11px;font-style:italic;color:var(--accent);cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;}
+.note-add-link:hover{color:var(--ink);}
 .tl-label{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);padding:12px 14px 8px;}
 .tl-period{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);padding:8px 14px 4px;}
 .tl-task{padding:8px 14px;border-bottom:1px solid var(--line);}

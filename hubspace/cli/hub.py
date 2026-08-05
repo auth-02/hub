@@ -162,7 +162,7 @@ def _first_run_html(root: Path) -> str:
     )
 
 
-def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]", timeline_json: str = "{}", tasks_json: str = "[]", task_timeline_json: str = "{}", published_json: str = "{}", provenance_json: str = "{}") -> str:
+def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]", timeline_json: str = "{}", tasks_json: str = "[]", task_timeline_json: str = "{}", published_json: str = "{}", provenance_json: str = "{}", notes_json: str = "{}") -> str:
     total     = sum(len(v) for v in groups.values())
     md_total  = sum(1 for v in groups.values() for f in v if f["ext"] == "md")
     html_total = total - md_total
@@ -243,6 +243,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         private_json=json.dumps(PRIVATE),
         published_json=published_json,
         provenance_json=provenance_json,
+        notes_json=notes_json,
     )
 
 
@@ -896,6 +897,29 @@ def main() -> None:
     )
     task_timeline_json = json.dumps(task_timelines, separators=(",", ":"))
 
+    # S12 — bake each task's stored comments so the Trace overlay can render the
+    # // NOTES cards (author · time · body). Comments live in an append-only
+    # JSONL at tasks/<slug>/comments/notes.jsonl; read_notes() returns [] when the
+    # file is absent, so a task with no comments is simply omitted. Keyed by
+    # "<repo>\t<slug>" to match TASK_TIMELINE_DATA. Bodies stay raw data — the UI
+    # escapes them on render.
+    from ..core import tasks as _tasks
+    notes_map: dict = {}
+    for t in all_tasks:
+        if not t.get("abs"):
+            continue
+        task_dir = Path(t["abs"]).parent
+        comments = _tasks.read_notes(task_dir)
+        if not comments:
+            continue
+        notes_map[f'{t["rp"]}\t{t["sl"]}'] = [
+            {"author": c.get("author"), "created": c.get("created"),
+             "body": c.get("body"), "target": c.get("target"),
+             "range": c.get("range")}
+            for c in comments
+        ]
+    notes_json = json.dumps(notes_map, separators=(",", ":"))
+
     # 1g — bake the published-state sidecar so a published task row can show a
     # PUBLISHED marker (URL + republish/revoke). Read-only; a missing file → {}.
     from ..core import publish as _publish
@@ -916,7 +940,7 @@ def main() -> None:
     provenance_json = json.dumps(provenance, separators=(",", ":"))
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(render(groups, fts_json, lineage_json, task_status_json, activity_json, timeline_json, tasks_json, task_timeline_json, published_json, provenance_json), encoding="utf-8")
+    OUTPUT.write_text(render(groups, fts_json, lineage_json, task_status_json, activity_json, timeline_json, tasks_json, task_timeline_json, published_json, provenance_json, notes_json), encoding="utf-8")
     total = sum(len(v) for v in groups.values())
     log(f"[hub] scanned {ROOT} -> {OUTPUT} ({total} files, {len(groups)} groups, {len(all_tasks)} tasks)")
 

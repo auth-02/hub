@@ -958,6 +958,44 @@ function setTraceMode(m){
 }
 window._setTraceMode=setTraceMode;
 
+// Relative time from a comment's ISO `created` string (feedAgo wants unix secs).
+function noteAgo(created){
+  const ms=Date.parse(created);
+  return isNaN(ms)?(created||''):feedAgo(ms/1000);
+}
+
+// // NOTES section — render the task's stored comments (S12). Keyed by
+// "<repo>\t<slug>" in NOTES_DATA, matching TASK_TIMELINE_DATA. Bodies arrive as
+// raw data and are escaped here; line breaks are preserved via white-space CSS.
+function renderTraceNotes(t){
+  const el=document.getElementById('trace-notes');
+  if(!el) return;
+  const notes=(typeof NOTES_DATA!=='undefined'&&NOTES_DATA[t.rp+'\t'+t.sl])||[];
+  let h=`<div class="trace-section-label">// notes · ${notes.length}</div>`;
+  if(notes.length){
+    h+='<div class="notes-list">'+notes.map(c=>{
+      const agent=/(agent|bot)/i.test(c.author||'');
+      const anchored=c.target&&c.target!=='manifest.md';
+      let meta=`<span class="note-author${agent?' agent':''}">`+
+        (agent?'▸ ':'')+esc(c.author||'anon')+'</span>'+
+        `<span class="note-time">${esc(noteAgo(c.created))}</span>`;
+      if(anchored){
+        meta+=`<span class="note-on">on ${esc(c.target)}`+
+          (c.range?` · ${esc(c.range)}`:'')+`</span>`;
+      }
+      return `<div class="note-card${agent?' agent':''}">`+
+        `<div class="note-meta">${meta}</div>`+
+        `<div class="note-body">${esc(c.body||'')}</div></div>`;
+    }).join('')+'</div>';
+  }else{
+    h+='<div class="notes-empty">no comments yet — '+
+      '<button class="note-add-link" id="note-add-empty" type="button">write a comment…</button></div>';
+  }
+  el.innerHTML=h;
+  const addBtn=document.getElementById('note-add-empty');
+  if(addBtn)addBtn.onclick=()=>{if(window._openComposer)window._openComposer({task:t,target:'manifest.md'});};
+}
+
 function openTrace(t){
   _openTraceT=t;
   const stMap=_ST_MAP;
@@ -1102,6 +1140,13 @@ function openTrace(t){
   } else {
     tlHead.style.display='none';
   }
+  // // NOTES (S12) — the task's stored comments rendered as cards. Read fresh
+  // from the baked NOTES_DATA on every open, so a comment added since the last
+  // rebuild appears after the softReload re-bakes the map. Each card is
+  // author · relative-time · body; a note anchored to a file/line shows its
+  // target (and range). No comments → a subtle hint + the composer affordance.
+  renderTraceNotes(t);
+
   window._graphTaskCtx=t;  // last task in focus — the palette G row opens this
 
   // The list|graph toggle always lands on `list` when the Trace (re)opens; the
