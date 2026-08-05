@@ -426,6 +426,86 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
 
 function fileHref(abs){return SERVER_ORIGIN?SERVER_ORIGIN+encodeURI(abs):'file://'+encodeURI(abs);}
 
+// ── Themed dropdown (S8) ────────────────────────────────────────────────────
+// Native <select> renders as an OS popup (a dark glassy macOS list) that clashes
+// with the paper/oxblood/mono theme. themeSelect() wraps a real <select> — kept
+// in the DOM and hidden — with a themed button + option panel drawn on the paper
+// ground. The hidden <select> stays the source of truth: existing code still
+// sets `sel.innerHTML` of <option>s, reads `sel.value`, and listens for `change`.
+// Picking a themed option writes `sel.value` and dispatches a native `change`,
+// so all New-task / Add-data / Publish wiring keeps working unchanged. After
+// repopulating a select's options, call the returned controller's `.refresh()`.
+// Transient UI only — never persisted to hub_view_state.
+function themeSelect(sel){
+  if(!sel||sel._dd) return sel&&sel._dd;
+  const wrap=document.createElement('div');
+  wrap.className='pal-dd';
+  sel.parentNode.insertBefore(wrap,sel);
+  wrap.appendChild(sel);
+  sel.classList.add('pal-dd-native');
+  sel.tabIndex=-1;  // the themed button is the tab stop; keep the native one out
+  const btn=document.createElement('button');
+  btn.type='button';btn.className='pal-dd-btn';
+  btn.setAttribute('aria-haspopup','listbox');btn.setAttribute('aria-expanded','false');
+  btn.innerHTML='<span class="pal-dd-val"></span><span class="pal-dd-caret">▾</span>';
+  const panel=document.createElement('div');
+  panel.className='pal-dd-panel';panel.setAttribute('role','listbox');
+  wrap.appendChild(btn);wrap.appendChild(panel);
+  const valEl=btn.querySelector('.pal-dd-val');
+  let open=false,hi=-1;
+  function opts(){return [...sel.options];}
+  function selectedIdx(){return Math.max(0,sel.selectedIndex);}
+  function refresh(){
+    const os=opts();
+    valEl.textContent=os.length?(os[selectedIdx()]?os[selectedIdx()].textContent:''):'';
+    panel.innerHTML=os.map((o,i)=>
+      '<div class="pal-dd-opt'+(i===sel.selectedIndex?' sel':'')+'" role="option" data-i="'+i+'"'+
+      (i===sel.selectedIndex?' aria-selected="true"':'')+'>'+esc(o.textContent)+'</div>').join('');
+    btn.disabled=!os.length;
+  }
+  function paintHi(){
+    [...panel.children].forEach((el,i)=>el.classList.toggle('hi',i===hi));
+    const el=panel.children[hi];if(el)el.scrollIntoView({block:'nearest'});
+  }
+  function openPanel(){
+    if(open||btn.disabled) return;
+    open=true;wrap.classList.add('open');btn.setAttribute('aria-expanded','true');
+    hi=selectedIdx();paintHi();
+  }
+  function closePanel(){
+    if(!open) return;
+    open=false;wrap.classList.remove('open');btn.setAttribute('aria-expanded','false');
+  }
+  function pick(i){
+    const os=opts();if(i<0||i>=os.length) return;
+    if(sel.selectedIndex!==i){sel.selectedIndex=i;sel.dispatchEvent(new Event('change',{bubbles:true}));}
+    refresh();closePanel();btn.focus();
+  }
+  btn.addEventListener('click',e=>{e.preventDefault();open?closePanel():openPanel();});
+  btn.addEventListener('keydown',e=>{
+    if(e.key==='Enter'||e.key===' '||e.key==='ArrowDown'){
+      e.preventDefault();
+      if(!open){openPanel();return;}
+      if(e.key==='ArrowDown'){hi=Math.min(opts().length-1,hi+1);paintHi();return;}
+      pick(hi);
+    }else if(e.key==='ArrowUp'){e.preventDefault();if(open){hi=Math.max(0,hi-1);paintHi();}else openPanel();}
+    else if(e.key==='Escape'){if(open){e.preventDefault();e.stopPropagation();closePanel();}}
+  });
+  panel.addEventListener('mousedown',e=>{
+    const o=e.target.closest('.pal-dd-opt');if(!o)return;
+    e.preventDefault();pick(+o.dataset.i);
+  });
+  panel.addEventListener('mousemove',e=>{
+    const o=e.target.closest('.pal-dd-opt');if(!o)return;
+    hi=+o.dataset.i;paintHi();
+  });
+  document.addEventListener('mousedown',e=>{if(open&&!wrap.contains(e.target))closePanel();});
+  refresh();
+  const ctl={refresh:refresh,el:wrap};
+  sel._dd=ctl;
+  return ctl;
+}
+
 // ── Timeline (ONE renderer, TWO scopes: 'global' | 'task') ─────────────────
 // 1c: the same component renders at the head of Work ("what have I been doing")
 // and inside Trace ("how did this task get here") — differing only by which
@@ -1182,14 +1262,20 @@ document.getElementById('rebuild').addEventListener('click',e=>{
        cli:'hub note <path>',prim:()=>{closePalette();if(window._openComposer)window._openComposer();}},
       {type:'action',id:'act:graph',key:'G',ic:'⌗',label:'Timeline · graph order',
        cli:'hub timeline <slug> --graph',prim:()=>{closePalette();if(window._openGraphFor)window._openGraphFor(null);}},
+      // Task-aware: a task in context (open trace/graph/preview, or named in the
+      // query) pre-scopes the add-data screen; otherwise its themed task
+      // dropdown IS the picker. (S8)
       {type:'action',write:true,id:'act:add-data',ic:'✎',label:'Add data',
-       cli:'hub data <path>',prim:()=>openAddData(null)},
+       cli:'hub data <path>',prim:()=>openAddData(null,paletteContextTask())},
     ];
     // Publishing leaves the machine. When the workspace is private, the row is
     // dropped entirely (baked from hub.toml [hub] private → the PRIVATE global).
     if(typeof PRIVATE==='undefined' || !PRIVATE){
+      // Task-aware (S8): with a task in context, publish that task's dak bundle
+      // directly; otherwise fall back to the file-publish sheet (its own asset
+      // picker + redaction scan).
       a.push({type:'action',write:true,id:'act:publish',ic:'✎',label:'Publish',
-       cli:'hub publish <path>',prim:()=>openPublish(null)});
+       cli:'hub publish --task <slug>',prim:()=>{const t=paletteContextTask();if(t)publishBundle(t);else openPublish(null);}});
       // 1g — freeze the current/selected task's subtree to a self-contained
       // bundle (its trace baked static) and hand off to dak. ⇧B in the comp.
       a.push({type:'action',write:true,id:'act:bundle',key:'B',ic:'⌗',label:'Trace bundle',
@@ -1202,7 +1288,9 @@ document.getElementById('rebuild').addEventListener('click',e=>{
       type:'task',id:'task:'+t.rp+':'+t.sl,label:tagName(t.sl),
       sub:t.rp+' · tasks/'+t.sl,cli:'hub trace tasks/'+t.sl,abs:t.abs,
       _match:t.sl+' '+t.rp,copyText:'tasks/'+t.sl,
-      prim:()=>{closePalette();openTrace(t);},
+      // S8: ↵ on a task opens its verbs (Add data · New comment · Publish ·
+      // Trace · Timeline·graph); ⇧↵ still opens the manifest in a floating window.
+      prim:()=>openTaskActions(t),
       shift:()=>{closePalette();if(t.abs)openFloat(t.abs,tagName(t.sl),fileHref(t.abs));},
     }));
   }
@@ -1228,6 +1316,53 @@ document.getElementById('rebuild').addEventListener('click',e=>{
   let scope='';           // one of > @ / #  or ''
   let palItems=[];        // flat, currently-rendered items
   let palSel=0;
+  // S8 — task-scoped sub-view: showing ONE task's verbs. Transient palette state
+  // (never persisted to hub_view_state).
+  let taskActionsTask=null;
+
+  // The task a global write action should act on: an open trace / graph / preview
+  // for a task, else a task named exactly in the query. Null → ask the user.
+  function paletteContextTask(){
+    if(typeof TASKS_DATA==='undefined'||!TASKS_DATA.length) return null;
+    if(_openTraceT) return _openTraceT;
+    if(window._graphCurrent){const g=window._graphCurrent;const t=TASKS_DATA.find(x=>x.sl===g.sl&&x.rp===g.rp);if(t) return t;}
+    if(_openPreviewAbs){const c=_ctxForAbs(_openPreviewAbs);if(c&&c.task) return c.task;}
+    const term=currentTerm().trim().toLowerCase();
+    if(term){
+      const m=TASKS_DATA.filter(t=>t.sl.toLowerCase()===term||tagName(t.sl).toLowerCase()===term);
+      if(m.length===1) return m[0];
+    }
+    return null;
+  }
+
+  // The verbs for ONE task — each acts on that task, each carries its 2c CLI
+  // hint (⌥↵ copies it). Reuses the existing screens/flows: add-data, the S7
+  // floating composer, the bundle publish, trace, and the graph-order timeline.
+  function taskActionItems(t){
+    const slug=t.sl;
+    const a=[
+      {type:'action',write:true,id:'ta:data:'+t.rp+':'+slug,ic:'✎',label:'Add data',
+       sub:t.rp+' · tasks/'+slug,cli:'cp <files> tasks/'+slug+'/data/',
+       prim:()=>openAddData(null,t)},
+      {type:'action',write:true,id:'ta:note:'+t.rp+':'+slug,ic:'✎',label:'New comment',
+       sub:'tasks/'+slug+'/comments',cli:'hub note tasks/'+slug+'/manifest.md',
+       prim:()=>{closePalette();if(window._openComposer)window._openComposer({task:t,target:'manifest.md'});}},
+    ];
+    if(typeof PRIVATE==='undefined'||!PRIVATE){
+      a.push({type:'action',write:true,id:'ta:pub:'+t.rp+':'+slug,ic:'⌗',label:'Publish (dak bundle)',
+       sub:'self-contained trace bundle',cli:'hub publish --task '+slug,
+       prim:()=>publishBundle(t)});
+    }
+    a.push(
+      {type:'action',id:'ta:trace:'+t.rp+':'+slug,ic:'◇',label:'Trace',
+       sub:'open the task trace',cli:'hub trace tasks/'+slug,
+       prim:()=>{closePalette();openTrace(t);}},
+      {type:'action',id:'ta:graph:'+t.rp+':'+slug,ic:'⌗',label:'Timeline · graph',
+       sub:'how this evolved',cli:'hub timeline '+slug+' --graph',
+       prim:()=>{closePalette();if(window._openGraphFor)window._openGraphFor(t);}});
+    return a;
+  }
+  function openTaskActions(t){taskActionsTask=t;scope='';palInput.value='';render();setTimeout(()=>palInput.focus(),0);}
 
   function currentTerm(){
     let v=palInput.value;
@@ -1236,7 +1371,25 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     return v;
   }
 
+  // A flat, single-section result list — used by the S8 task sub-views (task
+  // actions / task picker). Honors the search term via the same fuzzy scorer.
+  function renderFlat(items,label,cls){
+    const term=palInput.value.trim();
+    const scored=items.filter(it=>{const sc=fuzzy(term,it.label+' '+(it._match||it.sub||''));it._score=sc;return !(term&&sc<0);});
+    if(term)scored.sort((a,b)=>b._score-a._score);
+    let html='<div class="pal-sec '+cls+'">'+esc(label)+'</div>';
+    const flat=[];
+    scored.forEach(it=>{html+=rowHTML(it,flat.length);flat.push(it);});
+    if(!flat.length)html+='<div class="pal-empty">no matches</div>';
+    palResults.innerHTML=html;palItems=flat;palSel=flat.length?0:-1;paintSel();
+  }
+
   function render(){
+    // Task sub-views short-circuit the normal pool + scope logic.
+    if(taskActionsTask){
+      palScope.classList.add('show');palScope.textContent='TASK · '+tagName(taskActionsTask.sl);
+      renderFlat(taskActionItems(taskActionsTask),tagName(taskActionsTask.sl),'tasks');return;
+    }
     let raw=palInput.value;
     // Detect a scope prefix typed inline (only meaningful as first char)
     if(!scope && raw && SCOPE_TYPE[raw[0]]){
@@ -1327,12 +1480,13 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     if(adScreen) adScreen.classList.add('hidden');
     searchScreen.classList.remove('hidden');
     scope=scopeChar&&SCOPE_TYPE[scopeChar]?scopeChar:'';
+    taskActionsTask=null;
     pal.classList.add('show');
     palInput.value='';
     render();
     setTimeout(()=>{palInput.focus();},0);
   }
-  function closePalette(){pal.classList.remove('show');scope='';}
+  function closePalette(){pal.classList.remove('show');scope='';taskActionsTask=null;}
   window._openPalette=openPalette;
 
   palInput.addEventListener('input',render);
@@ -1342,9 +1496,12 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     else if(e.key==='Enter'){e.preventDefault();
       activate(palItems[palSel], e.altKey?'alt':e.shiftKey?'shift':'prim');}
     else if(e.key==='Escape'){e.preventDefault();
-      if(scope){scope='';palScope.classList.remove('show');render();}
+      if(taskActionsTask){taskActionsTask=null;render();}
+      else if(scope){scope='';palScope.classList.remove('show');render();}
       else closePalette();}
-    else if(e.key==='Backspace'&&scope&&palInput.value===''){scope='';render();}
+    else if(e.key==='Backspace'&&palInput.value===''){
+      if(taskActionsTask){taskActionsTask=null;render();}
+      else if(scope){scope='';render();}}
   });
   palResults.addEventListener('click',e=>{
     const row=e.target.closest('.pal-row');if(!row)return;
@@ -1357,6 +1514,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
 
   // ── new-task screen (1b) ──
   const repoSel=document.getElementById('pal-nt-repo');
+  const repoDD=themeSelect(repoSel);
   const titleInput=document.getElementById('pal-nt-title-input');
   const slugField=document.getElementById('pal-nt-slug');
   const statusWrap=document.getElementById('pal-nt-status');
@@ -1401,6 +1559,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     searchScreen.classList.add('hidden');ntScreen.classList.remove('hidden');
     const _ad=document.getElementById('pal-adddata-screen');if(_ad)_ad.classList.add('hidden');
     repoSel.innerHTML=repoList().map(r=>'<option value="'+esc(r)+'">'+esc(r)+'</option>').join('');
+    repoDD.refresh();
     titleInput.value=prefillTitle||'';
     planArea.value='';
     ntStatus='ongoing';
@@ -1450,6 +1609,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
   // POST /_upload, where the server re-enforces every guard.
   const adScreen=document.getElementById('pal-adddata-screen');
   const adTaskSel=document.getElementById('pal-ad-task');
+  const adTaskDD=themeSelect(adTaskSel);
   const adDest=document.getElementById('pal-ad-dest');
   const adDrop=document.getElementById('pal-ad-drop');
   const adFileInput=document.getElementById('pal-ad-file');
@@ -1495,7 +1655,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     adAddBtn.disabled = !(accepted>0 && t);
     adAddBtn.textContent = accepted ? ('Add '+accepted+' file'+(accepted===1?'':'s')) : 'Add files';
   }
-  function openAddData(files){
+  function openAddData(files,task){
     help.classList.remove('show');
     if(!pal.classList.contains('show')) pal.classList.add('show');
     searchScreen.classList.add('hidden');ntScreen.classList.add('hidden');
@@ -1504,6 +1664,10 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     adTaskSel.innerHTML = TASKS_DATA.length
       ? TASKS_DATA.map((t,i)=>'<option value="'+i+'">'+esc(t.rp+' · tasks/'+t.sl)+'</option>').join('')
       : '<option value="">no tasks yet — create one first</option>';
+    // Pre-scope to a task when the palette handed one over (task-scoped action or
+    // a task in context); otherwise the themed dropdown IS the task picker.
+    if(task){const i=TASKS_DATA.findIndex(x=>x.sl===task.sl&&x.rp===task.rp);if(i>=0)adTaskSel.value=String(i);}
+    adTaskDD.refresh();
     if(files&&files.length) stageFiles(files); else adRender();
     setTimeout(()=>{adDrop.focus();},0);
   }
@@ -1565,6 +1729,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
   // server returns the exact dak command via POST /_publish for the user to run.
   const pubScreen=document.getElementById('pal-publish-screen');
   const pubFileSel=document.getElementById('pal-pub-file');
+  const pubFileDD=themeSelect(pubFileSel);
   const pubTitle=document.getElementById('pal-pub-title');
   const pubScanEl=document.getElementById('pal-pub-scan');
   const pubListEl=document.getElementById('pal-pub-list');
@@ -1626,6 +1791,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
       : '<option value="">no files to publish</option>';
     const want=prefill&&prefill.abs;
     if(want&&opts.some(o=>o.abs===want))pubFileSel.value=want;
+    pubFileDD.refresh();
     pubTitle.value='';
     pubScan();
     setTimeout(()=>{pubFileSel.focus();},0);

@@ -398,6 +398,24 @@ background-image:radial-gradient(circle,#C9BFA3 .6px,transparent .6px);backgroun
 .pal-nt-status button{font-family:var(--mono);font-size:10px;letter-spacing:.06em;padding:6px 12px;border:none;border-left:1px solid var(--line);background:var(--alt);color:var(--mute);cursor:pointer;}
 .pal-nt-status button:first-child{border-left:none;}
 .pal-nt-status button.active{background:var(--accent);color:#fff;}
+/* Themed dropdown (S8) — replaces native <select> so the popup lives on the
+   paper ground instead of the OS-default dark list. */
+.pal-dd{position:relative;width:100%;}
+.pal-dd-native{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);border:0;}
+.pal-dd-btn{font-family:var(--mono);font-size:12.5px;padding:8px 10px;border:1px solid var(--line);background:var(--alt);color:var(--ink);width:100%;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;}
+.pal-dd-btn:hover{border-color:var(--accent);}
+.pal-dd-btn:disabled{color:var(--mute);cursor:default;}
+.pal-dd.open .pal-dd-btn,.pal-dd-btn:focus-visible{border-color:var(--accent);outline:none;}
+.pal-dd-btn:focus-visible{box-shadow:0 0 0 2px var(--accent2);}
+.pal-dd-val{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.pal-dd-caret{flex-shrink:0;color:var(--mute);font-size:10px;transition:transform .12s;}
+.pal-dd.open .pal-dd-caret{transform:rotate(180deg);color:var(--accent);}
+.pal-dd-panel{display:none;position:absolute;left:0;right:0;top:calc(100% - 1px);z-index:20;max-height:240px;overflow-y:auto;background:var(--bg);border:1px solid var(--line);border-top-color:var(--accent);box-shadow:0 14px 30px rgba(0,0,0,.18);}
+.pal-dd.open .pal-dd-panel{display:block;}
+.pal-dd-opt{font-family:var(--mono);font-size:12px;padding:7px 10px;color:var(--ink);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-left:2px solid transparent;}
+.pal-dd-opt.hi{background:var(--deep);}
+.pal-dd-opt.sel{color:var(--accent);border-left-color:var(--accent);}
+.pal-dd-opt.sel.hi{background:var(--accent);color:#fff;border-left-color:var(--accent);}
 .pal-nt-preview{padding:16px;display:flex;flex-direction:column;gap:8px;background:var(--alt);min-width:0;}
 .pal-nt-pv-label{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent2);}
 .pal-nt-pre{font-family:var(--mono);font-size:11px;line-height:1.6;color:var(--ink);background:var(--bg);border:1px solid var(--line);padding:12px;margin:0;overflow:auto;flex:1;white-space:pre-wrap;word-break:break-word;}
