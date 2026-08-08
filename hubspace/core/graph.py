@@ -26,17 +26,17 @@ PAPER_BG = "#F4EFE4"
 # produced/owned children fan out to the right, one column per kind, in a fixed
 # order so the layout is stable. Unknown kinds share the last column.
 _KIND_COL = {
-    "task": 0, "prompt": 1, "run": 2, "artifact": 3,
-    "note": 4, "doc": 5, "draw": 6, "data": 7,
+    "task": 0, "prompt": 1, "run": 2, "artifact": 3, "script": 4,
+    "note": 5, "doc": 6, "draw": 7, "data": 8,
 }
-_FALLBACK_COL = 8
+_FALLBACK_COL = 9
 
 # Kind → accent colour, mirrored from hub.css badge colours so the derived scene
 # reads in Hub's palette (oxblood task, deep-sea doc, …).
 KIND_COLOR = {
     "task": "#7A2828", "doc": "#1E5A6B", "artifact": "#5C4A7A",
     "run": "#2F6B4F", "data": "#2E7D8A", "draw": "#B5651D",
-    "note": "#C15F3C", "prompt": "#C99A20",
+    "note": "#C15F3C", "prompt": "#C99A20", "script": "#556B7D",
 }
 _DEFAULT_COLOR = "#8A8377"
 

@@ -430,8 +430,8 @@ document.addEventListener('keydown',e=>{
 function buildLineage(links){
   const groups={};
   links.forEach(l=>{(groups[l.r]=groups[l.r]||[]).push(l);});
-  const ORDER=['belongs_to_task','belongs_to_skill','task_has_run','task_has_artifact','task_has_draw','task_has_data','task_has_note','task_has_prompt','task_has_doc','skill_has_ref'];
-  const LABELS={'belongs_to_task':'↑ task','belongs_to_skill':'↑ skill','task_has_run':'runs','task_has_artifact':'artifacts','task_has_draw':'draws','task_has_data':'data','task_has_note':'notes','task_has_prompt':'prompts','task_has_doc':'docs','skill_has_ref':'references'};
+  const ORDER=['belongs_to_task','belongs_to_skill','task_has_run','task_has_artifact','task_has_script','task_has_draw','task_has_data','task_has_note','task_has_prompt','task_has_doc','skill_has_ref'];
+  const LABELS={'belongs_to_task':'↑ task','belongs_to_skill':'↑ skill','task_has_run':'runs','task_has_artifact':'artifacts','task_has_script':'scripts','task_has_draw':'draws','task_has_data':'data','task_has_note':'notes','task_has_prompt':'prompts','task_has_doc':'docs','skill_has_ref':'references'};
   let h='<div class="ln-label">// trace</div>';
   ORDER.forEach(r=>{
     if(!groups[r]) return;
@@ -543,12 +543,12 @@ function themeSelect(sel){
 // and inside Trace ("how did this task get here") — differing only by which
 // query feeds it. Authoring kinds (things you create) read oxblood --accent;
 // navigation kinds (structure you move through) read deep-sea --accent2.
-const TL_AUTHOR=new Set(['artifact','run','note','draw','data']);
+const TL_AUTHOR=new Set(['artifact','run','note','draw','data','script']);
 const TL_EVENT_LABEL={task:'Task opened',artifact:'Artifact added',run:'Run logged',note:'Note',prompt:'Prompt written',doc:'Doc written',draw:'Diagram',data:'Data added'};
 // Shared kind → card colour (the graph canvas + the Trace spine both read this,
 // so the two renderings stay chromatically identical). Authoring kinds skew
 // oxblood/warm; navigation kinds skew deep-sea/cool.
-const KIND_COLOR={task:'#7A2828',doc:'#1E5A6B',artifact:'#5C4A7A',run:'#2F6B4F',data:'#2E7D8A',draw:'#B5651D',note:'#C15F3C',prompt:'#C99A20'};
+const KIND_COLOR={task:'#7A2828',doc:'#1E5A6B',artifact:'#5C4A7A',run:'#2F6B4F',data:'#2E7D8A',draw:'#B5651D',note:'#C15F3C',prompt:'#C99A20',script:'#556B7D'};
 const colorForKind=k=>KIND_COLOR[k]||'#8A8377';
 const _MON3=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
 // "2026-07-22" → "JUL 22"; anything unparseable is passed through untouched.
@@ -1170,8 +1170,8 @@ function openTrace(t){
   // Lineage grid from LINEAGE_DATA keyed by manifest abs
   const lin=document.getElementById('trace-lineage');
   const links=LINEAGE_DATA[t.abs]||[];
-  const LIN_ORDER=['task_has_run','task_has_artifact','task_has_draw','task_has_note','task_has_prompt','task_has_data','task_has_doc'];
-  const LIN_LABELS={'task_has_run':'Runs','task_has_artifact':'Artifacts','task_has_draw':'Draws','task_has_note':'Notes','task_has_prompt':'Prompts','task_has_data':'Data','task_has_doc':'Docs'};
+  const LIN_ORDER=['task_has_run','task_has_artifact','task_has_script','task_has_draw','task_has_note','task_has_prompt','task_has_data','task_has_doc'];
+  const LIN_LABELS={'task_has_run':'Runs','task_has_artifact':'Artifacts','task_has_script':'Scripts & probes','task_has_draw':'Draws','task_has_note':'Notes','task_has_prompt':'Prompts','task_has_data':'Data','task_has_doc':'Docs'};
   const groups={};
   links.forEach(l=>{(groups[l.r]=groups[l.r]||[]).push(l);});
   let linH='';
@@ -2358,10 +2358,10 @@ document.getElementById('rebuild').addEventListener('click',e=>{
 // PURELY derived — never saved into a draw; the `list · g` control returns to
 // the Trace spine (the two are one task, toggled).
 (function(){
-  const KIND_COL={task:0,prompt:1,run:2,artifact:3,note:4,doc:5,draw:6,data:7};
-  const REL_LABEL={task_has_run:'run',task_has_artifact:'artifact',task_has_prompt:'prompt',task_has_doc:'doc',task_has_draw:'draw',task_has_data:'data',task_has_note:'note',belongs_to_task:'task'};
+  const KIND_COL={task:0,prompt:1,run:2,artifact:3,script:4,note:5,doc:6,draw:7,data:8};
+  const REL_LABEL={task_has_run:'run',task_has_artifact:'artifact',task_has_script:'script',task_has_prompt:'prompt',task_has_doc:'doc',task_has_draw:'draw',task_has_data:'data',task_has_note:'note',belongs_to_task:'task'};
   const COL_W=260,ROW_H=130,X0=40,Y0=40,CARD_W=200,CARD_H=84;
-  const colOf=k=>KIND_COL[k]!==undefined?KIND_COL[k]:8;
+  const colOf=k=>KIND_COL[k]!==undefined?KIND_COL[k]:9;
   const colorOf=colorForKind;  // shared with the Trace spine — one palette
   // Deterministic graph-order layout — mirrors core/graph.py::layout so a saved
   // diagram matches the canvas: kind columns, date order within a column.

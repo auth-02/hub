@@ -213,6 +213,34 @@ class TestBuildLineage(unittest.TestCase):
         # A draw under a task must NOT be mislabeled as a doc
         self.assertNotIn("task_has_doc", rel_types)
 
+    def test_task_to_script_edge_created(self):
+        # S16 — a .py and a .sh under a task build task_has_script edges.
+        db.upsert(self.conn,
+                  _fake_meta("/r/tasks/slug/manifest.md", kind="task", task_slug="slug"),
+                  "Manifest", "")
+        db.upsert(self.conn,
+                  _fake_meta("/r/tasks/slug/artifacts/probe.py",
+                             rel="tasks/slug/artifacts/probe.py",
+                             ext="py", kind="script", task_slug="slug"),
+                  "Probe", "")
+        db.upsert(self.conn,
+                  _fake_meta("/r/tasks/slug/scripts/run.sh",
+                             rel="tasks/slug/scripts/run.sh",
+                             ext="sh", kind="script", task_slug="slug"),
+                  "Run", "")
+        self.conn.commit()
+        db.build_lineage(self.conn)
+        rel_types = {r[0] for r in self.conn.execute("SELECT rel_type FROM lineage").fetchall()}
+        self.assertIn("task_has_script", rel_types)
+        self.assertIn("belongs_to_task", rel_types)
+        # Two scripts → two task_has_script edges.
+        n = self.conn.execute(
+            "SELECT COUNT(*) FROM lineage WHERE rel_type='task_has_script'"
+        ).fetchone()[0]
+        self.assertEqual(n, 2)
+        # A script under a task must NOT be mislabeled as a doc.
+        self.assertNotIn("task_has_doc", rel_types)
+
     def test_task_to_note_edge_created(self):
         db.upsert(self.conn,
                   _fake_meta("/r/tasks/slug/manifest.md", kind="task", task_slug="slug"),
@@ -313,6 +341,27 @@ class TestExportHtmlData(unittest.TestCase):
         _, lineage_json = db.export_html_data(self.conn)
         lineage = json.loads(lineage_json)
         self.assertTrue(len(lineage) > 0)
+
+    def test_script_appears_in_trace_lineage_data(self):
+        # S16 — a task-subtree script surfaces in the exported trace lineage,
+        # keyed by the manifest abs with rel_type task_has_script.
+        db.upsert(self.conn,
+                  _fake_meta("/p/tasks/s/manifest.md", kind="task", task_slug="s"),
+                  "M", "")
+        db.upsert(self.conn,
+                  _fake_meta("/p/tasks/s/artifacts/probe.py",
+                             rel="tasks/s/artifacts/probe.py",
+                             ext="py", kind="script", task_slug="s"),
+                  "Probe", "")
+        self.conn.commit()
+        db.build_lineage(self.conn)
+        _, lineage_json = db.export_html_data(self.conn)
+        lineage = json.loads(lineage_json)
+        links = lineage["/p/tasks/s/manifest.md"]
+        script_links = [l for l in links if l["r"] == "task_has_script"]
+        self.assertEqual(len(script_links), 1)
+        self.assertEqual(script_links[0]["k"], "script")
+        self.assertTrue(script_links[0]["p"].endswith("probe.py"))
 
 
 if __name__ == "__main__":

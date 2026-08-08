@@ -14,6 +14,19 @@ DATA_EXTS = {".pdf", ".xlsx", ".xls", ".csv", ".tsv"}
 DRAW_EXTS = {".excalidraw"}  # Excalidraw diagrams — first-class vault docs, any dir
 NOTE_EXTS = {".jsonl"}  # comment logs — only inside a task's comments/ (see below)
 
+# Code / script / text-probe extensions (S16). Indexed for lineage ONLY when the
+# file lives inside a task subtree (tasks/<slug>/**) — NOT swept vault-wide — so
+# a task's scripts and probe outputs show up in its Trace without dragging in
+# every script in every repo. Deliberately no binaries. `.json`/`.txt` are the
+# broadest here and, like DATA/NOTE, are only ever indexed inside a task subtree
+# (the whole set is task-scoped in _included).
+SCRIPT_EXTS = {
+    ".py", ".sh", ".bash", ".zsh", ".js", ".mjs", ".ts", ".tsx",
+    ".sql", ".rb", ".go", ".rs", ".java", ".rules",
+    ".toml", ".yaml", ".yml", ".ini", ".cfg", ".example", ".ipynb",
+    ".json", ".txt",
+}
+
 
 def _included(path: Path) -> bool:
     ext = path.suffix.lower()
@@ -29,6 +42,10 @@ def _included(path: Path) -> bool:
     # append-only comment log, S7); a stray .jsonl elsewhere is ignored.
     if ext in NOTE_EXTS and "/comments/" in path.as_posix():
         return True
+    # Scripts/probes (S16) — indexed ONLY when under a task subtree
+    # (tasks/<slug>/**), never anywhere else in the vault (unlike DRAW).
+    if ext in SCRIPT_EXTS and _task_slug(path) is not None:
+        return True
     return False
 
 
@@ -40,13 +57,14 @@ def _classify(path: Path, rel: str, repo_name: str = "") -> str | None:
     we prefix it so the structural patterns still fire correctly.
     """
     stem = path.stem.lower()
+    ext = path.suffix.lower()
     # When the containing repo is named "tasks", the file is already inside
     # tasks/<slug>/... — prepend so classification patterns match.
     effective_rel = f"tasks/{rel}" if repo_name.lower() == "tasks" else rel
     parts = effective_rel.split("/")
 
     # Excalidraw diagrams are always kind:draw, regardless of name or location.
-    if path.suffix.lower() in DRAW_EXTS:
+    if ext in DRAW_EXTS:
         return "draw"
 
     if stem == "claude":
@@ -57,6 +75,15 @@ def _classify(path: Path, rel: str, repo_name: str = "") -> str | None:
     # Task family — tasks/ at repo root; order matters: sub-dirs before task itself
     if parts[0] == "tasks" and len(parts) >= 3:
         sub = parts[2]
+        # Scripts/probes (S16): a code/text-probe file in a task subtree → kind
+        # `script`. This deliberately WINS over the generic artifacts/ bucket (a
+        # probe .py dropped in artifacts/ is most useful labelled a script) and
+        # over loose files anywhere else in the task (e.g. tasks/<slug>/scripts/,
+        # or a .py in the task root). It does NOT override the structured
+        # runs/prompts/data/comments dirs, which keep their semantic kinds — so a
+        # .txt in prompts/ is still a PROMPT and a .json in data/ is still DATA.
+        if ext in SCRIPT_EXTS and sub not in ("runs", "prompts", "data", "comments"):
+            return "script"
         if sub == "runs":        return "run"
         if sub == "artifacts":   return "artifact"
         if sub == "prompts":     return "prompt"

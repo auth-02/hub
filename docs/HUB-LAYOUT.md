@@ -70,6 +70,12 @@ The differentiated structure. A task is a directory under `<repo>/tasks/<slug>/`
   the other subdirs, DRAW is resolved by extension, not by this path (§3), so a
   `.excalidraw` file anywhere is still a DRAW — `draws/` is where the UI's *New
   draw* action and the `hub draw` verb put one when scoped to a task.
+- A task's **code / script / probe files are indexed too** (S16), so they show
+  up in the task's trace instead of being invisible. Any file with a code or
+  text-probe extension (`.py .sh .sql .js .ts .toml .yaml .json .txt …`) that
+  lives **anywhere inside the task subtree** is classified `SCRIPT` (§3). This is
+  scoped strictly to `tasks/<slug>/**` — scripts elsewhere in a repo are *not*
+  swept in — and binaries are never indexed.
 - `comments/` holds **notes** in a single append-only log, `notes.jsonl`,
   created on demand. Each line is one JSON comment object
   (`{id, target, range?, author, created, body}`): `target` is the task-relative
@@ -102,6 +108,7 @@ Kind is derived purely from path. First match wins, top to bottom:
 | `<repo>/tasks/<slug>/manifest.md`         | TASK     |
 | `<repo>/tasks/<slug>/runs/**`             | RUN      |
 | `<repo>/tasks/<slug>/artifacts/**`        | ARTIFACT |
+| `<repo>/tasks/<slug>/**` with a code/probe ext | SCRIPT |
 | `<repo>/tasks/<slug>/prompts/**`          | PROMPT   |
 | `<repo>/tasks/<slug>/data/**`             | DATA     |
 | `<repo>/tasks/<slug>/comments/notes.jsonl` | NOTE    |
@@ -112,6 +119,14 @@ Kind is derived purely from path. First match wins, top to bottom:
 any name- or path-based rule — an Excalidraw canvas is a DRAW wherever it lives
 (its conventional home is a task's `draws/`, §2). `MD` is the catch-all and is
 never an error — a repo of loose notes is a valid, fully searchable hub.
+
+`SCRIPT` (S16) is resolved by extension but **only inside a task subtree**
+(`tasks/<slug>/**`) — a code/probe file anywhere else in the vault is not
+indexed. Within the task it wins over the generic `artifacts/` bucket (a probe
+`.py` in `artifacts/` is a SCRIPT, not an ARTIFACT) and covers loose code in the
+task root or a `scripts/`/`probes/` dir, but it does **not** override the
+structured `runs/`, `prompts/`, `data/`, or `comments/` dirs — a `.txt` in
+`prompts/` is still a PROMPT and a `.json` in `data/` is still DATA.
 
 PROMPT is recognized only where a `prompts/` folder already exists; nothing in
 hub or `hub new` creates one (see §2).
