@@ -38,7 +38,7 @@ from ..render import (
     _render_md, _render_csv, _render_xlsx, _inject_into_html,
     _render_lineage_html, _favicon_href, _CSS, _DOC_CHROME_CSS, _PAGE, _add_outline,
     draw_page_html, doc_menu, DOC_PDF_ITEM, render_provenance,
-    doc_publish_item, DOC_PUBLISH_SCRIPT, DOC_EMBED_SCRIPT,
+    doc_publish_item, doc_published_open_item, DOC_PUBLISH_SCRIPT, DOC_EMBED_SCRIPT,
 )
 from ..core import metadata as _metadata
 
@@ -221,7 +221,8 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             lineage_html = _render_lineage_html(links, self.__class__.server_port) if links else ""
             provenance_html = render_provenance(_metadata.extract_provenance(src))
             src = _inject_into_html(src, lineage_html, _favicon_href(self.__class__.server_port),
-                                    provenance_html, pub_path=self._pub_path(fs_path))
+                                    provenance_html, pub_path=self._pub_path(fs_path),
+                                    pub_url=self._published_url(fs_path))
             self._send(200, "text/html; charset=utf-8", src.encode("utf-8"))
         elif fs_path.suffix.lower() == ".txt":
             src = fs_path.read_text(encoding="utf-8", errors="replace")
@@ -1128,23 +1129,37 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         }).encode())
 
     def _publish_revoke(self, body: dict) -> None:
-        """Forget a task's published-state entry, then rebuild so the marker clears.
+        """Forget a published entry (task OR single file), then rebuild so the
+        marker clears.
 
-        Body is JSON ``{slug, repo?}``. Local-only: Hub removes the sidecar entry
-        (the UI twin of `hub publish --task <slug> --revoke`) and makes no network
-        call. The rebuild re-bakes the (now smaller) published map into the page.
+        Body is JSON either ``{slug, repo?}`` (a task bundle, the S5b flow) or
+        ``{path}`` (a single published file/artifact — S20). Local-only: Hub
+        removes the matching sidecar entry (the UI twin of `hub publish --revoke`)
+        and makes no network call. The rebuild re-bakes the (now smaller)
+        published map into the page so every surface's PUBLISHED marker updates.
         """
         from ..core import publish as _publish
 
         def _fail(code: int, payload: dict) -> None:
             self._send(code, "application/json", json.dumps(payload).encode())
 
-        slug = (body.get("slug") or "").strip()
-        repo = (body.get("repo") or "").strip() or None
-        if not slug:
-            _fail(400, {"ok": False, "error": "slug required"})
-            return
-        removed = _publish.revoke_published(repo, slug)
+        raw = (body.get("path") or "").strip()
+        if raw:
+            # Single-file revoke: resolve the path the SAME way /_publish records
+            # it (root-relative → absolute, then .resolve()), so the asset key
+            # matches what record_published_asset wrote.
+            root = _active_root.resolve()
+            p = Path(raw)
+            if not p.is_absolute():
+                p = root / raw.lstrip("/")
+            removed = _publish.revoke_published_asset(p.resolve())
+        else:
+            slug = (body.get("slug") or "").strip()
+            repo = (body.get("repo") or "").strip() or None
+            if not slug:
+                _fail(400, {"ok": False, "error": "slug or path required"})
+                return
+            removed = _publish.revoke_published(repo, slug)
         result = self._rebuild(_active_root)
         if result.returncode != 0:
             import sys as _sys2
@@ -1462,6 +1477,21 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         self._serve_page(url_path, path, body)
 
     @staticmethod
+    def _published_url(path: Path) -> str:
+        """The live published URL recorded for ``path``, or "" if unpublished.
+
+        Reads the already-written ``published.json`` sidecar keyed by the asset's
+        resolved path — the same key /_publish records under. Best-effort; any
+        read/parse failure yields "" so doc pages always render."""
+        try:
+            from ..core import publish as _publish
+            entry = _publish.load_published().get(
+                _publish.published_asset_key(path.resolve()))
+            return (entry or {}).get("url", "") or ""
+        except Exception:
+            return ""
+
+    @staticmethod
     def _pub_path(path: Path) -> str:
         """Path to bake into the doc-page Publish item: scan-root-relative when
         the file lives under the active root (what /_publish prefers), else the
@@ -1524,6 +1554,11 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         # /_publish and shows the honest published / dry-run / error state.
         pub_script = ""
         if path.suffix.lower() in (".md", ".markdown", ".html", ".htm"):
+            # S20 — if THIS file is already published, offer a jump to its live
+            # URL (best-effort; baked from published.json at render time).
+            pub_url = self._published_url(path)
+            if pub_url:
+                menu_items.append(doc_published_open_item(pub_url))
             menu_items.append(doc_publish_item(self._pub_path(path)))
             pub_script = DOC_PUBLISH_SCRIPT
         menu_items.append(DOC_PDF_ITEM)

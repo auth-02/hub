@@ -12,10 +12,46 @@ function publishedFor(t){
   if(typeof PUBLISHED_DATA==='undefined'||!PUBLISHED_DATA) return null;
   return PUBLISHED_DATA[(t.rp||'(root)')+'\t'+t.sl]||null;
 }
+// S20 — published-state for a single file/artifact. The SAME baked
+// PUBLISHED_DATA map also holds asset entries keyed "asset\t<abspath>" (mirror
+// of core.publish.published_asset_key). Missing/undefined → not published.
+function publishedForFile(abs){
+  if(typeof PUBLISHED_DATA==='undefined'||!PUBLISHED_DATA||!abs) return null;
+  return PUBLISHED_DATA['asset\t'+abs]||null;
+}
+// The PUBLISHED chip for a single file — a deep-sea marker linking to the live
+// URL plus republish (↻) / revoke (✕) actions. Actions carry data-pub-file*
+// attributes so ONE delegated handler drives them wherever a file row appears.
+// Buttons (never nested <a>) so they sit safely inside the row's own anchor.
+function filePubChip(abs){
+  const pub=publishedForFile(abs);
+  if(!pub) return '';
+  const url=pub.url||'';
+  return `<span class="task-pub file-pub" title="published ${esc(pub.at||'')}">`+
+    `<button class="file-pub-open" type="button" data-pub-file-open="${esc(abs)}"${url?'':' disabled'} title="Open the live published URL">PUBLISHED</button>`+
+    `<button class="task-pub-act" type="button" data-pub-file-republish="${esc(abs)}" title="Republish (scan + hand off to dak)">↻</button>`+
+    `<button class="task-pub-act" type="button" data-pub-file-revoke="${esc(abs)}" title="Revoke (forget this published link)">✕</button></span>`;
+}
+// (Re)decorate a file row anchor with (or without) its PUBLISHED chip. Idempotent
+// — strips any existing chip first, so it can run after a publish/revoke.
+function decorateFileRow(r){
+  if(!r) return;
+  const old=r.querySelector(':scope > .file-pub'); if(old) old.remove();
+  const chip=filePubChip(r.dataset.abs);
+  if(!chip) return;
+  const path=r.querySelector('.path');
+  if(path) path.insertAdjacentHTML('afterend',chip); else r.insertAdjacentHTML('beforeend',chip);
+}
+function decorateFileRowByAbs(abs){
+  if(typeof rows==='undefined') return;
+  rows.forEach(r=>{if(r.dataset.abs===abs) decorateFileRow(r);});
+}
 
 // ── DOM refs ──────────────────────────────────────────────────────────────
 const q=document.getElementById('q');
 const rows=[...document.querySelectorAll('.row')];
+// S20 — surface any single-file PUBLISHED marker on its row (chip + actions).
+rows.forEach(decorateFileRow);
 const chips=[...document.querySelectorAll('.chip')];
 const preview=document.getElementById('preview');
 const pvTitle=document.getElementById('pv-title');
@@ -476,6 +512,21 @@ function readerComment(line){
   if(ctx&&line!=null) ctx.range='L'+line;
   if(window._openComposer) window._openComposer(ctx);
 }
+// S20 — when the open file is published, show a PUBLISHED · open↗ / republish /
+// revoke control in the reader header (next to ↗ publish). Reuses the same
+// data-pub-file* delegation the row chip uses. Hidden when private or unpublished.
+function refreshReaderPubState(abs){
+  const ps=document.getElementById('reader-pubstate');
+  if(!ps) return;
+  const pub=(!(typeof PRIVATE!=='undefined'&&PRIVATE))&&publishedForFile(abs);
+  if(!pub){ps.style.display='none';ps.innerHTML='';return;}
+  const url=pub.url||'';
+  ps.style.display='';
+  ps.innerHTML=`<span class="reader-pub-tag" title="published ${esc(pub.at||'')}">PUBLISHED</span>`+
+    `<button class="reader-btn" type="button" data-pub-file-open="${esc(abs)}"${url?'':' disabled'} title="Open the live published URL">↗ open</button>`+
+    `<button class="reader-btn" type="button" data-pub-file-republish="${esc(abs)}" title="Republish (scan + hand off to dak)">↻ republish</button>`+
+    `<button class="reader-btn" type="button" data-pub-file-revoke="${esc(abs)}" title="Revoke (forget this published link)">✕ revoke</button>`;
+}
 function openReader(abs,opts){
   if(!abs||!readerEl){ if(opts&&opts.href)window.open(opts.href,'_blank','noopener'); return; }
   opts=opts||{};
@@ -488,6 +539,7 @@ function openReader(abs,opts){
   readerOpen.href=href;
   const pubBtn=document.getElementById('reader-publish');
   if(pubBtn) pubBtn.style.display=(typeof PRIVATE!=='undefined'&&PRIVATE)?'none':'';
+  refreshReaderPubState(abs);
   if(preview.classList.contains('open')) closePreview();
   // S19 — comments render inline in the iframe; hand them over on load (and
   // again when the doc script announces hub-doc-ready, covering the race).
@@ -1115,6 +1167,42 @@ document.addEventListener('click',e=>{
   }
 });
 
+// S20 — republish a single file: reuse the honest scan→review→publish sheet,
+// prefilled to this file (same flow + dry-run handling as first publish). Revoke
+// forgets the local asset entry (server: POST /_publish-revoke with {path}).
+function revokeFile(abs){
+  fetch('/_publish-revoke',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({path:abs})})
+    .then(r=>r.json()).then(d=>{
+      if(d&&d.ok){flash('revoked');location.reload();}
+      else flash('revoke failed');
+    }).catch(()=>flash('revoke failed'));
+}
+function republishFile(abs){
+  if(window._openPublish)window._openPublish({abs:abs});
+}
+window._republishFile=republishFile;window._revokeFile=revokeFile;
+
+// S20 — file PUBLISHED chip actions (rows + reader). Delegated once at module
+// scope; the data-pub-file* attributes carry the file's abs path so the handler
+// works wherever a chip is rendered. Runs in the CAPTURE phase so it intercepts
+// the click BEFORE the enclosing row's own (bubble-phase) open handler —
+// stop/prevent then keep the chip action from also opening the row.
+document.addEventListener('click',e=>{
+  if(!e.target.closest)return;
+  const openBtn=e.target.closest('[data-pub-file-open]');
+  if(openBtn){
+    e.preventDefault();e.stopPropagation();
+    const pub=publishedForFile(openBtn.getAttribute('data-pub-file-open'));
+    if(pub&&pub.url)window.open(pub.url,'_blank','noopener');
+    return;
+  }
+  const rep=e.target.closest('[data-pub-file-republish]');
+  if(rep){e.preventDefault();e.stopPropagation();republishFile(rep.getAttribute('data-pub-file-republish'));return;}
+  const rev=e.target.closest('[data-pub-file-revoke]');
+  if(rev){e.preventDefault();e.stopPropagation();revokeFile(rev.getAttribute('data-pub-file-revoke'));return;}
+},true);
+
 // ── Work view ─────────────────────────────────────────────────────────────
 function renderWorkView(){
   const raw=q.value.trim().toLowerCase();
@@ -1197,6 +1285,7 @@ function renderWorkView(){
         return `<a class="loose-row" href="${r.href}" data-open-reader data-abs="${esc(r.dataset.abs||'')}">
           <span class="loose-kd">${esc(kd)}</span>
           <span>${esc(path)}</span>
+          ${filePubChip(r.dataset.abs)}
         </a>`;
       }).join('');
   } else {
@@ -1638,11 +1727,20 @@ setTimeout(function restoreViewState(){
 
 const REBUILD_CMD=`/usr/bin/python3 ${HUBPY}`;
 const toast=document.getElementById('toast');
-function flash(msg){toast.textContent=msg;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),2400);}
+function flash(msg){toast.classList.remove('has-open');toast.textContent=msg;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),2400);}
 // Persistent toast — stays visible until the page swaps (used during rebuild)
 function flashSticky(msg){toast.textContent=msg;toast.classList.add('show');}
+// S20 — a toast that carries a clickable "open ↗" link to a just-published URL,
+// so BOTH a bundle and a single-file publish offer an immediate Open. Stays a
+// bit longer than a plain flash so the link is actually clickable.
+function flashOpen(msg,url){
+  toast.innerHTML=esc(msg)+' <a class="toast-open" href="'+esc(url)+'" target="_blank" rel="noopener">open ↗</a>';
+  toast.classList.add('show','has-open');
+  clearTimeout(toast._openT);
+  toast._openT=setTimeout(()=>{toast.classList.remove('show','has-open');toast.textContent='';},6000);
+}
 async function copy(text,msg){
-  try{await navigator.clipboard.writeText(text);flash(msg);}
+  try{await navigator.clipboard.writeText(text);if(msg)flash(msg);}
   catch(e){window.prompt('Copy this command:',text);}
 }
 
@@ -2499,9 +2597,20 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     }
     el.innerHTML='<span class="pal-pub-live">✓ published</span>'+
       '<a class="pal-pub-url" href="'+esc(url)+'" target="_blank" rel="noopener">'+esc(url)+'</a>'+
+      '<a class="pal-pub-open" href="'+esc(url)+'" target="_blank" rel="noopener" title="open the live URL">open ↗</a>'+
       '<button class="pal-pub-copy" type="button" title="copy URL">copy</button>';
     const cp=el.querySelector('.pal-pub-copy');
     if(cp)cp.onclick=()=>copy(url,'URL copied');
+  }
+  // S20 — reflect a just-published file's marker everywhere WITHOUT a full
+  // reload: add the asset entry to the in-memory PUBLISHED_DATA (mutating the
+  // baked object; a later reload re-bakes it from published.json), then
+  // re-decorate its row + refresh the reader header if it's the open file.
+  function _markFilePublished(abs,url,mode){
+    if(typeof PUBLISHED_DATA==='object'&&PUBLISHED_DATA)
+      PUBLISHED_DATA['asset\t'+abs]={url:url,at:'',mode:mode||'snapshot'};
+    decorateFileRowByAbs(abs);
+    if(typeof _openReaderAbs!=='undefined'&&_openReaderAbs===abs)refreshReaderPubState(abs);
   }
   function pubPublish(){
     const abs=pubFileSel.value;
@@ -2518,6 +2627,8 @@ document.getElementById('rebuild').addEventListener('click',e=>{
         const d=res.d||{};
         if(res.ok&&d.url){
           pubShowResult(d.url,d.dryRun);
+          // S14 — a dry-run uploaded nothing, so it earns no persistent marker.
+          if(!d.dryRun)_markFilePublished(abs,d.url,d.mode);
           flash(d.dryRun?('dry-run — not uploaded · '+d.url):('published · '+d.url));
           return;
         }
@@ -2561,10 +2672,13 @@ document.getElementById('rebuild').addEventListener('click',e=>{
           // S14 / #3 — a dry-run uploaded nothing; don't claim "published" and
           // don't reload (the server recorded no published-state for it).
           if(d.dryRun){flash('dry-run — not uploaded (URL not live): '+d.url+red);return;}
-          copy(d.url,'published · '+d.url+red);
-          // Server recorded published-state + rebuilt; reload so the row's
-          // PUBLISHED marker (republish/revoke) shows (matches revoke flow).
-          setTimeout(()=>location.reload(),700);
+          copy(d.url,null);
+          // S20 — a clear inform-on-publish with a clickable Open (parity with
+          // the single-file sheet's "open ↗"). Server recorded published-state +
+          // rebuilt; reload so the row's PUBLISHED marker (republish/revoke)
+          // shows (matches revoke flow) — the persistent, clickable affordance.
+          flashOpen('published · '+t.sl+red,d.url);
+          setTimeout(()=>location.reload(),1600);
           return;
         }
         const detail=d.detail?(': '+String(d.detail).split('\n').slice(-1)[0]):'';

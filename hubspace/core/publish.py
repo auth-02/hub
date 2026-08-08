@@ -214,14 +214,36 @@ def record_published_asset(path, url: str, mode: str = "snapshot",
 
 
 def revoke_published(repo: str | None, slug: str, path=None) -> bool:
-    """Forget a published entry locally. Returns True if an entry was removed.
+    """Forget a published TASK entry locally. Returns True if an entry was removed.
 
     Hub only forgets the local record here (the sidecar); un-publishing the
     remote copy is dak's job and is invoked separately by the caller if desired.
+    ``path`` overrides the sidecar location (used by tests) — it is NOT the
+    published asset's path. To forget a single file, use
+    :func:`revoke_published_asset`.
     """
     p = _Path(path) if path else published_path()
     data = load_published(p)
     key = published_key(repo, slug)
+    if key not in data:
+        return False
+    del data[key]
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(_json.dumps(data, indent=2), encoding="utf-8")
+    return True
+
+
+def revoke_published_asset(asset_path, sidecar=None) -> bool:
+    """Forget a single published ASSET entry locally. True if one was removed.
+
+    The twin of :func:`revoke_published` for the ``asset\\t<abspath>`` keys that
+    :func:`record_published_asset` writes. ``sidecar`` overrides the sidecar
+    location (used by tests); ``asset_path`` is the published file itself.
+    Local-only — no network call (un-publishing the remote copy is dak's job).
+    """
+    p = _Path(sidecar) if sidecar else published_path()
+    data = load_published(p)
+    key = published_asset_key(asset_path)
     if key not in data:
         return False
     del data[key]

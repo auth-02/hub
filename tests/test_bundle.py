@@ -218,6 +218,77 @@ class TestPublishedSidecar(unittest.TestCase):
         # revoking again is a no-op returning False
         self.assertFalse(publish.revoke_published("cortex", "t", path=self.sidecar))
 
+    # ── S20: single-file asset entries in the SAME sidecar ─────────────────────
+    def test_asset_record_and_load_round_trip(self):
+        asset = Path(self._dir) / "report.md"
+        asset.write_text("hi\n", encoding="utf-8")
+        publish.record_published_asset(asset, "https://a.example/xyz",
+                                       mode="snapshot", sidecar=self.sidecar)
+        data = publish.load_published(self.sidecar)
+        key = publish.published_asset_key(asset)
+        self.assertEqual(data[key]["url"], "https://a.example/xyz")
+        self.assertEqual(data[key]["mode"], "snapshot")
+        self.assertIn("at", data[key])
+        # asset key can never collide with a "<repo>\t<slug>" task key
+        self.assertTrue(key.startswith("asset\t"))
+
+    def test_asset_revoke_by_path(self):
+        asset = Path(self._dir) / "report.md"
+        asset.write_text("hi\n", encoding="utf-8")
+        publish.record_published_asset(asset, "https://a", sidecar=self.sidecar)
+        self.assertTrue(publish.revoke_published_asset(asset, sidecar=self.sidecar))
+        self.assertEqual(publish.load_published(self.sidecar), {})
+        # revoking again is a no-op returning False
+        self.assertFalse(publish.revoke_published_asset(asset, sidecar=self.sidecar))
+
+    def test_asset_revoke_leaves_task_entries(self):
+        asset = Path(self._dir) / "report.md"
+        asset.write_text("hi\n", encoding="utf-8")
+        publish.record_published("cortex", "t", "https://task", path=self.sidecar)
+        publish.record_published_asset(asset, "https://asset", sidecar=self.sidecar)
+        self.assertTrue(publish.revoke_published_asset(asset, sidecar=self.sidecar))
+        data = publish.load_published(self.sidecar)
+        self.assertEqual(list(data), ["cortex\tt"])  # task entry untouched
+
+
+# ── S20: a recorded asset entry is baked into the generated index ───────────────
+class TestAssetPublishedBaked(unittest.TestCase):
+    """End-to-end: record_published_asset + load_published round-trip an asset
+    entry that the generated index BAKES into PUBLISHED_DATA. Builds the index in
+    a subprocess (XDG_STATE_HOME → temp) so load_published reads our seeded
+    sidecar; no network anywhere."""
+
+    def test_generated_index_carries_asset_url(self):
+        import subprocess
+        root = tempfile.mkdtemp()
+        state = tempfile.mkdtemp()
+        try:
+            asset = Path(root) / "report.md"
+            asset.write_text("# Report\nnothing secret\n", encoding="utf-8")
+            url = "https://baked-asset.example/xyz"
+            sidecar = Path(state) / "hub" / "published.json"
+            publish.record_published_asset(asset, url, sidecar=sidecar)
+
+            out = Path(state) / "docs-index.html"
+            env = dict(os.environ)
+            env.update({
+                "XDG_STATE_HOME": state,       # → state_dir() = <state>/hub
+                "HUB_SCAN_ROOT": root,
+                "HUB_OUTPUT": str(out),
+                "HUB_DB": str(Path(state) / "hub.db"),
+                "PYTHONPATH": os.path.dirname(os.path.dirname(__file__)),
+            })
+            r = subprocess.run([sys.executable, "-m", "hubspace.cli.hub"],
+                               env=env, capture_output=True, text=True, timeout=120)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            page = out.read_text(encoding="utf-8")
+            self.assertIn(url, page)                        # asset URL baked
+            self.assertIn(str(asset.resolve()), page)       # under its asset key
+        finally:
+            import shutil
+            shutil.rmtree(root, ignore_errors=True)
+            shutil.rmtree(state, ignore_errors=True)
+
 
 # ── cli: hub publish --task ─────────────────────────────────────────────────────
 class TestPublishTaskCLI(_Base):

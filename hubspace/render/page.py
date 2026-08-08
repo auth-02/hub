@@ -54,6 +54,19 @@ def _esc_attr(s: str) -> str:
              .replace("<", "&lt;").replace(">", "&gt;"))
 
 
+def doc_published_open_item(url: str) -> str:
+    """A ⋯ menu item that opens THIS doc's live published URL (S20).
+
+    Present only when the file already has a recorded published-state entry, so
+    a reader who opens a published doc's page can jump straight to its live copy.
+    Best-effort: Hub bakes the URL from ``published.json`` at render time."""
+    return (
+        f'<a class="doc-menu-item" href="{_esc_attr(url)}" target="_blank" '
+        'rel="noopener" title="Open this doc\'s live published URL">'
+        '↗ Open published</a>'
+    )
+
+
 def doc_publish_item(pub_path: str) -> str:
     """A ⋯ menu item that publishes THIS doc via POST /_publish (S14 / #5).
 
@@ -286,16 +299,22 @@ def render_provenance(prov: dict | None) -> str:
 
 
 def _inject_into_html(src: str, lineage_html: str, favicon: str = "",
-                      provenance_html: str = "", pub_path: str = "") -> str:
+                      provenance_html: str = "", pub_path: str = "",
+                      pub_url: str = "") -> str:
     """Inject backlinks CSS + HTML into an existing HTML document."""
     src, outline_html = _add_outline(src)
     head_inject = f"<style>{_BACKLINKS_CSS}{_DOC_CHROME_CSS}</style>"
     if favicon:
         head_inject = f'<link rel="icon" type="image/svg+xml" href="{favicon}">' + head_inject
     src = re.sub(r"</head>", head_inject + "</head>", src, count=1, flags=re.IGNORECASE)
-    # ⋯ menu (Publish + Save as PDF) goes right after <body> so it floats over
-    # the doc; the tiny publisher script goes at end-of-body.
-    menu = doc_menu([doc_publish_item(pub_path), DOC_PDF_ITEM]) if pub_path else _DOC_PRINT_BTN
+    # ⋯ menu (Open published? + Publish + Save as PDF) goes right after <body>
+    # so it floats over the doc; the tiny publisher script goes at end-of-body.
+    if pub_path:
+        items = ([doc_published_open_item(pub_url)] if pub_url else []) + \
+                [doc_publish_item(pub_path), DOC_PDF_ITEM]
+        menu = doc_menu(items)
+    else:
+        menu = _DOC_PRINT_BTN
     src = re.sub(r"<body[^>]*>", lambda mo: mo.group(0) + menu, src, count=1, flags=re.IGNORECASE)
     if pub_path:
         # lambda replacement so \u escapes in the script aren't re-interpreted.

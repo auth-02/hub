@@ -218,6 +218,31 @@ class TestBundleEndpoints(unittest.TestCase):
         data = _publish.load_published(Path(self._state) / "published.json")
         self.assertEqual(data, {})
 
+    def test_revoke_by_path_removes_asset_entry(self):
+        # S20 — /_publish-revoke with a {path} body forgets a single-file asset
+        # entry, while a co-existing task entry is left untouched.
+        sidecar = Path(self._state) / "published.json"
+        asset = Path(self._scan_root) / "cortex" / "tasks/auth-refactor/artifacts/report.md"
+        _publish.record_published("cortex", "auth-refactor", "https://task", path=sidecar)
+        _publish.record_published_asset(asset, "https://asset")
+        self.assertIn(_publish.published_asset_key(asset),
+                      _publish.load_published(sidecar))
+        status, d = _post(self._port, "/_publish-revoke", {"path": str(asset)})
+        self.assertEqual(status, 200)
+        self.assertTrue(d["ok"])
+        self.assertTrue(d["removed"])
+        data = _publish.load_published(sidecar)
+        self.assertNotIn(_publish.published_asset_key(asset), data)
+        # the task entry survived the by-path asset revoke
+        self.assertIn(_publish.published_key("cortex", "auth-refactor"), data)
+        # cleanup so other tests start clean
+        _publish.revoke_published("cortex", "auth-refactor", path=sidecar)
+
+    def test_revoke_missing_target_is_400(self):
+        status, d = _post(self._port, "/_publish-revoke", {})
+        self.assertEqual(status, 400)
+        self.assertFalse(d.get("ok", True))
+
 
 if __name__ == "__main__":
     unittest.main()
