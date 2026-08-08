@@ -38,7 +38,7 @@ from ..render import (
     _render_md, _render_csv, _render_xlsx, _inject_into_html,
     _render_lineage_html, _favicon_href, _CSS, _DOC_CHROME_CSS, _PAGE, _add_outline,
     draw_page_html, doc_menu, DOC_PDF_ITEM, render_provenance,
-    doc_publish_item, DOC_PUBLISH_SCRIPT,
+    doc_publish_item, DOC_PUBLISH_SCRIPT, DOC_EMBED_SCRIPT,
 )
 from ..core import metadata as _metadata
 
@@ -1386,7 +1386,10 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             menu_items.append(doc_publish_item(self._pub_path(path)))
             pub_script = DOC_PUBLISH_SCRIPT
         menu_items.append(DOC_PDF_ITEM)
-        body = doc_menu(menu_items) + body + pub_script
+        # S17 — keydown forwarder so the palette/composer/close shortcuts work
+        # when this page is shown inside the SPA reading-view iframe. No-op for a
+        # top-level tab (deep link); never present in published bundles.
+        body = doc_menu(menu_items) + body + pub_script + DOC_EMBED_SCRIPT
 
         html = _PAGE.format(
             title=title,

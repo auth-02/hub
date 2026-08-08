@@ -107,6 +107,43 @@ show('<span class="dpr-tag err">publish failed</span>','err');});
 """
 
 
+# S17 — tiny keydown-forwarder for LIVE-served doc bodies shown inside the SPA
+# reading-view iframe. A doc page opened as a top-level tab (window.parent===
+# window) short-circuits immediately, so deep-links behave exactly as before.
+# When embedded, ⌘K/⌘P/c/Esc keydowns (which the iframe would otherwise swallow)
+# are forwarded to window.parent so the palette / composer / close shortcuts work
+# even while focus is inside the file. Same-origin, so postMessage reaches the
+# SPA shell. Deliberately NEVER added to published bundles (they render through
+# render.bundle, not these helpers) — bundles must stay self-contained.
+DOC_EMBED_SCRIPT = """
+<script>
+(function(){
+if(window.parent===window) return;
+function fwd(key){try{window.parent.postMessage({source:'hub-doc',type:'hub-key',key:key},'*');}catch(_){}}
+document.addEventListener('keydown',function(e){
+  var k=(e.key||'').toLowerCase();
+  if((e.metaKey||e.ctrlKey)&&!e.altKey&&(k==='k'||k==='p')){e.preventDefault();fwd(k);return;}
+  var tag=(e.target&&e.target.tagName)||'';
+  if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT'||(e.target&&e.target.isContentEditable))return;
+  if(e.metaKey||e.ctrlKey||e.altKey)return;
+  if(k==='c'){fwd('c');}
+  else if(k==='escape'){fwd('escape');}
+});
+window.addEventListener('message',function(e){
+  var d=e.data;if(!d||d.type!=='hub-reader-scroll')return;
+  var a=String(d.anchor||'');
+  var el=a&&document.getElementById(a);
+  if(el){el.scrollIntoView({block:'start',behavior:'smooth'});
+    var o=el.style.backgroundColor;el.style.transition='background .3s';
+    el.style.backgroundColor='rgba(193,95,60,.20)';
+    setTimeout(function(){el.style.backgroundColor=o;},1400);}
+  else{window.scrollTo({top:0,behavior:'smooth'});}
+});
+})();
+</script>
+"""
+
+
 def doc_menu(items: list) -> str:
     """A floating ⋯ dropdown of document actions (fixed top-right).
 
@@ -180,6 +217,12 @@ def _inject_into_html(src: str, lineage_html: str, favicon: str = "",
             src += DOC_PUBLISH_SCRIPT
     if outline_html:
         src = re.sub(r"<body[^>]*>", lambda mo: mo.group(0) + outline_html, src, count=1, flags=re.IGNORECASE)
+    # S17 — forward palette/composer/close keydowns from inside the SPA reader.
+    if re.search(r"</body>", src, re.IGNORECASE):
+        src = re.sub(r"</body>", lambda _mo: DOC_EMBED_SCRIPT + "</body>",
+                     src, count=1, flags=re.IGNORECASE)
+    else:
+        src += DOC_EMBED_SCRIPT
     inject_html = lineage_html + provenance_html
     m = re.search(r"</h1>", src, re.IGNORECASE)
     if m:

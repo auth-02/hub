@@ -139,6 +139,13 @@ class TestInjectIntoHtml(unittest.TestCase):
         result = render._inject_into_html(src, "", favicon="http://localhost:8787/favicon.svg")
         self.assertIn('rel="icon"', result)
 
+    def test_reader_keydown_forwarder_injected_into_html(self):
+        # S17 — injected HTML docs served live also carry the reader forwarder.
+        src = "<html><head></head><body><h1>T</h1></body></html>"
+        result = render._inject_into_html(src, "")
+        self.assertIn("hub-doc", result)
+        self.assertIn("window.parent===window", result)
+
     def test_print_button_injected(self):
         src = "<html><head></head><body></body></html>"
         result = render._inject_into_html(src, "")

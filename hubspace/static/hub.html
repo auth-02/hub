@@ -45,7 +45,7 @@
     <div class="pv-header">
       <span class="pv-title" id="pv-title"></span>
       <div class="pv-actions">
-        <a class="pv-btn primary" id="pv-open" href="#" target="_blank" rel="noopener">Open</a>
+        <a class="pv-btn primary" id="pv-open" href="#" data-open-reader title="open in the reading view">Open</a>
         <button class="pv-btn" id="pv-ask" title="copy the /changelog command to regenerate this" style="display:none">ask again</button>
         <button class="pv-btn" id="pv-float" title="open as floating window">⧉</button>
         <button class="pv-btn" id="pv-close">✕</button>
@@ -119,6 +119,21 @@
     <div class="trace-linfoot" id="trace-linfoot"></div>
     <div class="trace-lineage" id="trace-lineage"></div>
     <div class="trace-actions" id="trace-actions"></div>
+  </div>
+</div>
+<div id="reader" class="reader" aria-label="File reading view">
+  <div class="reader-head">
+    <div class="reader-crumb" id="reader-crumb"></div>
+    <div class="reader-actions">
+      <button class="reader-btn" id="reader-comment" type="button" title="write a comment on this file (c / ⌘↵)">💬 comment</button>
+      <button class="reader-btn" id="reader-publish" type="button" title="publish this file to a shareable URL">↗ publish</button>
+      <a class="reader-btn" id="reader-open" href="#" target="_blank" rel="noopener" title="open the raw page in a new tab">↗ new tab</a>
+      <button class="reader-btn" id="reader-close" type="button" title="close (esc)">✕</button>
+    </div>
+  </div>
+  <div class="reader-main">
+    <div class="reader-doc" id="reader-doc"></div>
+    <aside class="reader-margin" id="reader-margin" aria-label="Comments on this file"></aside>
   </div>
 </div>
 <div id="toast" class="toast"></div>

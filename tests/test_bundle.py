@@ -120,6 +120,14 @@ class TestRenderBundle(_Base):
         html = bundle.render_task_bundle(self.conn, "cortex", "auth-refactor")
         self.assertIn("data:image/svg+xml", html)
 
+    def test_no_spa_reader_keydown_forwarder(self):
+        """S17 — the parent-messaging keydown forwarder is for LIVE-served pages
+        shown inside the SPA reader only. A published bundle must stay fully
+        self-contained: it must NOT carry the parent postMessage script."""
+        html = bundle.render_task_bundle(self.conn, "cortex", "auth-refactor")
+        self.assertNotIn("hub-doc", html)
+        self.assertNotIn("window.parent.postMessage", html)
+
     def test_missing_task_raises(self):
         with self.assertRaises(ValueError):
             bundle.render_task_bundle(self.conn, "cortex", "no-such-task")

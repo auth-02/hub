@@ -111,13 +111,21 @@ activeRepos=new Set((sessionStorage.getItem('docs_hub_repos')||'').split(',').fi
 // without this, the open preview/trace/graph closes and you land back on the
 // index — "back to home". Capture what's open + scrollY, restore it on load.
 let _openPreviewAbs=null, _openTraceT=null;
+// S17 — the in-workspace reading view (files open INSIDE the SPA, not a new tab).
+let _openReaderAbs=null, _openReaderTask=null, _openReaderRange=null;
 window._graphCurrent=null;
 function _captureViewState(){
   try{
     const pvEl=document.getElementById('preview');
     const trEl=document.getElementById('trace');
     const gcEl=document.getElementById('gcanvas');
+    const rdEl=document.getElementById('reader');
     let ov=null;
+    // Reader is the topmost browsing surface (it overlays trace/graph), so an
+    // open reading view must win the restore over everything below it.
+    if(rdEl&&rdEl.classList.contains('show')&&_openReaderAbs){
+      ov={k:'reader',abs:_openReaderAbs,range:_openReaderRange||null};
+    }else
     // Graph is checked first: it overlays the Trace (both can be `show` at once),
     // so an open graph must win the restore.
     if(gcEl&&gcEl.classList.contains('show')&&window._graphCurrent){
@@ -179,6 +187,7 @@ function openPreview(row){
   pvTitle.textContent=row.querySelector('.path').textContent;
   pvOpen.href=row.href;
   const abs=row.dataset.abs||'';
+  pvOpen.dataset.abs=abs;   // S17 — the delegated router opens this in the reader
   _openPreviewAbs=abs;
   const links=LINEAGE_DATA[abs]||[];
   if(links.length){
@@ -332,6 +341,9 @@ function _ctxForAbs(abs){
   return null;
 }
 function composerContext(){
+  // 0) the reading view is the topmost surface — comment on the open file,
+  //    task-relative target (S17 #1/#4).
+  if(_openReaderAbs){const c=_ctxForAbs(_openReaderAbs);if(c) return c;}
   // 1) an open trace / 2) an open graph → that task, general (manifest) target.
   if(_openTraceT) return {task:_openTraceT,target:'manifest.md'};
   if(window._graphCurrent&&typeof TASKS_DATA!=='undefined'){
@@ -410,10 +422,156 @@ function _composerSave(){
 }
 window._openComposer=openComposer;
 
+// ── Reading view (S17) — files open INSIDE the workspace ────────────────────
+// The SPA is the single shell. Opening a file shows a large in-workspace reading
+// view: the file body in a SANDBOXED same-origin <iframe> (keeps hub's injected
+// doc CSS, avoids style/script bleed into the SPA), and the app chrome — palette,
+// composer, and the file's comments margin — in the PARENT around it. A tiny
+// forwarder injected into LIVE-served doc bodies (render/page.py::DOC_EMBED_SCRIPT)
+// relays ⌘K/⌘P/c/Esc keydowns to window.parent, so those shortcuts fire even when
+// focus is inside the iframe. The standalone render/page.py route stays intact for
+// deep links + published bundles; only the in-app browsing click routes here.
+const readerEl=document.getElementById('reader');
+const readerDoc=document.getElementById('reader-doc');
+const readerMargin=document.getElementById('reader-margin');
+const readerCrumb=document.getElementById('reader-crumb');
+const readerOpen=document.getElementById('reader-open');
+
+function _readerRel(abs,ctx){
+  if(ctx&&ctx.task){
+    const t=ctx.task;
+    return (t.rp&&t.rp!=='(root)'?t.rp+'/':'')+'tasks/'+t.sl+'/'+ctx.target;
+  }
+  return abs;
+}
+// Render the file's comments in the PARENT margin (S17 #2). Notes are filtered
+// from the owning task's baked NOTES_DATA by task-relative target; anchored
+// (ranged) comments are labeled and click-scroll the iframe (best-effort).
+function renderReaderNotes(abs){
+  if(!readerMargin) return;
+  const pubBtn=document.getElementById('reader-publish');
+  if(pubBtn) pubBtn.style.display=(typeof PRIVATE!=='undefined'&&PRIVATE)?'none':'';
+  const ctx=_ctxForAbs(abs);
+  if(!ctx){
+    readerMargin.innerHTML='<div class="reader-margin-label">// comments</div>'+
+      '<div class="reader-margin-empty">this file isn’t under a task, so it has no comment thread.</div>';
+    return;
+  }
+  const all=(typeof NOTES_DATA!=='undefined'&&NOTES_DATA[ctx.task.rp+'\t'+ctx.task.sl])||[];
+  const notes=all.filter(c=>(c.target||'manifest.md')===ctx.target);
+  let h='<div class="reader-margin-label">// comments · '+notes.length+'</div>';
+  if(notes.length){
+    h+='<div class="notes-list">'+notes.map(c=>{
+      const agent=/(agent|bot)/i.test(c.author||'');
+      const anchored=!!c.range;
+      let meta='<span class="note-author'+(agent?' agent':'')+'">'+
+        (agent?'▸ ':'')+esc(c.author||'anon')+'</span>'+
+        '<span class="note-time">'+esc(noteAgo(c.created))+'</span>';
+      if(anchored) meta+='<span class="note-on">'+esc(c.range)+'</span>';
+      return '<div class="note-card'+(agent?' agent':'')+(anchored?' anchored':'')+'"'+
+        (anchored?' data-range="'+esc(c.range)+'" title="scroll to '+esc(c.range)+'"':'')+'>'+
+        '<div class="note-meta">'+meta+'</div>'+
+        '<div class="note-body">'+esc(c.body||'')+'</div></div>';
+    }).join('')+'</div>';
+  } else {
+    h+='<div class="reader-margin-empty">no comments on this file yet — '+
+      '<button class="note-add-link" id="reader-note-empty" type="button">write one…</button></div>';
+  }
+  readerMargin.innerHTML=h;
+  const empty=document.getElementById('reader-note-empty');
+  if(empty) empty.onclick=readerComment;
+  readerMargin.querySelectorAll('.note-card.anchored').forEach(card=>{
+    card.onclick=()=>{
+      const ifr=document.getElementById('reader-iframe');
+      if(ifr&&ifr.contentWindow)try{
+        ifr.contentWindow.postMessage({type:'hub-reader-scroll',anchor:card.dataset.range||''},'*');
+      }catch(_){}
+    };
+  });
+}
+// Open a comment on the file currently in the reading view. Prefills the
+// composer target to THIS file (task-relative) with an optional range field
+// for a line/section anchor (S17 #4).
+function readerComment(){
+  const ctx=(_openReaderAbs&&_ctxForAbs(_openReaderAbs))||composerContext();
+  if(window._openComposer) window._openComposer(ctx);
+}
+function openReader(abs,opts){
+  if(!abs||!readerEl){ if(opts&&opts.href)window.open(opts.href,'_blank','noopener'); return; }
+  opts=opts||{};
+  const href=opts.href||fileHref(abs);
+  _openReaderAbs=abs;
+  const ctx=_ctxForAbs(abs);
+  _openReaderTask=opts.task||(ctx&&ctx.task)||null;
+  _openReaderRange=opts.range||null;
+  readerCrumb.innerHTML='<b>reading</b> · '+esc(_readerRel(abs,ctx));
+  readerOpen.href=href;
+  if(preview.classList.contains('open')) closePreview();
+  readerDoc.innerHTML='<iframe class="reader-iframe" id="reader-iframe" src="'+esc(href)+'"></iframe>';
+  const ifr=document.getElementById('reader-iframe');
+  if(_openReaderRange&&ifr){
+    ifr.addEventListener('load',()=>{try{
+      ifr.contentWindow.postMessage({type:'hub-reader-scroll',anchor:_openReaderRange},'*');
+    }catch(_){}});
+  }
+  renderReaderNotes(abs);
+  readerEl.classList.add('show');
+  readerEl.scrollTop=0;
+}
+function closeReader(){
+  _openReaderAbs=null;_openReaderTask=null;_openReaderRange=null;
+  if(!readerEl) return;
+  readerEl.classList.remove('show');
+  readerDoc.innerHTML='';
+  readerMargin.innerHTML='';
+}
+window._openReader=openReader;
+if(readerEl){
+  document.getElementById('reader-close').addEventListener('click',closeReader);
+  document.getElementById('reader-comment').addEventListener('click',readerComment);
+  document.getElementById('reader-publish').addEventListener('click',()=>{
+    if(_openReaderAbs&&window._openPublish)window._openPublish({abs:_openReaderAbs});
+  });
+}
+
+// Delegated router: any in-app browsing link marked data-open-reader opens the
+// file in the reading view instead of scattering to a new tab. Modified clicks
+// (⌘/Ctrl/⇧/middle) fall through so power users can still pop a raw tab.
+document.addEventListener('click',e=>{
+  const a=e.target.closest&&e.target.closest('[data-open-reader]');
+  if(!a)return;
+  if(e.metaKey||e.ctrlKey||e.shiftKey||e.button===1)return;
+  const abs=a.dataset.abs;
+  if(!abs)return;
+  e.preventDefault();
+  openReader(abs,{href:a.getAttribute('href')||undefined});
+});
+
+// Palette/composer/close shortcuts forwarded from inside the reader iframe
+// (the iframe would otherwise swallow the keydown). Same-origin postMessage.
+window.addEventListener('message',e=>{
+  const d=e.data;
+  if(!d||d.source!=='hub-doc'||d.type!=='hub-key')return;
+  const k=d.key;
+  if(k==='k'||k==='p'){
+    if(!document.getElementById('palette').classList.contains('show')&&window._openPalette)
+      window._openPalette('');
+  }else if(k==='c'){
+    readerComment();
+  }else if(k==='escape'){
+    if(readerEl&&readerEl.classList.contains('show'))closeReader();
+  }
+});
+
 // ── Keyboard nav ──────────────────────────────────────────────────────────
 document.addEventListener('keydown',e=>{
   const tag=document.activeElement.tagName;
   if(tag==='INPUT'||tag==='TEXTAREA') return;
+  // Reading view is the topmost surface — Esc closes it; list nav stays inert.
+  if(readerEl&&readerEl.classList.contains('show')){
+    if(e.key==='Escape'){e.preventDefault();closeReader();}
+    return;
+  }
   if(document.getElementById('trace').classList.contains('show')){
     if(e.key==='Escape') closeTrace();
     else if((e.key==='g'||e.key==='G')&&_openTraceT){e.preventDefault();if(window._openGraphFor)window._openGraphFor(_openTraceT);}
@@ -422,7 +580,13 @@ document.addEventListener('keydown',e=>{
   if(e.key==='j'||e.key==='ArrowDown'){e.preventDefault();selectRow(selIdx<0?0:selIdx+1);}
   else if(e.key==='k'||e.key==='ArrowUp'){e.preventDefault();selectRow(Math.max(selIdx-1,0));}
   else if(e.key==='Escape'){closePreview();}
-  else if(e.key==='Enter'&&selIdx>=0&&selRows[selIdx]){window.open(selRows[selIdx].href,'_blank');}
+  else if(e.key==='Enter'&&selIdx>=0&&selRows[selIdx]){
+    const r=selRows[selIdx];
+    // Diagrams still open in the full canvas (new tab); everything else opens
+    // in the in-workspace reading view (S17).
+    if(r.dataset.kind==='draw')window.open(r.href,'_blank','noopener');
+    else openReader(r.dataset.abs,{href:r.href});
+  }
   else if(e.key==='/'&&!modal.classList.contains('show')){e.preventDefault();q.focus();}
 });
 
@@ -447,7 +611,7 @@ function buildLineage(links){
     }
     groups[r].forEach(l=>{
       const name=l.p.split('/').pop();
-      h+=`<a class="ln-item" href="${fileHref(l.a)}" target="_blank" title="${esc(l.p)}">${esc(name)}</a>`;
+      h+=`<a class="ln-item" href="${fileHref(l.a)}" data-open-reader data-abs="${esc(l.a)}" title="${esc(l.p)}">${esc(name)}</a>`;
     });
     h+='</div>';
   });
@@ -720,7 +884,7 @@ function buildCard(t){
     `<div class="kc-repo">${esc(t.rp)}</div>`+
     (chips.length?`<div class="kc-chips">${chips.map(c=>`<span class="kc-chip">${esc(c)}</span>`).join('')}</div>`:'')+
     `<div class="kc-ago">${feedAgo(t.mtime)}</div>`;
-  card.addEventListener('click',()=>{if(t.abs)window.open(fileHref(t.abs),'_blank','noopener');});
+  card.addEventListener('click',()=>{if(t.abs)openReader(t.abs);});
   card.addEventListener('dragstart',e=>{
     card.classList.add('dragging');
     e.dataTransfer.effectAllowed='move';
@@ -812,7 +976,7 @@ function renderCalendar(){
     const chips=entries.map(e=>{
       const t=e._t;
       const st=['ongoing','paused','completed'].includes(t.status)?t.status:'ongoing';
-      return `<a class="cal-chip s-${st}" href="${fileHref(t.abs)}" target="_blank" rel="noopener" title="${esc(t.rp+' / '+t.sl)}">${esc(tagName(t.sl))}</a>`;
+      return `<a class="cal-chip s-${st}" href="${fileHref(t.abs)}" data-open-reader data-abs="${esc(t.abs)}" title="${esc(t.rp+' / '+t.sl)}">${esc(tagName(t.sl))}</a>`;
     }).join('');
     h+=`<div class="cal-cell${today?' cal-today':''}"><div class="cal-day">${day}</div>${chips}</div>`;
   }
@@ -922,7 +1086,7 @@ function renderWorkView(){
       looseRows.map(r=>{
         const kd=(r.dataset.kind||r.dataset.search.split(' ')[0]||'').toUpperCase()||'MD';
         const path=r.querySelector('.path')?.textContent||'';
-        return `<a class="loose-row" href="${r.href}" target="_blank" rel="noopener">
+        return `<a class="loose-row" href="${r.href}" data-open-reader data-abs="${esc(r.dataset.abs||'')}">
           <span class="loose-kd">${esc(kd)}</span>
           <span>${esc(path)}</span>
         </a>`;
@@ -1193,7 +1357,7 @@ function openTrace(t){
     groups[rel].forEach(l=>{
       const name=l.p.split('/').pop();
       const meta=l.p.split('/').slice(-2,-1)[0]||'';
-      linH+=`<a class="tl-file" href="${fileHref(l.a)}" target="_blank" rel="noopener">
+      linH+=`<a class="tl-file" href="${fileHref(l.a)}" data-open-reader data-abs="${esc(l.a)}">
         <span>${esc(name)}</span>
         <span class="tl-fmeta">${esc(meta)}</span>
       </a>`;
@@ -1240,7 +1404,7 @@ function openTrace(t){
     fh+='<div class="linfoot-edges">'+ext.map(e=>
       `<div class="linfoot-edge"><span class="lf-in">${esc(e.inName)}</span>`+
       `<span class="lf-arr">←</span>`+
-      (e.extAbs?`<a class="lf-ext" href="${fileHref(e.extAbs)}" target="_blank" rel="noopener" title="${esc(e.extPath)}">${esc(e.extPath)}</a>`
+      (e.extAbs?`<a class="lf-ext" href="${fileHref(e.extAbs)}" data-open-reader data-abs="${esc(e.extAbs)}" title="${esc(e.extPath)}">${esc(e.extPath)}</a>`
                :`<span class="lf-ext" title="${esc(e.extPath)}">${esc(e.extPath)}</span>`)+
       `</div>`).join('')+'</div>';
   } else {
@@ -1269,8 +1433,8 @@ function openTrace(t){
     const a=document.createElement('a');
     a.className='trace-btn primary';
     a.href=fileHref(t.abs);
-    a.target='_blank';
-    a.rel='noopener';
+    a.dataset.openReader='';
+    a.dataset.abs=t.abs;
     a.textContent='Open manifest';
     actionsEl.appendChild(a);
   }
@@ -1345,7 +1509,9 @@ setTimeout(function restoreViewState(){
   if(!s)return;
   const ov=s.ov;
   if(ov){
-    if(ov.k==='preview'){
+    if(ov.k==='reader'){
+      openReader(ov.abs,{range:ov.range||undefined});
+    }else if(ov.k==='preview'){
       const row=[...document.querySelectorAll('.row')].find(r=>r.dataset.abs===ov.abs);
       if(row)openPreview(row);
     }else if(ov.k==='trace'){
@@ -1708,7 +1874,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
       const repo=(r.dataset.search||'').split(' ')[0];
       out.push({type:'file',id:'file:'+abs,label:path,sub:repo,abs:abs,href:r.href,
         _match:r.dataset.search||path,copyText:abs,
-        prim:()=>{closePalette();window.open(r.href,'_blank','noopener');},
+        prim:()=>{closePalette();window._openReader?window._openReader(abs,{href:r.href}):window.open(r.href,'_blank','noopener');},
         shift:()=>{closePalette();openFloat(abs,path,r.href);}});
     });
     return out;
@@ -1730,6 +1896,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
   // for a task, else a task named exactly in the query. Null → ask the user.
   function paletteContextTask(){
     if(typeof TASKS_DATA==='undefined'||!TASKS_DATA.length) return null;
+    if(_openReaderTask) return _openReaderTask;
     if(_openTraceT) return _openTraceT;
     if(window._graphCurrent){const g=window._graphCurrent;const t=TASKS_DATA.find(x=>x.sl===g.sl&&x.rp===g.rp);if(t) return t;}
     if(_openPreviewAbs){const c=_ctxForAbs(_openPreviewAbs);if(c&&c.task) return c.task;}
@@ -2569,7 +2736,9 @@ document.getElementById('rebuild').addEventListener('click',e=>{
         <button class="gc-btn" data-ins="isolate">isolate path</button>
       </div>`;
     inspector.querySelector('[data-ins="open"]').onclick=()=>{
-      const a=nodeAbs(n);if(a)window.open(fileHref(a),'_blank','noopener');else flash('path not resolvable');
+      const a=nodeAbs(n);
+      if(a)window._openReader?window._openReader(a):window.open(fileHref(a),'_blank','noopener');
+      else flash('path not resolvable');
     };
     // Isolate the path feeding THIS node: turn on the isolate flag (mirrors the
     // header checkbox) and dim everything that is not an ancestor.

@@ -132,6 +132,19 @@ class TestServerHttp(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"Hello", body)
 
+    def test_served_page_carries_reader_keydown_forwarder(self):
+        """S17 — a live-served doc page carries the tiny forwarder that relays
+        palette/composer/close keydowns to window.parent when it is shown inside
+        the SPA reading-view iframe. It is a no-op when opened as a top-level tab
+        (guarded by window.parent===window)."""
+        md_path = Path(self._scan_root) / "hello.md"
+        status, body = _get(self._port, str(md_path))
+        self.assertEqual(status, 200)
+        text = body.decode("utf-8", "replace")
+        self.assertIn("hub-doc", text)
+        self.assertIn("window.parent===window", text)
+        self.assertIn("hub-reader-scroll", text)
+
     def test_notes_jsonl_redirects_instead_of_downloading(self):
         """S13 — a direct GET to a task's comments/notes.jsonl must NOT stream
         the raw log as octet-stream (which downloads); it bounces to the SPA."""
