@@ -400,6 +400,80 @@ def rewrite_manifest(
     return text
 
 
+# ── general inline doc editing (roadmap S18 — edit ANY hub document) ─────────
+# Unlike rewrite_manifest (which surgically edits ONLY a manifest's status/plan),
+# this is a whole-file replace for arbitrary TEXT documents. It shares the S3c
+# conflict rule ("hub never wins a race against your editor") via a base_mtime
+# guard, and the same "text only" allowlist the reading view enforces. HTML is
+# deliberately excluded (raw HTML editing would break rendered artifacts) and
+# internal storage (a task's comments/ log) is never editable. The single pure,
+# testable writer behind `POST /_edit-doc`. Containment to the scan root is the
+# caller's job (it owns the active root) — this only guards ext + conflict.
+
+from .scan import SCRIPT_EXTS as _SCRIPT_EXTS
+
+# Text/markdown docs a user may edit inline: prose formats + the S16 script/probe
+# text files. HTML (.html/.htm) is intentionally absent.
+EDITABLE_EXTS = {".md", ".markdown", ".txt"} | set(_SCRIPT_EXTS)
+
+
+class DocConflict(Exception):
+    """The file changed on disk since the client read it (stale base_mtime)."""
+
+    def __init__(self, mtime: float) -> None:
+        super().__init__("file changed on disk")
+        self.mtime = mtime
+
+
+def editable_doc_reason(path: Path) -> str | None:
+    """Return None if `path` is an editable text doc, else a rejection reason.
+
+    Rejections: ``html_unsupported`` for .html/.htm (out of scope — raw HTML
+    editing would break rendered artifacts), ``internal`` for a task's comments/
+    storage (append-only log, never a document), and ``unsupported`` for any
+    other extension. Purely path-based; the caller still enforces scan-root
+    containment.
+    """
+    ext = path.suffix.lower()
+    if ext in (".html", ".htm"):
+        return "html_unsupported"
+    # A task's comment log is internal storage, not a document (S13/S7).
+    if "comments" in path.parts:
+        return "internal"
+    if ext not in EDITABLE_EXTS:
+        return "unsupported"
+    return None
+
+
+def write_doc(path: Path, content: str, base_mtime=None) -> float:
+    """Whole-file overwrite of an editable text doc, honouring the conflict rule.
+
+    `path` must already exist and be an editable text doc (see
+    `editable_doc_reason`) — the caller is responsible for scan-root containment.
+    The conflict rule: `base_mtime` is the mtime the client last read; if the
+    file's current mtime differs (beyond the S3c 1 ms tolerance) the write is
+    DISCARDED and `DocConflict` is raised so the caller can 409 and the UI can
+    re-read. Otherwise `content` is written UTF-8 and the new mtime is returned.
+    Raises `ValueError` on a non-editable target or non-string content; lets
+    `OSError` propagate (e.g. a read-only root → the caller maps it to 403).
+    """
+    reason = editable_doc_reason(path)
+    if reason is not None:
+        raise ValueError(reason)
+    if not isinstance(content, str):
+        raise ValueError("content must be a string")
+    cur = path.stat().st_mtime  # OSError if missing → caller maps to 404/403
+    if base_mtime is not None:
+        try:
+            base = float(base_mtime)
+        except (TypeError, ValueError):
+            base = None
+        if base is not None and abs(cur - base) > 0.001:
+            raise DocConflict(cur)
+    path.write_text(content, encoding="utf-8")
+    return path.stat().st_mtime
+
+
 def write_manifest(
     repo_root: Path,
     slug: str,

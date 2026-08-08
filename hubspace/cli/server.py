@@ -130,6 +130,13 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             self._list_dirs((qs.get("path") or [""])[0])
             return
 
+        # Raw source of an editable text doc — the reading view's Edit mode reads
+        # this to prefill its textarea (S18). Same containment guard as edits.
+        if url_path == "/_doc-raw":
+            qs = parse_qs(urlparse(self.path).query)
+            self._doc_raw((qs.get("path") or [""])[0])
+            return
+
         # Blank Excalidraw canvas (new, unsaved diagram)
         if url_path == "/draw":
             html_page = draw_page_html(None, None, self.__class__.server_port)
@@ -279,6 +286,16 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                                        "detail": str(e)}).encode())
                 return
             self._manifest_edit(body)
+        elif url_path == "/_edit-doc":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                self._send(400, "application/json",
+                           json.dumps({"ok": False, "error": "bad_json",
+                                       "detail": str(e)}).encode())
+                return
+            self._edit_doc(body)
         elif url_path == "/_publish-scan":
             length = int(self.headers.get("Content-Length", 0))
             try:
@@ -704,6 +721,130 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             new_mtime = manifest.stat().st_mtime
         except OSError:
             new_mtime = cur_mtime
+        self._send(200, "application/json",
+                   json.dumps({"ok": True, "rel": rel, "mtime": new_mtime}).encode())
+
+    def _resolve_in_root(self, raw: str):
+        """Resolve a client path (absolute or scan-root-relative) inside the root.
+
+        Returns the resolved Path when it stays within the active scan root, else
+        None. The single containment guard shared by /_doc-raw and /_edit-doc —
+        the same rule GET / _publish-scan use (never an arbitrary filesystem
+        read/write outside the scan root)."""
+        raw = (raw or "").strip()
+        if not raw:
+            return None
+        root = _active_root.resolve()
+        p = Path(raw)
+        if not p.is_absolute():
+            p = root / raw.lstrip("/")
+        resolved = p.resolve()
+        if not is_within(resolved, root):
+            return None
+        return resolved
+
+    def _doc_raw(self, raw: str) -> None:
+        """Return the raw UTF-8 text of an editable doc for the Edit-mode textarea.
+
+        Query param ``?path=<abs-or-rel>``; the path must resolve INSIDE the
+        active scan root (containment guard) and be an editable text doc (same
+        allowlist as /_edit-doc — HTML and internal comment logs are refused). On
+        success returns ``text/plain`` with an ``X-Doc-Mtime`` header carrying the
+        current mtime, so the client can capture ``base_mtime`` for the next save
+        without a second request."""
+        from ..core import tasks as _tasks
+
+        resolved = self._resolve_in_root(raw)
+        if resolved is None:
+            self._send(403, "text/plain", b"Forbidden")
+            return
+        if not resolved.is_file():
+            self._send(404, "text/plain", b"Not found")
+            return
+        if _tasks.editable_doc_reason(resolved) is not None:
+            self._send(400, "text/plain", b"Not an editable text document")
+            return
+        try:
+            text = resolved.read_text(encoding="utf-8", errors="replace")
+            mtime = resolved.stat().st_mtime
+        except OSError as e:
+            self._send(403, "text/plain", str(e).encode())
+            return
+        body = text.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("X-Doc-Mtime", repr(mtime))
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _edit_doc(self, body: dict) -> None:
+        """Whole-file save of ANY editable hub document — the S18 general editor.
+
+        Body is JSON ``{path, content, base_mtime}``. `path` (absolute or
+        scan-root-relative) must resolve INSIDE the active scan root and be an
+        editable TEXT doc: ``.md``/``.markdown``/``.txt`` and the S16 script/probe
+        text files. Refused: ``.html``/``.htm`` (raw HTML editing would break
+        rendered artifacts — out of scope), a task's internal ``comments/`` log,
+        anything escaping the scan root, and a read-only root (403). Conflict rule
+        (identical to /_manifest-edit): `base_mtime` is the mtime the client last
+        read; if the file changed under them → 409 and the write is DISCARDED so
+        the UI can re-read. On success the file is overwritten UTF-8, the index
+        rebuilds (so lineage/FTS reconcile), and the new mtime is returned so the
+        client can update its base for the next save."""
+        from ..core import tasks as _tasks
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        raw = (body.get("path") or "").strip()
+        content = body.get("content")
+        base_mtime = body.get("base_mtime")
+        if not raw:
+            _fail(400, {"ok": False, "error": "path required"})
+            return
+        if not isinstance(content, str):
+            _fail(400, {"ok": False, "error": "content required"})
+            return
+        resolved = self._resolve_in_root(raw)
+        if resolved is None:
+            _fail(403, {"ok": False, "error": "forbidden"})
+            return
+        if not resolved.is_file():
+            _fail(404, {"ok": False, "error": "not_found"})
+            return
+        reason = _tasks.editable_doc_reason(resolved)
+        if reason == "html_unsupported":
+            _fail(400, {"ok": False, "error": "html_unsupported",
+                        "detail": "HTML documents can't be edited inline "
+                                  "(it would break the rendered artifact)."})
+            return
+        if reason is not None:
+            _fail(400, {"ok": False, "error": reason,
+                        "detail": "Only text/markdown documents are editable."})
+            return
+        try:
+            new_mtime = _tasks.write_doc(resolved, content, base_mtime)
+        except _tasks.DocConflict as e:
+            _fail(409, {"ok": False, "error": "conflict", "mtime": e.mtime})
+            return
+        except ValueError as e:
+            _fail(400, {"ok": False, "error": "invalid", "detail": str(e)})
+            return
+        except OSError as e:
+            _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+            return
+
+        root = _active_root.resolve()
+        try:
+            rel = resolved.relative_to(root).as_posix()
+        except ValueError:
+            rel = str(resolved)
+        # Reconcile so the index/lineage/FTS reflect the edit on reload.
+        result = self._rebuild(_active_root)
+        if result.returncode != 0:
+            import sys as _sys2
+            print(result.stderr or result.stdout, file=_sys2.stderr)
         self._send(200, "application/json",
                    json.dumps({"ok": True, "rel": rel, "mtime": new_mtime}).encode())
 

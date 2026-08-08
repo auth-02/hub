@@ -515,23 +515,116 @@ function openReader(abs,opts){
     }catch(_){}});
   }
   renderReaderNotes(abs);
+  // S18 — offer Edit only for editable text docs (mirrors the server allowlist).
+  _readerEditing=false;
+  readerEl.classList.remove('editing');
+  readerEl.classList.toggle('can-edit',_isEditableDoc(abs));
   readerEl.classList.add('show');
   readerEl.scrollTop=0;
 }
 function closeReader(){
+  if(_readerEditing&&!_confirmDiscardEdit()) return;
   _openReaderAbs=null;_openReaderTask=null;_openReaderRange=null;
+  _readerEditing=false;_readerBaseMtime=null;_readerRawOrig='';
   if(!readerEl) return;
-  readerEl.classList.remove('show');
+  readerEl.classList.remove('show','editing','can-edit');
   readerDoc.innerHTML='';
   readerMargin.innerHTML='';
 }
 window._openReader=openReader;
+
+// ── S18: inline document editor ────────────────────────────────────────────
+// Extensions the reading view lets you edit — kept in lockstep with
+// tasks.EDITABLE_EXTS on the server (.html/.htm deliberately excluded).
+const _EDITABLE_EXTS=new Set(['.md','.markdown','.txt','.py','.sh','.bash','.zsh',
+  '.js','.mjs','.ts','.tsx','.sql','.rb','.go','.rs','.java','.rules','.toml',
+  '.yaml','.yml','.ini','.cfg','.example','.ipynb','.json']);
+let _readerEditing=false, _readerBaseMtime=null, _readerRawOrig='';
+function _extOf(abs){const m=/\.[^./\\]+$/.exec(String(abs||''));return m?m[0].toLowerCase():'';}
+function _isEditableDoc(abs){
+  if(!abs) return false;
+  // A task's append-only comment log is internal storage, never a document.
+  if(/(^|\/)comments\//.test(String(abs))) return false;
+  return _EDITABLE_EXTS.has(_extOf(abs));
+}
+function _editorDirty(){
+  const ta=document.getElementById('reader-textarea');
+  return !!ta && ta.value!==_readerRawOrig;
+}
+function _confirmDiscardEdit(){
+  return !_editorDirty()||window.confirm('Discard your unsaved changes?');
+}
+// Fetch raw source + current mtime, then swap the iframe for a textarea.
+async function enterReaderEdit(){
+  if(!_openReaderAbs||_readerEditing) return;
+  let text,mtime;
+  try{
+    const resp=await fetch('/_doc-raw?path='+encodeURIComponent(_openReaderAbs));
+    if(!resp.ok){flash('could not open for editing');return;}
+    text=await resp.text();
+    mtime=resp.headers.get('X-Doc-Mtime');
+  }catch(_){flash('could not open for editing');return;}
+  _readerEditing=true;_readerBaseMtime=mtime;_readerRawOrig=text;
+  readerEl.classList.add('editing');
+  readerDoc.innerHTML='<div class="reader-editor">'
+    +'<textarea id="reader-textarea" spellcheck="false" wrap="off"></textarea>'
+    +'<div class="editor-foot"><span>editing raw source — ⌘↵ save · esc cancel</span>'
+    +'<span class="ef-dirty" id="editor-dirty"></span></div></div>';
+  const ta=document.getElementById('reader-textarea');
+  ta.value=text;
+  const dirtyMark=()=>{document.getElementById('editor-dirty').textContent=_editorDirty()?'● unsaved':'';};
+  ta.addEventListener('input',dirtyMark);
+  ta.addEventListener('keydown',ev=>{
+    if(ev.key==='Escape'){ev.preventDefault();ev.stopPropagation();cancelReaderEdit();}
+    else if((ev.metaKey||ev.ctrlKey)&&ev.key==='Enter'){ev.preventDefault();ev.stopPropagation();saveReaderEdit();}
+  });
+  ta.focus();
+}
+function cancelReaderEdit(){
+  if(!_readerEditing) return;
+  if(!_confirmDiscardEdit()) return;
+  _readerEditing=false;_readerBaseMtime=null;_readerRawOrig='';
+  readerEl.classList.remove('editing');
+  // Restore the rendered view (re-open re-injects the iframe + notes).
+  if(_openReaderAbs) openReader(_openReaderAbs);
+}
+async function saveReaderEdit(){
+  if(!_readerEditing||!_openReaderAbs) return;
+  const ta=document.getElementById('reader-textarea');
+  if(!ta) return;
+  const content=ta.value;
+  let resp,out;
+  try{
+    resp=await fetch('/_edit-doc',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:_openReaderAbs,content:content,base_mtime:_readerBaseMtime})});
+    out=await resp.json().catch(()=>({}));
+  }catch(_){flash('save failed');return;}
+  if(resp.status===409){
+    // Hub never wins a race against your editor — reload the fresh source.
+    flash('file changed on disk — reloaded');
+    try{
+      const r2=await fetch('/_doc-raw?path='+encodeURIComponent(_openReaderAbs));
+      if(r2.ok){_readerRawOrig=await r2.text();_readerBaseMtime=r2.headers.get('X-Doc-Mtime');
+        ta.value=_readerRawOrig;const dm=document.getElementById('editor-dirty');if(dm)dm.textContent='';}
+    }catch(_){}
+    return;
+  }
+  if(!resp.ok||!out.ok){flash((out&&out.detail)||(out&&out.error)||'save failed');return;}
+  flash('saved');
+  _readerEditing=false;_readerBaseMtime=out.mtime||null;_readerRawOrig=content;
+  readerEl.classList.remove('editing');
+  // The rebuild re-rendered the doc — re-open on the fresh render.
+  if(_openReaderAbs) openReader(_openReaderAbs);
+}
 if(readerEl){
   document.getElementById('reader-close').addEventListener('click',closeReader);
   document.getElementById('reader-comment').addEventListener('click',readerComment);
   document.getElementById('reader-publish').addEventListener('click',()=>{
     if(_openReaderAbs&&window._openPublish)window._openPublish({abs:_openReaderAbs});
   });
+  document.getElementById('reader-edit').addEventListener('click',enterReaderEdit);
+  document.getElementById('reader-save').addEventListener('click',saveReaderEdit);
+  document.getElementById('reader-cancel').addEventListener('click',cancelReaderEdit);
 }
 
 // Delegated router: any in-app browsing link marked data-open-reader opens the
@@ -573,6 +666,9 @@ document.addEventListener('keydown',e=>{
   // these when focus is inside it, so mirror that here for parent focus.
   if(readerEl&&readerEl.classList.contains('show')){
     const rk=(e.key||'').toLowerCase();
+    // While editing, the parent chrome only handles Escape → exit edit mode
+    // (the textarea has its own ⌘↵/esc handlers); other shortcuts stay inert.
+    if(_readerEditing){if(e.key==='Escape'){e.preventDefault();cancelReaderEdit();}return;}
     if(e.key==='Escape'){e.preventDefault();closeReader();}
     else if((e.metaKey||e.ctrlKey)&&(rk==='k'||rk==='p')&&!e.altKey){
       e.preventDefault();
