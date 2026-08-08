@@ -119,6 +119,11 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             self._run_rebuild()
             return
 
+        # Settings panel (S15) — current workspace prefs + dak creds (token MASKED)
+        if url_path == "/_settings":
+            self._settings_get()
+            return
+
         # Directory picker backend (read-only listing for the set-root modal)
         if url_path == "/_list-dirs":
             qs = parse_qs(urlparse(self.path).query)
@@ -314,6 +319,16 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                                        "detail": str(e)}).encode())
                 return
             self._publish_revoke(body)
+        elif url_path == "/_settings":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                self._send(400, "application/json",
+                           json.dumps({"ok": False, "error": "bad_json",
+                                       "detail": str(e)}).encode())
+                return
+            self._settings_post(body)
         elif url_path == "/_task-status":
             length = int(self.headers.get("Content-Length", 0))
             try:
@@ -1106,6 +1121,146 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         parent = None if p.parent == p else str(p.parent)
         self._send(200, "application/json",
                    json.dumps({"path": str(p), "parent": parent, "dirs": dirs}).encode())
+
+    # ── Settings (S15) ──────────────────────────────────────────────────────
+    def _settings_get(self) -> None:
+        """Return current workspace prefs + dak creds — token ALWAYS masked.
+
+        Workspace prefs come from the hub.toml the Settings panel owns
+        (`config.config_path()`), so what the panel shows is what it will write.
+        The dak block never carries the real token: only ``api_token_set`` (and
+        the safe account_id/subdomain). See config.masked_dak_config.
+        """
+        cfg = config.load_config(config.config_path().parent)
+        port = cfg.get("port")
+        if isinstance(port, bool):
+            port = None
+        elif isinstance(port, int):
+            pass
+        elif isinstance(port, str) and port.strip().isdigit():
+            port = int(port.strip())
+        else:
+            port = None
+        hub = {
+            "default_view": config.resolve_default_view(cfg),
+            "port": port,
+            "exclude_dirs": sorted(config.config_exclude_dirs(cfg)),
+            "private": config.is_private(cfg),
+            "upload_exts": sorted(config.upload_exts(cfg)),
+            "scan_root": str(_active_root),
+        }
+        self._send(200, "application/json",
+                   json.dumps({"ok": True, "hub": hub,
+                               "dak": config.masked_dak_config()}).encode())
+
+    @staticmethod
+    def _split_list(raw) -> list:
+        """Normalize a comma/whitespace list (or an actual list) → [str]."""
+        if isinstance(raw, list):
+            items = [str(x).strip() for x in raw]
+        else:
+            items = re.split(r"[,\s]+", str(raw or ""))
+        return [x for x in (i.strip() for i in items) if x]
+
+    def _settings_post(self, body: dict) -> None:
+        """Write workspace prefs → hub.toml and dak creds → ~/.dak/config.json.
+
+        SECURITY: the API token is written ONLY to ~/.dak/config.json, never to
+        hub.toml (which is indexed and can be embedded/published). config.write_config
+        enforces this at the sink via a fixed key allowlist; here we additionally
+        never copy a dak field into the hub values. The token is overwritten only
+        when the client sends a real new value (not the mask sentinel / not empty),
+        so re-saving other fields keeps the existing token. Nothing here logs the
+        token. Rebuilds after a hub.toml change; a port change is flagged in
+        ``notes`` because hub.toml `port` is read at process start.
+        """
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        hub_in = body.get("hub") if isinstance(body.get("hub"), dict) else {}
+        dak_in = body.get("dak") if isinstance(body.get("dak"), dict) else {}
+        notes: list[str] = []
+
+        # ── validate + normalize workspace prefs ─────────────────────────────
+        hub_vals: dict = {}
+        if "default_view" in hub_in:
+            v = str(hub_in.get("default_view") or "").strip()
+            if v:
+                if v not in ("work", "list", "board", "calendar"):
+                    _fail(400, {"ok": False, "error": "invalid_view"})
+                    return
+                hub_vals["default_view"] = v
+        if "port" in hub_in:
+            raw = hub_in.get("port")
+            if raw not in (None, ""):
+                try:
+                    pi = int(raw)
+                except (TypeError, ValueError):
+                    _fail(400, {"ok": False, "error": "invalid_port"})
+                    return
+                if not (1 <= pi <= 65535):
+                    _fail(400, {"ok": False, "error": "invalid_port"})
+                    return
+                hub_vals["port"] = pi
+        if "exclude_dirs" in hub_in:
+            dirs = self._split_list(hub_in.get("exclude_dirs"))
+            for d in dirs:
+                if "/" in d or "\\" in d or d in (".", ".."):
+                    _fail(400, {"ok": False, "error": "invalid_exclude_dir",
+                                "detail": d})
+                    return
+            hub_vals["exclude_dirs"] = dirs
+        if "upload_exts" in hub_in:
+            exts = []
+            for e in self._split_list(hub_in.get("upload_exts")):
+                e = e.lower()
+                exts.append(e if e.startswith(".") else "." + e)
+            hub_vals["upload_exts"] = exts
+        if "private" in hub_in:
+            pv = hub_in.get("private")
+            if isinstance(pv, str):
+                pv = pv.strip().lower() in ("1", "true", "yes", "on")
+            hub_vals["private"] = bool(pv)
+
+        # ── validate dak creds (token handled specially) ─────────────────────
+        dak_vals: dict = {}
+        for k in ("account_id", "subdomain"):
+            if k in dak_in and dak_in.get(k) is not None:
+                dak_vals[k] = str(dak_in.get(k)).strip()
+        tok = dak_in.get("api_token")
+        if tok is not None:
+            tok = str(tok)
+            if tok.strip() and tok != config.DAK_MASK:
+                dak_vals["api_token"] = tok.strip()
+
+        # ── write hub.toml (workspace prefs) + note a port change ────────────
+        if hub_vals:
+            cfg_path = config.config_path()
+            if "port" in hub_vals:
+                prev = config.resolve_port(config.load_config(cfg_path.parent))
+                if str(hub_vals["port"]) != str(prev):
+                    notes.append("Port change takes effect after you restart the server.")
+            try:
+                config.write_config(hub_vals, cfg_path)
+            except OSError as e:
+                _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+                return
+            # Re-bake the index so default_view / repo chips reflect the change.
+            result = self._rebuild(_active_root)
+            if result.returncode != 0:
+                import sys as _sys2
+                print(result.stderr or result.stdout, file=_sys2.stderr)
+
+        # ── write dak creds (token to ~/.dak/config.json ONLY) ───────────────
+        if dak_vals:
+            try:
+                config.write_dak_config(dak_vals)
+            except OSError as e:
+                _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+                return
+
+        self._send(200, "application/json",
+                   json.dumps({"ok": True, "notes": notes}).encode())
 
     def _run_rebuild(self) -> None:
         result = self._rebuild(_active_root)

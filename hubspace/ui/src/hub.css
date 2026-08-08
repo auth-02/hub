@@ -42,6 +42,25 @@ header{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:8px
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
 .btn.primary:hover{background:var(--ink);border-color:var(--ink);}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;font-family:var(--mono);font-size:11px;padding:10px 14px;letter-spacing:.05em;opacity:0;transition:opacity .2s;pointer-events:none;max-width:80vw;}
+/* ── Settings (S15): gear bottom-left + panel modeled on the set-root modal ── */
+.settings-gear{position:fixed;left:18px;bottom:18px;z-index:45;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--bg);color:var(--mute);font-size:16px;line-height:1;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.14);transition:transform .15s,color .15s,border-color .15s;}
+.settings-gear:hover{color:var(--accent);border-color:var(--accent);transform:rotate(45deg);}
+.settings-gear:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent2);}
+.settings-card{min-width:440px;width:520px;max-width:92vw;}
+.settings-body{display:flex;flex-direction:column;gap:22px;max-height:64vh;overflow-y:auto;padding-right:4px;}
+.settings-sec-head{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin-bottom:10px;border-bottom:1px solid var(--line);padding-bottom:6px;}
+.settings-sec-sub{color:var(--mute);}
+.settings-note{font-family:var(--mono);font-size:10.5px;color:var(--mute);margin:-4px 0 10px;line-height:1.5;}
+.settings-field{margin-bottom:12px;}
+.settings-label{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink);margin-bottom:5px;}
+.settings-hint{color:var(--mute);text-transform:none;letter-spacing:0;}
+.settings-input,.settings-select{width:100%;font-family:var(--mono);font-size:12.5px;padding:9px 11px;border:1px solid var(--line);background:var(--alt);color:var(--ink);outline:none;}
+.settings-input:focus,.settings-select:focus{border-color:var(--accent);}
+.settings-root{display:flex;align-items:center;gap:10px;}
+.settings-root-path{flex:1;min-width:0;font-family:var(--mono);font-size:11.5px;color:var(--accent2);word-break:break-all;}
+.settings-root .btn{flex:0 0 auto;}
+.settings-toggle{display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:12px;color:var(--ink);cursor:pointer;}
+.settings-toggle input{width:auto;}
 .toast.show{opacity:1;}
 h1{font-family:var(--disp);font-weight:500;font-size:40px;letter-spacing:-.02em;margin:8px 0 4px;}
 h1 em{font-style:italic;color:var(--accent);}

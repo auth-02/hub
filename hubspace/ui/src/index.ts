@@ -1498,6 +1498,107 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     .catch(()=>flash('rebuild failed'));
 });
 
+// ── Settings panel (S15) ────────────────────────────────────────────────────
+// Gear fixed bottom-left of the home page opens a themed panel (modeled on the
+// set-root modal). Section 1 (workspace prefs) → hub.toml via POST /_settings;
+// Section 2 (Cloudflare creds) → ~/.dak/config.json. The API token is fetched
+// only as a SET/UNSET flag (never its value); leaving the masked field unchanged
+// on save keeps the existing token server-side.
+(function(){
+  const gear=document.getElementById('settings-gear');
+  const panel=document.getElementById('settings');
+  if(!gear||!panel) return;
+  const $ = (id)=>document.getElementById(id);
+  const viewSel=$('settings-view');
+  const portIn=$('settings-port');
+  const excludeIn=$('settings-exclude');
+  const uploadsIn=$('settings-uploads');
+  const privateIn=$('settings-private');
+  const rootPathEl=$('settings-root-path');
+  const tokenIn=$('settings-dak-token');
+  const accountIn=$('settings-dak-account');
+  const subdomainIn=$('settings-dak-subdomain');
+  const MASK='••••••';
+  let _tokenSet=false;   // whether a token already exists server-side
+  let _lastFocus=null;
+
+  const viewDD=themeSelect(viewSel);
+
+  function fill(data){
+    const hub=(data&&data.hub)||{}, dak=(data&&data.dak)||{};
+    viewSel.value=hub.default_view||'';if(viewDD)viewDD.refresh();
+    portIn.value=(hub.port!=null?String(hub.port):'');
+    excludeIn.value=(hub.exclude_dirs||[]).join(', ');
+    uploadsIn.value=(hub.upload_exts||[]).join(' ');
+    privateIn.checked=!!hub.private;
+    rootPathEl.textContent=hub.scan_root||_currentRoot||'';
+    accountIn.value=dak.account_id||'';
+    subdomainIn.value=dak.subdomain||'';
+    _tokenSet=!!dak.api_token_set;
+    // Show the mask for an existing token; leaving it untouched keeps it.
+    tokenIn.value=_tokenSet?MASK:'';
+    tokenIn.placeholder=_tokenSet?'token set — leave to keep':'Cloudflare API token';
+  }
+
+  function open(){
+    _lastFocus=document.activeElement;
+    rootPathEl.textContent=_currentRoot||'';
+    panel.classList.add('show');
+    fetch('/_settings').then(r=>r.json()).then(fill).catch(()=>{});
+    setTimeout(()=>{if(viewDD&&viewDD.el){const b=viewDD.el.querySelector('.pal-dd-btn');if(b)b.focus();}},0);
+  }
+  function close(){
+    panel.classList.remove('show');
+    if(_lastFocus&&_lastFocus.focus)try{_lastFocus.focus();}catch(_){}
+  }
+
+  function save(){
+    // Only send the token when the user typed a real new value (not the mask).
+    const dak={account_id:accountIn.value.trim(),subdomain:subdomainIn.value.trim()};
+    const tv=tokenIn.value;
+    if(tv&&tv!==MASK) dak.api_token=tv;
+    const body={
+      hub:{
+        default_view:viewSel.value,
+        port:portIn.value.trim(),
+        exclude_dirs:excludeIn.value,
+        upload_exts:uploadsIn.value,
+        private:privateIn.checked,
+      },
+      dak:dak,
+    };
+    const btn=$('settings-save');if(btn)btn.disabled=true;
+    fetch('/_settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+      .then(r=>r.json().then(d=>({ok:r.ok,d:d})))
+      .then(({ok,d})=>{
+        if(btn)btn.disabled=false;
+        if(!ok||!d.ok){flash('save failed: '+((d&&d.error)||'error'));return;}
+        close();
+        const notes=(d.notes||[]);
+        flash(notes.length?('settings saved · '+notes.join(' ')):'settings saved');
+      })
+      .catch(()=>{if(btn)btn.disabled=false;flash('save failed');});
+  }
+
+  gear.addEventListener('click',e=>{e.preventDefault();open();});
+  $('settings-cancel').addEventListener('click',close);
+  $('settings-save').addEventListener('click',save);
+  // Reuse the EXISTING dir picker for scan root — don't rebuild it.
+  $('settings-root-change').addEventListener('click',()=>{close();openModal();});
+  panel.addEventListener('click',e=>{if(e.target===panel)close();});
+  // Focus trap + Esc (the panel is the topmost dialog when shown).
+  panel.addEventListener('keydown',e=>{
+    if(e.key==='Escape'){e.preventDefault();close();return;}
+    if(e.key!=='Tab')return;
+    const f=panel.querySelectorAll('button,select,input,textarea,[tabindex]:not([tabindex="-1"])');
+    const list=[...f].filter(el=>!el.disabled&&el.offsetParent!==null);
+    if(!list.length)return;
+    const first=list[0],last=list[list.length-1];
+    if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}
+    else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
+  });
+})();
+
 // ── Command palette (roadmap 1a/1b/2c) ──────────────────────────────────────
 // The ONE write surface. Client-only over data already on the page; the sole
 // network call is POST /_new-task. Distinct from the #q filter (a lens over the
