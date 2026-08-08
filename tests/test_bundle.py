@@ -127,6 +127,10 @@ class TestRenderBundle(_Base):
         html = bundle.render_task_bundle(self.conn, "cortex", "auth-refactor")
         self.assertNotIn("hub-doc", html)
         self.assertNotIn("window.parent.postMessage", html)
+        # S19 — the reader companion (hover "+" gutter, inline-comment renderer,
+        # line-click hand-off) is LIVE-served only; it must never reach a bundle.
+        self.assertNotIn("hub-comment-line", html)
+        self.assertNotIn("hub-line-add", html)
 
     def test_missing_task_raises(self):
         with self.assertRaises(ValueError):

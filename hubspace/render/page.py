@@ -107,19 +107,29 @@ show('<span class="dpr-tag err">publish failed</span>','err');});
 """
 
 
-# S17 — tiny keydown-forwarder for LIVE-served doc bodies shown inside the SPA
+# S17/S19 — companion script for LIVE-served doc bodies shown inside the SPA
 # reading-view iframe. A doc page opened as a top-level tab (window.parent===
-# window) short-circuits immediately, so deep-links behave exactly as before.
-# When embedded, ⌘K/⌘P/c/Esc keydowns (which the iframe would otherwise swallow)
-# are forwarded to window.parent so the palette / composer / close shortcuts work
-# even while focus is inside the file. Same-origin, so postMessage reaches the
-# SPA shell. Deliberately NEVER added to published bundles (they render through
-# render.bundle, not these helpers) — bundles must stay self-contained.
+# window) short-circuits immediately, so deep-links / new-tab behave exactly as
+# before. When embedded it:
+#   • forwards ⌘K/⌘P/c/Esc keydowns the iframe would otherwise swallow, so the
+#     palette / composer / close shortcuts work with focus inside the file;
+#   • answers `hub-reader-scroll` by scrolling to an anchor;
+#   • (S19) shows a hover "+" gutter on any block carrying data-src-line and, on
+#     click, postMessages the parent {type:'hub-comment-line', line:<n>} so the
+#     composer opens prefilled with that line — the user never types "L4";
+#   • (S19) renders this file's comments INLINE on the document — anchored ones
+#     right under the block whose data-src-line matches (comments live ON the
+#     doc, not a side rail); general ones in a compact block at the top.
+# Same-origin, so postMessage reaches the SPA shell. Deliberately NEVER added to
+# published bundles (they render through render.bundle, not these helpers) —
+# bundles must stay self-contained.
 DOC_EMBED_SCRIPT = """
 <script>
 (function(){
 if(window.parent===window) return;
 function fwd(key){try{window.parent.postMessage({source:'hub-doc',type:'hub-key',key:key},'*');}catch(_){}}
+function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 document.addEventListener('keydown',function(e){
   var k=(e.key||'').toLowerCase();
   if((e.metaKey||e.ctrlKey)&&!e.altKey&&(k==='k'||k==='p')){e.preventDefault();fwd(k);return;}
@@ -130,15 +140,94 @@ document.addEventListener('keydown',function(e){
   else if(k==='escape'){fwd('escape');}
 });
 window.addEventListener('message',function(e){
-  var d=e.data;if(!d||d.type!=='hub-reader-scroll')return;
-  var a=String(d.anchor||'');
-  var el=a&&document.getElementById(a);
-  if(el){el.scrollIntoView({block:'start',behavior:'smooth'});
-    var o=el.style.backgroundColor;el.style.transition='background .3s';
-    el.style.backgroundColor='rgba(193,95,60,.20)';
-    setTimeout(function(){el.style.backgroundColor=o;},1400);}
-  else{window.scrollTo({top:0,behavior:'smooth'});}
+  var d=e.data;if(!d)return;
+  if(d.type==='hub-reader-scroll'){
+    var a=String(d.anchor||'');
+    var el=a&&document.getElementById(a);
+    if(el){el.scrollIntoView({block:'start',behavior:'smooth'});
+      var o=el.style.backgroundColor;el.style.transition='background .3s';
+      el.style.backgroundColor='rgba(193,95,60,.20)';
+      setTimeout(function(){el.style.backgroundColor=o;},1400);}
+    else{window.scrollTo({top:0,behavior:'smooth'});}
+    return;
+  }
+  if(d.type==='hub-doc-notes'){renderNotes(d.notes||[]);return;}
 });
+
+// ── S19: hover "+" line gutter ──────────────────────────────────────────────
+// A single floating button trails the pointer to the currently-hovered block.
+var addBtn=document.createElement('button');
+addBtn.type='button';addBtn.className='hub-line-add';addBtn.textContent='+';
+addBtn.title='comment on this line';addBtn.style.display='none';
+var curLine=null;
+addBtn.addEventListener('click',function(ev){
+  ev.preventDefault();ev.stopPropagation();
+  if(curLine==null)return;
+  try{window.parent.postMessage({source:'hub-doc',type:'hub-comment-line',line:curLine},'*');}catch(_){}
+});
+document.addEventListener('DOMContentLoaded',function(){document.body.appendChild(addBtn);});
+if(document.body)document.body.appendChild(addBtn);
+document.addEventListener('mousemove',function(e){
+  var blk=e.target&&e.target.closest&&e.target.closest('[data-src-line]');
+  if(!blk||blk.classList.contains('hub-inline-note')){addBtn.style.display='none';curLine=null;return;}
+  var ln=parseInt(blk.getAttribute('data-src-line'),10);
+  if(isNaN(ln)){addBtn.style.display='none';curLine=null;return;}
+  curLine=ln;
+  var r=blk.getBoundingClientRect();
+  addBtn.style.top=(window.scrollY+r.top)+'px';
+  addBtn.style.left=(window.scrollX+r.left-30)+'px';
+  addBtn.style.display='flex';
+});
+
+// ── S19: inline comment cards ───────────────────────────────────────────────
+function card(n){
+  var agent=!!n.agent;
+  var meta='<span class="note-author'+(agent?' agent':'')+'">'+(agent?'\\u25b8 ':'')+
+    esc(n.author||'anon')+'</span><span class="note-time">'+esc(n.timeAgo||'')+'</span>'+
+    (n.line?'<span class="note-on">L'+esc(n.line)+'</span>':'');
+  var el=document.createElement('div');
+  el.className='note-card hub-inline-note'+(agent?' agent':'')+(n.line?' anchored':'');
+  el.innerHTML='<div class="note-meta">'+meta+'</div><div class="note-body">'+esc(n.body||'')+'</div>';
+  return el;
+}
+function blockForLine(line){
+  var blocks=document.querySelectorAll('.page [data-src-line]');
+  var exact=null,best=null,bestLn=-1;
+  for(var i=0;i<blocks.length;i++){
+    if(blocks[i].classList.contains('hub-inline-note'))continue;
+    var ln=parseInt(blocks[i].getAttribute('data-src-line'),10);
+    if(ln===line){exact=blocks[i];break;}
+    if(ln<line&&ln>bestLn){bestLn=ln;best=blocks[i];}
+  }
+  return exact||best;
+}
+function renderNotes(notes){
+  var page=document.querySelector('.page');if(!page)return;
+  // Clear any previously-inserted cards (re-render after a new comment saves).
+  var old=page.querySelectorAll('.hub-inline-note,.hub-inline-notes');
+  for(var i=0;i<old.length;i++)old[i].parentNode.removeChild(old[i]);
+  var general=[];
+  notes.forEach(function(n){
+    if(n.line){
+      var blk=blockForLine(n.line);
+      var c=card(n);
+      if(blk&&blk.parentNode){blk.parentNode.insertBefore(c,blk.nextSibling);}
+      else{general.push(n);}
+    }else{general.push(n);}
+  });
+  if(general.length){
+    var wrap=document.createElement('div');
+    wrap.className='hub-inline-notes';
+    wrap.innerHTML='<div class="hub-inline-notes-label">// comments \\u00b7 '+general.length+'</div>';
+    general.forEach(function(n){wrap.appendChild(card(n));});
+    var firstBlk=page.querySelector('[data-src-line]');
+    if(firstBlk){firstBlk.parentNode.insertBefore(wrap,firstBlk);}
+    else{page.appendChild(wrap);}
+  }
+}
+// Tell the parent we're ready for this file's comments (covers the case where
+// the parent posted before this script's listener was attached).
+try{window.parent.postMessage({source:'hub-doc',type:'hub-doc-ready'},'*');}catch(_){}
 })();
 </script>
 """

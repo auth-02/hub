@@ -189,7 +189,7 @@ class TestDocPublishItem(unittest.TestCase):
 class TestRenderMd(unittest.TestCase):
     def test_heading(self):
         result = render._render_md("# Hello")
-        self.assertIn("<h1>", result)
+        self.assertIn("<h1", result)
         self.assertIn("Hello", result)
 
     def test_bold(self):
@@ -202,17 +202,17 @@ class TestRenderMd(unittest.TestCase):
 
     def test_code_fence(self):
         result = render._render_md("```python\nprint('hi')\n```")
-        self.assertIn("<pre>", result)
+        self.assertIn("<pre", result)
         self.assertIn("<code", result)
 
     def test_unordered_list(self):
         result = render._render_md("- item one\n- item two")
-        self.assertIn("<ul>", result)
-        self.assertIn("<li>", result)
+        self.assertIn("<ul", result)
+        self.assertIn("<li", result)
 
     def test_ordered_list(self):
         result = render._render_md("1. first\n2. second")
-        self.assertIn("<ol>", result)
+        self.assertIn("<ol", result)
 
     def test_link(self):
         result = render._render_md("[click](http://example.com)")
@@ -222,7 +222,7 @@ class TestRenderMd(unittest.TestCase):
         src = "---\ntitle: T\n---\n# Heading"
         result = render._render_md(src)
         self.assertNotIn("title:", result)
-        self.assertIn("<h1>", result)
+        self.assertIn("<h1", result)
 
     def test_inline_code(self):
         result = render._render_md("use `foo()` here")
@@ -231,12 +231,12 @@ class TestRenderMd(unittest.TestCase):
     def test_table(self):
         src = "| A | B |\n|---|---|\n| 1 | 2 |"
         result = render._render_md(src)
-        self.assertIn("<table>", result)
+        self.assertIn("<table", result)
         self.assertIn("<th ", result)  # class attribute added by typed-column renderer
 
     def test_blockquote(self):
         result = render._render_md("> quoted text")
-        self.assertIn("<blockquote>", result)
+        self.assertIn("<blockquote", result)
 
 
 class TestRenderCsv(unittest.TestCase):
@@ -252,7 +252,7 @@ class TestRenderCsv(unittest.TestCase):
         name = self._write_csv("Name,Age\nAlice,30\nBob,25")
         try:
             result = render._render_csv(__import__("pathlib").Path(name))
-            self.assertIn("<table>", result)
+            self.assertIn("<table", result)
             self.assertIn("Alice", result)
             self.assertIn("Name", result)
         finally:
@@ -262,7 +262,7 @@ class TestRenderCsv(unittest.TestCase):
         name = self._write_csv("Name\tScore\nAlice\t100", suffix=".tsv")
         try:
             result = render._render_csv(__import__("pathlib").Path(name))
-            self.assertIn("<table>", result)
+            self.assertIn("<table", result)
             self.assertIn("Score", result)
         finally:
             os.unlink(name)
@@ -384,7 +384,7 @@ class TestRenderMdExtended(unittest.TestCase):
     def test_nested_list_items(self):
         src = "- parent\n  - child"
         result = render._render_md(src)
-        self.assertIn("<ul>", result)
+        self.assertIn("<ul", result)
 
     def test_xss_in_code_fence_escaped(self):
         src = "```\n<script>alert(1)</script>\n```"

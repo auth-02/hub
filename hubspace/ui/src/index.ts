@@ -396,7 +396,9 @@ function openComposer(ctx){
   _composerEl.querySelector('#cmp-title').textContent='comment on '+tgt;
   _composerEl.querySelector('#cmp-dest').textContent=
     (t.rp&&t.rp!=='(root)'?t.rp+'/':'')+'tasks/'+t.sl+'/comments/notes.jsonl';
-  _composerEl.querySelector('#cmp-range').value='';
+  // S19 — a line-click prefills the range (e.g. "L4") so the comment anchors
+  // to that line without the user typing it; the field stays editable.
+  _composerEl.querySelector('#cmp-range').value=ctx.range||'';
   _composerEl.querySelector('#cmp-body').value='';
   _composerEl.classList.add('show');
   setTimeout(()=>_composerEl.querySelector('#cmp-body').focus(),0);
@@ -433,7 +435,6 @@ window._openComposer=openComposer;
 // deep links + published bundles; only the in-app browsing click routes here.
 const readerEl=document.getElementById('reader');
 const readerDoc=document.getElementById('reader-doc');
-const readerMargin=document.getElementById('reader-margin');
 const readerCrumb=document.getElementById('reader-crumb');
 const readerOpen=document.getElementById('reader-open');
 
@@ -444,56 +445,35 @@ function _readerRel(abs,ctx){
   }
   return abs;
 }
-// Render the file's comments in the PARENT margin (S17 #2). Notes are filtered
-// from the owning task's baked NOTES_DATA by task-relative target; anchored
-// (ranged) comments are labeled and click-scroll the iframe (best-effort).
-function renderReaderNotes(abs){
-  if(!readerMargin) return;
-  const pubBtn=document.getElementById('reader-publish');
-  if(pubBtn) pubBtn.style.display=(typeof PRIVATE!=='undefined'&&PRIVATE)?'none':'';
+// S19 — comments now render INLINE on the document (inside the iframe, at each
+// comment's source line), not in a right-side rail. Collect this file's
+// comments from the owning task's baked NOTES_DATA (filtered by task-relative
+// target), shaped for the iframe: {line, author, body, timeAgo, agent}. The
+// line is the first integer of the comment's range (e.g. "L4"/"L41-L48" → 4/41);
+// range-less comments (line:null) render as a general block at the top.
+let _readerNotes=[];
+function _readerNotesFor(abs){
   const ctx=_ctxForAbs(abs);
-  if(!ctx){
-    readerMargin.innerHTML='<div class="reader-margin-label">// comments</div>'+
-      '<div class="reader-margin-empty">this file isn’t under a task, so it has no comment thread.</div>';
-    return;
-  }
+  if(!ctx) return [];
   const all=(typeof NOTES_DATA!=='undefined'&&NOTES_DATA[ctx.task.rp+'\t'+ctx.task.sl])||[];
-  const notes=all.filter(c=>(c.target||'manifest.md')===ctx.target);
-  let h='<div class="reader-margin-label">// comments · '+notes.length+'</div>';
-  if(notes.length){
-    h+='<div class="notes-list">'+notes.map(c=>{
-      const agent=/(agent|bot)/i.test(c.author||'');
-      const anchored=!!c.range;
-      let meta='<span class="note-author'+(agent?' agent':'')+'">'+
-        (agent?'▸ ':'')+esc(c.author||'anon')+'</span>'+
-        '<span class="note-time">'+esc(noteAgo(c.created))+'</span>';
-      if(anchored) meta+='<span class="note-on">'+esc(c.range)+'</span>';
-      return '<div class="note-card'+(agent?' agent':'')+(anchored?' anchored':'')+'"'+
-        (anchored?' data-range="'+esc(c.range)+'" title="scroll to '+esc(c.range)+'"':'')+'>'+
-        '<div class="note-meta">'+meta+'</div>'+
-        '<div class="note-body">'+esc(c.body||'')+'</div></div>';
-    }).join('')+'</div>';
-  } else {
-    h+='<div class="reader-margin-empty">no comments on this file yet — '+
-      '<button class="note-add-link" id="reader-note-empty" type="button">write one…</button></div>';
-  }
-  readerMargin.innerHTML=h;
-  const empty=document.getElementById('reader-note-empty');
-  if(empty) empty.onclick=readerComment;
-  readerMargin.querySelectorAll('.note-card.anchored').forEach(card=>{
-    card.onclick=()=>{
-      const ifr=document.getElementById('reader-iframe');
-      if(ifr&&ifr.contentWindow)try{
-        ifr.contentWindow.postMessage({type:'hub-reader-scroll',anchor:card.dataset.range||''},'*');
-      }catch(_){}
-    };
+  return all.filter(c=>(c.target||'manifest.md')===ctx.target).map(c=>{
+    const mm=/(\d+)/.exec(c.range||'');
+    return {line:mm?parseInt(mm[1],10):null,author:c.author||'anon',
+      body:c.body||'',timeAgo:noteAgo(c.created),agent:/(agent|bot)/i.test(c.author||'')};
   });
 }
+function _sendReaderNotes(){
+  const ifr=document.getElementById('reader-iframe');
+  if(ifr&&ifr.contentWindow)try{
+    ifr.contentWindow.postMessage({type:'hub-doc-notes',notes:_readerNotes||[]},'*');
+  }catch(_){}
+}
 // Open a comment on the file currently in the reading view. Prefills the
-// composer target to THIS file (task-relative) with an optional range field
-// for a line/section anchor (S17 #4).
-function readerComment(){
+// composer target to THIS file (task-relative); ``line`` (from a gutter "+"
+// click) prefills the range so the user never types "L4" by hand (S19 #3).
+function readerComment(line){
   const ctx=(_openReaderAbs&&_ctxForAbs(_openReaderAbs))||composerContext();
+  if(ctx&&line!=null) ctx.range='L'+line;
   if(window._openComposer) window._openComposer(ctx);
 }
 function openReader(abs,opts){
@@ -506,15 +486,22 @@ function openReader(abs,opts){
   _openReaderRange=opts.range||null;
   readerCrumb.innerHTML='<b>reading</b> · '+esc(_readerRel(abs,ctx));
   readerOpen.href=href;
+  const pubBtn=document.getElementById('reader-publish');
+  if(pubBtn) pubBtn.style.display=(typeof PRIVATE!=='undefined'&&PRIVATE)?'none':'';
   if(preview.classList.contains('open')) closePreview();
+  // S19 — comments render inline in the iframe; hand them over on load (and
+  // again when the doc script announces hub-doc-ready, covering the race).
+  _readerNotes=_readerNotesFor(abs);
   readerDoc.innerHTML='<iframe class="reader-iframe" id="reader-iframe" src="'+esc(href)+'"></iframe>';
   const ifr=document.getElementById('reader-iframe');
-  if(_openReaderRange&&ifr){
-    ifr.addEventListener('load',()=>{try{
-      ifr.contentWindow.postMessage({type:'hub-reader-scroll',anchor:_openReaderRange},'*');
-    }catch(_){}});
+  if(ifr){
+    ifr.addEventListener('load',()=>{
+      _sendReaderNotes();
+      if(_openReaderRange)try{
+        ifr.contentWindow.postMessage({type:'hub-reader-scroll',anchor:_openReaderRange},'*');
+      }catch(_){}
+    });
   }
-  renderReaderNotes(abs);
   // S18 — offer Edit only for editable text docs (mirrors the server allowlist).
   _readerEditing=false;
   readerEl.classList.remove('editing');
@@ -529,7 +516,7 @@ function closeReader(){
   if(!readerEl) return;
   readerEl.classList.remove('show','editing','can-edit');
   readerDoc.innerHTML='';
-  readerMargin.innerHTML='';
+  _readerNotes=[];
 }
 window._openReader=openReader;
 
@@ -566,18 +553,29 @@ async function enterReaderEdit(){
   }catch(_){flash('could not open for editing');return;}
   _readerEditing=true;_readerBaseMtime=mtime;_readerRawOrig=text;
   readerEl.classList.add('editing');
+  // S19 — a line-number gutter (a mirrored column) scrolls in lockstep with the
+  // textarea; its line count updates on every input.
   readerDoc.innerHTML='<div class="reader-editor">'
-    +'<textarea id="reader-textarea" spellcheck="false" wrap="off"></textarea>'
+    +'<div class="editor-body"><div class="editor-gutter" id="editor-gutter" aria-hidden="true"></div>'
+    +'<textarea id="reader-textarea" spellcheck="false" wrap="off"></textarea></div>'
     +'<div class="editor-foot"><span>editing raw source — ⌘↵ save · esc cancel</span>'
     +'<span class="ef-dirty" id="editor-dirty"></span></div></div>';
   const ta=document.getElementById('reader-textarea');
   ta.value=text;
+  const gutter=document.getElementById('editor-gutter');
+  const syncGutter=()=>{
+    const n=(ta.value.match(/\n/g)||[]).length+1;
+    let s='';for(let k=1;k<=n;k++)s+=k+'\n';
+    gutter.textContent=s;gutter.scrollTop=ta.scrollTop;
+  };
   const dirtyMark=()=>{document.getElementById('editor-dirty').textContent=_editorDirty()?'● unsaved':'';};
-  ta.addEventListener('input',dirtyMark);
+  ta.addEventListener('input',()=>{dirtyMark();syncGutter();});
+  ta.addEventListener('scroll',()=>{gutter.scrollTop=ta.scrollTop;});
   ta.addEventListener('keydown',ev=>{
     if(ev.key==='Escape'){ev.preventDefault();ev.stopPropagation();cancelReaderEdit();}
     else if((ev.metaKey||ev.ctrlKey)&&ev.key==='Enter'){ev.preventDefault();ev.stopPropagation();saveReaderEdit();}
   });
+  syncGutter();
   ta.focus();
 }
 function cancelReaderEdit(){
@@ -644,7 +642,12 @@ document.addEventListener('click',e=>{
 // (the iframe would otherwise swallow the keydown). Same-origin postMessage.
 window.addEventListener('message',e=>{
   const d=e.data;
-  if(!d||d.source!=='hub-doc'||d.type!=='hub-key')return;
+  if(!d||d.source!=='hub-doc')return;
+  // S19 — the doc script is ready: (re)send this file's inline comments.
+  if(d.type==='hub-doc-ready'){_sendReaderNotes();return;}
+  // S19 — a gutter "+" was clicked: open the composer prefilled with that line.
+  if(d.type==='hub-comment-line'){readerComment(d.line);return;}
+  if(d.type!=='hub-key')return;
   const k=d.key;
   if(k==='k'||k==='p'){
     if(!document.getElementById('palette').classList.contains('show')&&window._openPalette)

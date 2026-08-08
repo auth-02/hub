@@ -376,20 +376,12 @@ background-image:radial-gradient(circle,#C9BFA3 .7px,transparent .7px);backgroun
 .reader-btn:hover{border-color:var(--ink);color:var(--ink);}
 #reader-comment{border-color:var(--accent);color:var(--accent);}
 #reader-comment:hover{background:var(--accent);color:#fff;}
+/* S19 — the reading view is a clean, wide, view-only surface (the // outline
+   and inline anchored comments render inside the served doc iframe). The right
+   "// comments" rail was removed; the document now takes the full width. */
 .reader-main{flex:1;min-height:0;display:flex;}
 .reader-doc{flex:1;min-width:0;position:relative;background:#fff;}
 .reader-iframe{position:absolute;inset:0;width:100%;height:100%;border:none;}
-.reader-margin{flex:0 0 300px;max-width:34vw;border-left:1px solid var(--line);background:var(--bg);
-  overflow-y:auto;padding:16px 16px 40px;}
-.reader-margin-label{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;
-  color:var(--accent);margin-bottom:12px;}
-.reader-margin .note-card{cursor:default;}
-.reader-margin .note-card.anchored{cursor:pointer;border-left-color:var(--rust);}
-.reader-margin .note-card.anchored:hover{background:var(--deep);}
-.reader-margin-empty{font-family:var(--mono);font-size:11px;color:var(--mute);line-height:1.6;}
-.reader-margin-empty .note-add-link{font-family:var(--mono);font-size:11px;color:var(--accent);
-  background:none;border:none;border-bottom:1px dotted var(--accent);cursor:pointer;padding:0;}
-@media(max-width:820px){.reader-margin{flex-basis:220px;}}
 /* S18 — inline document editor. Edit is offered only for editable text docs
    (.reader.can-edit); save/cancel appear only while editing (.reader.editing),
    which hides the read-mode actions so the chrome never shows both. */
@@ -403,6 +395,13 @@ background-image:radial-gradient(circle,#C9BFA3 .7px,transparent .7px);backgroun
 #reader-save{border-color:var(--accent);color:#fff;background:var(--accent);}
 #reader-save:hover{background:var(--ink);border-color:var(--ink);}
 .reader-editor{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--bg);}
+/* S19 — line-number gutter mirrors the textarea. Font metrics (size, line-height,
+   top padding) MUST match the textarea so numbers line up with their rows. */
+.reader-editor .editor-body{flex:1;min-height:0;display:flex;}
+.reader-editor .editor-gutter{flex:0 0 auto;overflow:hidden;text-align:right;
+  padding:28px 10px 28px 16px;background:var(--alt);border-right:1px solid var(--line);
+  color:var(--mute);font-family:var(--mono);font-size:13px;line-height:1.7;
+  white-space:pre;user-select:none;pointer-events:none;}
 .reader-editor textarea{flex:1;min-height:0;width:100%;border:none;outline:none;resize:none;
   padding:28px 40px;background:var(--bg);color:var(--ink);
   font-family:var(--mono);font-size:13px;line-height:1.7;tab-size:2;}

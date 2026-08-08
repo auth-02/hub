@@ -55,12 +55,26 @@ def _inline(text: str) -> str:
 
 
 def _render_md(src: str) -> str:
-    """Convert a markdown string to an HTML fragment."""
+    """Convert a markdown string to an HTML fragment.
 
-    # Strip YAML frontmatter
-    src = re.sub(r"^---[ \t]*\n.*?\n---[ \t]*\n?", "", src, count=1, flags=re.DOTALL)
+    Every top-level block element (headings, paragraphs, list items, code
+    blocks, blockquotes) is annotated with a ``data-src-line="<n>"`` attribute
+    giving the 1-based source line where that block begins. The reading view's
+    per-line comment gutter and inline anchored-comment cards key off this
+    (see render/page.py::DOC_EMBED_SCRIPT); it is inert for everyone else.
+    """
 
-    # Protect fenced code blocks
+    # Strip YAML frontmatter — but remember how many source lines it occupied so
+    # every downstream data-src-line still points at the ORIGINAL source line.
+    fm_offset = 0
+    m_fm = re.match(r"^---[ \t]*\n.*?\n---[ \t]*\n?", src, flags=re.DOTALL)
+    if m_fm:
+        fm_offset = src[: m_fm.end()].count("\n")
+        src = src[m_fm.end():]
+
+    # Protect fenced code blocks. The placeholder keeps the SAME number of
+    # trailing newlines as the original fence so every later line keeps its
+    # index — line tracking survives multi-line code blocks.
     fences: list[str] = []
 
     def _fence(m: re.Match) -> str:
@@ -68,9 +82,13 @@ def _render_md(src: str) -> str:
         body = m.group(2).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         cls = f' class="language-{lang}"' if lang else ""
         fences.append(f"<pre><code{cls}>{body}</code></pre>")
-        return f"\x02{len(fences)-1}\x03"
+        return f"\x02{len(fences)-1}\x03" + "\n" * m.group(0).count("\n")
 
     src = re.sub(r"`{3,}(\w*)\n([\s\S]*?)`{3,}", _fence, src)
+
+    def _sl(idx: int) -> int:
+        """1-based ORIGINAL source line for line index ``idx``."""
+        return idx + fm_offset + 1
 
     lines = src.splitlines()
     N = len(lines)
@@ -83,7 +101,8 @@ def _render_md(src: str) -> str:
 
         # Fence placeholder
         if re.match(r"^\x02\d+\x03$", stripped):
-            out.append(fences[int(stripped[1:-1])])
+            fh = fences[int(stripped[1:-1])]
+            out.append(fh.replace("<pre>", f'<pre data-src-line="{_sl(i)}">', 1))
             i += 1
             continue
 
@@ -92,17 +111,19 @@ def _render_md(src: str) -> str:
             i += 1
             continue
 
+        sln = _sl(i)  # source line where this block begins
+
         # ATX heading
         m = re.match(r"^(#{1,6})\s+(.*?)(?:\s+#+\s*)?$", line)
         if m:
             lvl = len(m.group(1))
-            out.append(f"<h{lvl}>{_inline(m.group(2).strip())}</h{lvl}>")
+            out.append(f'<h{lvl} data-src-line="{sln}">{_inline(m.group(2).strip())}</h{lvl}>')
             i += 1
             continue
 
         # Horizontal rule (standalone ---, ***, ___)
         if re.match(r"^(\*[ \t]*){3,}$|^(-[ \t]*){3,}$|^(_[ \t]*){3,}$", stripped):
-            out.append("<hr>")
+            out.append(f'<hr data-src-line="{sln}">')
             i += 1
             continue
 
@@ -119,7 +140,7 @@ def _render_md(src: str) -> str:
             while bq and not bq[-1]:
                 bq.pop()
             inner = _render_md("\n".join(bq))
-            out.append(f"<blockquote>{inner}</blockquote>")
+            out.append(f'<blockquote data-src-line="{sln}">{inner}</blockquote>')
             continue
 
         # Unordered list
@@ -127,9 +148,9 @@ def _render_md(src: str) -> str:
             items: list[str] = []
             while i < N and re.match(r"^[ \t]*[-*+][ \t]+", lines[i]):
                 content = re.sub(r"^[ \t]*[-*+][ \t]+", "", lines[i])
-                items.append(f"<li>{_inline(content)}</li>")
+                items.append(f'<li data-src-line="{_sl(i)}">{_inline(content)}</li>')
                 i += 1
-            out.append("<ul>\n" + "\n".join(items) + "\n</ul>")
+            out.append(f'<ul data-src-line="{sln}">\n' + "\n".join(items) + "\n</ul>")
             continue
 
         # Ordered list
@@ -137,9 +158,9 @@ def _render_md(src: str) -> str:
             items = []
             while i < N and re.match(r"^[ \t]*\d+\.[ \t]+", lines[i]):
                 content = re.sub(r"^[ \t]*\d+\.[ \t]+", "", lines[i])
-                items.append(f"<li>{_inline(content)}</li>")
+                items.append(f'<li data-src-line="{_sl(i)}">{_inline(content)}</li>')
                 i += 1
-            out.append("<ol>\n" + "\n".join(items) + "\n</ol>")
+            out.append(f'<ol data-src-line="{sln}">\n' + "\n".join(items) + "\n</ol>")
             continue
 
         # Table (header | separator row)
@@ -164,7 +185,7 @@ def _render_md(src: str) -> str:
                 ) + "</tr>"
                 for row in rows
             )
-            out.append(f"<table><thead><tr>{ths}</tr></thead><tbody>{trs}</tbody></table>")
+            out.append(f'<table data-src-line="{sln}"><thead><tr>{ths}</tr></thead><tbody>{trs}</tbody></table>')
             continue
 
         # Paragraph — collect until a block-level boundary
@@ -184,14 +205,14 @@ def _render_md(src: str) -> str:
 
             # Setext h1
             if i + 1 < N and re.match(r"^=+[ \t]*$", lines[i + 1]):
-                out.append(f"<h1>{_inline(ls)}</h1>")
+                out.append(f'<h1 data-src-line="{_sl(i)}">{_inline(ls)}</h1>')
                 i += 2
                 para = None
                 break
 
             # Setext h2
             if i + 1 < N and re.match(r"^-+[ \t]*$", lines[i + 1]):
-                out.append(f"<h2>{_inline(ls)}</h2>")
+                out.append(f'<h2 data-src-line="{_sl(i)}">{_inline(ls)}</h2>')
                 i += 2
                 para = None
                 break
@@ -201,7 +222,7 @@ def _render_md(src: str) -> str:
             i += 1
 
         if para:
-            out.append(f"<p>{_inline(' '.join(para))}</p>")
+            out.append(f'<p data-src-line="{sln}">{_inline(" ".join(para))}</p>')
 
     result = "\n".join(out)
     for idx, fence in enumerate(fences):
@@ -223,7 +244,8 @@ def _add_outline(body_html: str) -> tuple[str, str]:
 
     def _inject(m: re.Match) -> str:
         level = int(m.group(1))
-        inner = m.group(2)
+        attrs = m.group(2)  # preserve any existing attrs (e.g. data-src-line)
+        inner = m.group(3)
         plain = re.sub(r"<[^>]+>", "", inner).strip()
         slug = slugify(plain) or "section"
         if slug in seen:
@@ -232,9 +254,9 @@ def _add_outline(body_html: str) -> tuple[str, str]:
         else:
             seen[slug] = 1
         headings.append((level, plain, slug))
-        return f'<h{level} id="{slug}">{inner}</h{level}>'
+        return f'<h{level}{attrs} id="{slug}">{inner}</h{level}>'
 
-    body_html = re.sub(r"<h([1-3])>(.*?)</h\1>", _inject, body_html, flags=re.DOTALL)
+    body_html = re.sub(r"<h([1-3])((?:\s[^>]*)?)>(.*?)</h\1>", _inject, body_html, flags=re.DOTALL)
 
     if len(headings) < 2:
         return body_html, ""
