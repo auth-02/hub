@@ -283,7 +283,15 @@ class TestAssetPublishedBaked(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             page = out.read_text(encoding="utf-8")
             self.assertIn(url, page)                        # asset URL baked
-            self.assertIn(str(asset.resolve()), page)       # under its asset key
+            # S20 fix: the entry is baked under the FILES-INDEX abs (unresolved
+            # str(path) — what the row uses for data-abs), so publishedForFile()
+            # hits. Under a symlinked temp root this differs from the resolved abs
+            # record_published_asset stored under; the resolved form must NOT be
+            # the baked key (else the marker would never render).
+            self.assertIn(f'data-abs="{asset}"', page)      # row abs (unresolved)
+            self.assertIn(f'asset\\t{asset}"', page)         # PUBLISHED_DATA keyed to match
+            if str(asset) != str(asset.resolve()):
+                self.assertNotIn(f'asset\\t{asset.resolve()}"', page)
         finally:
             import shutil
             shutil.rmtree(root, ignore_errors=True)

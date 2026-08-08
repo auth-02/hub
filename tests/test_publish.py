@@ -187,5 +187,128 @@ class TestIsPrivate(unittest.TestCase):
         self.assertFalse(config.is_private({"private": "no"}))
 
 
+# ── single-file published-state under a symlinked scan root (S20 regression) ──
+# The files index stores each abs UNRESOLVED (scan._meta: str(path)); the UI's
+# data-abs and PUBLISHED_DATA["asset\t"+abs] lookup use that exact string. But
+# record_published_asset stores the RESOLVED abs. Under a symlinked root the two
+# differ, so before the fix the baked PUBLISHED_DATA key never matched any row's
+# data-abs → no PUBLISHED marker. These pin the realpath reconciliation.
+
+class TestAssetKeyRealpath(unittest.TestCase):
+    def test_find_asset_key_matches_across_symlink(self):
+        base = tempfile.mkdtemp()
+        try:
+            real = Path(base) / "realroot"; real.mkdir()
+            link = Path(base) / "linkroot"; os.symlink(real, link)
+            (real / "report.md").write_text("hi\n", encoding="utf-8")
+            resolved = str((real / "report.md"))
+            unresolved = str(link / "report.md")
+            self.assertNotEqual(resolved, unresolved)  # symlink really differs
+            data = {f"asset\t{resolved}": {"url": "u"}}
+            # lookup by the UNRESOLVED (files-index) abs still finds the entry
+            self.assertEqual(publish.find_asset_key(data, unresolved),
+                             f"asset\t{resolved}")
+            self.assertIsNone(publish.find_asset_key(data, str(link / "other.md")))
+        finally:
+            import shutil; shutil.rmtree(base, ignore_errors=True)
+
+    def test_realign_rekeys_to_unresolved_files_index_abs(self):
+        base = tempfile.mkdtemp()
+        try:
+            real = Path(base) / "realroot"; real.mkdir()
+            link = Path(base) / "linkroot"; os.symlink(real, link)
+            (real / "report.md").write_text("hi\n", encoding="utf-8")
+            resolved = str(real / "report.md")
+            unresolved = str(link / "report.md")   # what scan._meta would record
+            data = {
+                f"asset\t{resolved}": {"url": "u"},
+                "myrepo\tmy-task": {"url": "t"},           # task key: untouched
+                "asset\t/gone/missing.md": {"url": "x"},   # no such file: untouched
+            }
+            out = publish.realign_asset_keys(data, [unresolved])
+            self.assertIn(f"asset\t{unresolved}", out)          # re-keyed to UI abs
+            self.assertNotIn(f"asset\t{resolved}", out)
+            self.assertEqual(out[f"asset\t{unresolved}"]["url"], "u")
+            self.assertIn("myrepo\tmy-task", out)               # passthrough
+            self.assertIn("asset\t/gone/missing.md", out)       # passthrough
+        finally:
+            import shutil; shutil.rmtree(base, ignore_errors=True)
+
+    def test_revoke_matches_across_symlink(self):
+        base = tempfile.mkdtemp()
+        try:
+            real = Path(base) / "realroot"; real.mkdir()
+            link = Path(base) / "linkroot"; os.symlink(real, link)
+            (real / "report.md").write_text("hi\n", encoding="utf-8")
+            import json as _json
+            sidecar = Path(base) / "published.json"
+            # Stored under the UNRESOLVED abs (the files-index form)…
+            unresolved = str(link / "report.md")
+            resolved = os.path.realpath(unresolved)
+            self.assertNotEqual(unresolved, resolved)  # symlink really differs
+            sidecar.write_text(_json.dumps({f"asset\t{unresolved}": {"url": "u"}}),
+                               encoding="utf-8")
+            # …revoke by the RESOLVED abs (server form) still removes it.
+            self.assertTrue(
+                publish.revoke_published_asset(resolved, sidecar=sidecar))
+            self.assertEqual(publish.load_published(sidecar), {})
+        finally:
+            import shutil; shutil.rmtree(base, ignore_errors=True)
+
+
+class TestBakedPublishedStateSymlinkedRoot(unittest.TestCase):
+    """End-to-end: build the real index under a symlinked scan root and assert
+    the baked PUBLISHED_DATA carries a key under the SAME abs string a file row
+    uses for data-abs — so publishedForFile(dataAbs) would hit."""
+
+    def test_marker_key_matches_row_data_abs(self):
+        import json as _json
+        import re as _re
+        import shutil
+        import subprocess
+        base = tempfile.mkdtemp()
+        try:
+            real = Path(base) / "realroot"; real.mkdir()
+            link = Path(base) / "linkroot"; os.symlink(real, link)
+            state = Path(base) / "state" / "hub"; state.mkdir(parents=True)
+            (real / "report.md").write_text("# Report\nhello\n", encoding="utf-8")
+
+            # Record via the helper the SAME way /_publish does — it resolve()s,
+            # so the stored key is the /private/... (resolved) abs.
+            sidecar = state / "published.json"
+            walked_abs = str(link / "report.md")   # how os.walk yields it under the root
+            publish.record_published_asset(walked_abs, "https://x.example/r",
+                                           sidecar=sidecar)
+            stored = _json.loads(sidecar.read_text())
+            self.assertIn(f"asset\t{os.path.realpath(walked_abs)}", stored)
+
+            out_html = Path(base) / "docs-index.html"
+            repo_root = os.path.dirname(os.path.dirname(__file__))
+            env = {
+                **os.environ,
+                "PYTHONPATH": repo_root,
+                "XDG_STATE_HOME": str(Path(base) / "state"),
+                "HUB_SCAN_ROOT": str(link),
+                "HUB_OUTPUT": str(out_html),
+                "HUB_DB": str(Path(base) / "hub.db"),
+            }
+            r = subprocess.run(
+                [sys.executable, "-m", "hubspace.cli.hub"],
+                env=env, cwd=base, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+            html = out_html.read_text(encoding="utf-8")
+            m = _re.search(r"const PUBLISHED_DATA=(\{.*?\});", html)
+            self.assertIsNotNone(m, "PUBLISHED_DATA not found in baked index")
+            pub = _json.loads(m.group(1))
+            # The key the UI computes from a row's data-abs (unresolved) hits.
+            self.assertIn(f"asset\t{walked_abs}", pub,
+                          "PUBLISHED_DATA missing the files-index abs key")
+            self.assertEqual(pub[f"asset\t{walked_abs}"]["url"],
+                             "https://x.example/r")
+        finally:
+            shutil.rmtree(base, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main()

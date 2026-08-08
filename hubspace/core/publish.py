@@ -193,8 +193,67 @@ def record_published(repo: str | None, slug: str, url: str,
 
 
 def published_asset_key(path) -> str:
-    """Stable sidecar key for a single published asset (``asset\\t<abspath>``)."""
+    """Stable sidecar key for a single published asset (``asset\\t<abspath>``).
+
+    The stored key uses the ``resolve()``d (canonical, symlink-free) abs so a
+    record is stable no matter which alias of a symlinked path the caller passed.
+    Lookups reconcile this canonical form with the files-index UNRESOLVED abs via
+    :func:`find_asset_key` / :func:`realign_asset_keys` — see the note there.
+    """
     return f"asset\t{_Path(path).resolve()}"
+
+
+import os as _os
+
+_ASSET_PREFIX = "asset\t"
+
+
+def find_asset_key(data: dict, path) -> str | None:
+    """Return the ``asset\\t<abs>`` key in `data` that names the SAME file as
+    `path`, comparing by ``os.path.realpath`` so a symlinked scan root does not
+    hide the entry.
+
+    The files index stores each file's abs UNRESOLVED (``scan._meta`` → ``str(path)``)
+    while :func:`record_published_asset` stores the RESOLVED abs; under a symlinked
+    root (e.g. macOS ``/var`` → ``/private/var``) those strings differ. Matching by
+    realpath makes a lookup with EITHER form find the entry. Returns ``None`` when
+    no asset entry names the same file."""
+    exact = published_asset_key(path)
+    if exact in data:
+        return exact
+    target = _os.path.realpath(str(path))
+    for key in data:
+        if key.startswith(_ASSET_PREFIX) and \
+                _os.path.realpath(key[len(_ASSET_PREFIX):]) == target:
+            return key
+    return None
+
+
+def realign_asset_keys(data: dict, file_abs_iter) -> dict:
+    """Return a copy of `data` with every ``asset\\t<abs>`` entry re-keyed to the
+    abs form used by the files index, matched by realpath.
+
+    Called at bake time. `file_abs_iter` is the discovered files' abs strings
+    (``scan._meta``'s UNRESOLVED ``str(path)``) — the exact value the UI bakes as
+    each row's ``data-abs`` and passes to ``publishedForFile()``. Asset entries are
+    stored under the RESOLVED abs; under a symlinked scan root the two differ, so
+    without this the ``PUBLISHED_DATA`` lookup would miss and no marker would show.
+    Here each asset entry is matched to a discovered file by realpath equivalence
+    and re-emitted under that file's unresolved abs. Task keys and asset entries
+    with no matching discovered file are passed through unchanged."""
+    by_real: dict[str, str] = {}
+    for abs_ in file_abs_iter:
+        if abs_:
+            by_real[_os.path.realpath(str(abs_))] = str(abs_)
+    out: dict = {}
+    for key, val in data.items():
+        if key.startswith(_ASSET_PREFIX):
+            ui_abs = by_real.get(_os.path.realpath(key[len(_ASSET_PREFIX):]))
+            if ui_abs is not None:
+                out[f"{_ASSET_PREFIX}{ui_abs}"] = val
+                continue
+        out[key] = val
+    return out
 
 
 def record_published_asset(path, url: str, mode: str = "snapshot",
@@ -243,8 +302,10 @@ def revoke_published_asset(asset_path, sidecar=None) -> bool:
     """
     p = _Path(sidecar) if sidecar else published_path()
     data = load_published(p)
-    key = published_asset_key(asset_path)
-    if key not in data:
+    # Match by realpath so a revoke by the unresolved (files-index) abs still
+    # finds an entry stored under the resolved abs, and vice versa.
+    key = find_asset_key(data, asset_path)
+    if key is None:
         return False
     del data[key]
     p.parent.mkdir(parents=True, exist_ok=True)

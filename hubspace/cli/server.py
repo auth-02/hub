@@ -1480,13 +1480,16 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
     def _published_url(path: Path) -> str:
         """The live published URL recorded for ``path``, or "" if unpublished.
 
-        Reads the already-written ``published.json`` sidecar keyed by the asset's
-        resolved path — the same key /_publish records under. Best-effort; any
-        read/parse failure yields "" so doc pages always render."""
+        Reads the already-written ``published.json`` sidecar, matching the asset
+        entry by realpath (via publish.find_asset_key) so a lookup by the
+        unresolved path still finds a record stored under the resolved abs under a
+        symlinked scan root. Best-effort; any read/parse failure yields "" so doc
+        pages always render."""
         try:
             from ..core import publish as _publish
-            entry = _publish.load_published().get(
-                _publish.published_asset_key(path.resolve()))
+            data = _publish.load_published()
+            key = _publish.find_asset_key(data, path)
+            entry = data.get(key) if key else None
             return (entry or {}).get("url", "") or ""
         except Exception:
             return ""

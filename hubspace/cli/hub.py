@@ -938,7 +938,13 @@ def main() -> None:
     # 1g — bake the published-state sidecar so a published task row can show a
     # PUBLISHED marker (URL + republish/revoke). Read-only; a missing file → {}.
     from ..core import publish as _publish
-    published_json = json.dumps(_publish.load_published(), separators=(",", ":"))
+    # Re-key single-file asset entries to the files-index abs form (unresolved,
+    # what each row bakes as data-abs) so the UI's PUBLISHED_DATA lookup hits even
+    # when the scan root is symlinked (e.g. /var → /private/var). See
+    # publish.realign_asset_keys.
+    _all_abs = [f["abs"] for files in groups.values() for f in files if f.get("abs")]
+    _pub_data = _publish.realign_asset_keys(_publish.load_published(), _all_abs)
+    published_json = json.dumps(_pub_data, separators=(",", ":"))
 
     # S6 (2a) — bake per-artifact provenance so the UI can show an "ask again"
     # affordance (copy-only) on agent-generated artifacts. Read straight from
