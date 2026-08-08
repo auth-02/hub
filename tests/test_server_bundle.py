@@ -134,13 +134,15 @@ class TestBundleEndpoints(unittest.TestCase):
         shutil.rmtree(cls._state, ignore_errors=True)
 
     def test_bundle_writes_under_state_and_runs_dak(self):
+        # A REAL (mocked) bundle publish — dryRun omitted → dryRun:false and
+        # published-state recorded. The mock stands in for dak (no network).
         fake = _fake_dak()
         with patch.object(server.subprocess, "run", fake):
             status, d = _post(self._port, "/_publish-bundle",
-                              {"slug": "auth-refactor", "repo": "cortex",
-                               "dryRun": True})
+                              {"slug": "auth-refactor", "repo": "cortex"})
         self.assertEqual(status, 200)
         self.assertTrue(d["ok"])
+        self.assertFalse(d["dryRun"])
         self.assertEqual(d["url"], _BUNDLE_URL)
         # dak was spawned with the produced bundle path
         dak_cmd = next(c for c in fake.calls if any("dak.py" in str(x) for x in c))
@@ -158,6 +160,23 @@ class TestBundleEndpoints(unittest.TestCase):
         self.assertNotIn("localhost", html)     # self-contained
         # written under state, NOT the scan root
         self.assertFalse((Path(self._scan_root) / "publish").exists())
+
+    def test_bundle_dry_run_reports_flag_and_skips_record(self):
+        # S14 / #3 — a dry-run bundle carries dryRun:true and does NOT record
+        # published-state (the URL never uploaded, so no live row marker).
+        _publish.revoke_published("cortex", "auth-refactor")
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish-bundle",
+                              {"slug": "auth-refactor", "repo": "cortex",
+                               "dryRun": True})
+        self.assertEqual(status, 200)
+        self.assertTrue(d["ok"])
+        self.assertTrue(d["dryRun"])
+        dak_cmd = next(c for c in fake.calls if any("dak.py" in str(x) for x in c))
+        self.assertIn("--dry-run", dak_cmd)
+        pub = _publish.load_published(Path(self._state) / "published.json")
+        self.assertNotIn(_publish.published_key("cortex", "auth-refactor"), pub)
 
     def test_bundle_unknown_task_404(self):
         status, d = _post(self._port, "/_publish-bundle", {"slug": "nope"})

@@ -530,6 +530,10 @@ background-image:radial-gradient(circle,#C9BFA3 .6px,transparent .6px);backgroun
 .pal-pub-url:hover{color:var(--ink);}
 .pal-pub-copy{flex-shrink:0;font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--mute);background:none;border:1px solid var(--line);padding:3px 7px;cursor:pointer;}
 .pal-pub-copy:hover{color:var(--ink);border-color:var(--accent);}
+/* S14 / #3 — dry-run result: a preview, never a live "published" link. */
+.pal-pub-result:has(.pal-pub-live.dry){border-left-color:var(--accent);}
+.pal-pub-live.dry{color:var(--accent);}
+.pal-pub-url.dry{color:var(--mute);text-decoration:none;}
 
 /* help panel */
 .pal-help{position:fixed;inset:0;background:rgba(26,26,26,.5);display:none;align-items:center;justify-content:center;z-index:95;}

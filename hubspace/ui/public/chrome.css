@@ -9,6 +9,17 @@
 .doc-menu-item:last-child{border-bottom:none;}
 .doc-menu-item:hover{background:var(--accent);color:#fff;}
 .doc-menu .pencil{display:inline-block;transform:rotate(125deg);}
+/* S14 / #3 — honest publish result line for the doc-page ⋯ Publish item. A dry
+   run is clearly a preview (never a live "published" link). */
+.doc-pub-result{position:fixed;top:60px;right:18px;z-index:41;max-width:min(420px,80vw);font-family:var(--mono);font-size:11px;line-height:1.5;background:var(--bg);border:1px solid var(--line);box-shadow:0 12px 30px rgba(0,0,0,.18);padding:9px 12px;display:flex;flex-direction:column;gap:5px;word-break:break-all;}
+.doc-pub-result .dpr-tag{font-size:9px;letter-spacing:.12em;text-transform:uppercase;}
+.doc-pub-result .dpr-tag.ok{color:var(--accent2);}
+.doc-pub-result .dpr-tag.dry{color:var(--accent);}
+.doc-pub-result .dpr-tag.err{color:#c0392b;}
+.doc-pub-result.dry{border-color:var(--accent);}
+.doc-pub-result.err{border-color:#c0392b;}
+.doc-pub-result .dpr-url{color:var(--accent);}
+.doc-pub-result .dpr-preview,.doc-pub-result .dpr-detail{color:var(--mute);}
 /* S6 (2a) — provenance line for agent-generated artifacts (/changelog skill).
    Hub reads who/when/what-range from the file's own front matter; it does not
    generate the file. */

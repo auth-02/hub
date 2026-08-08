@@ -146,6 +146,38 @@ class TestInjectIntoHtml(unittest.TestCase):
         self.assertIn("doc-menu", result)
         self.assertIn("window.print()", result)
 
+    def test_publish_item_injected_with_path(self):
+        # S14 / #5 — an HTML doc served with a pub_path gets the ↗ Publish menu
+        # item (path baked in) + the tiny publisher script.
+        src = "<html><head></head><body><h1>Doc</h1></body></html>"
+        result = render._inject_into_html(src, "", pub_path="docs/spec.html")
+        self.assertIn("↗ Publish", result)
+        self.assertIn('data-pub-path="docs/spec.html"', result)
+        self.assertIn("hubPublish", result)
+        self.assertIn("/_publish", result)
+
+    def test_no_publish_item_without_path(self):
+        # No pub_path → the plain print-only menu, no publish affordance.
+        src = "<html><head></head><body></body></html>"
+        result = render._inject_into_html(src, "")
+        self.assertNotIn("↗ Publish", result)
+        self.assertNotIn("hubPublish", result)
+
+
+class TestDocPublishItem(unittest.TestCase):
+    def test_item_bakes_path_and_targets_publish(self):
+        from hubspace.render import doc_publish_item
+        item = doc_publish_item("tasks/x/manifest.md")
+        self.assertIn('data-pub-path="tasks/x/manifest.md"', item)
+        self.assertIn("hubPublish(this)", item)
+        self.assertIn("↗ Publish", item)
+
+    def test_item_escapes_attribute(self):
+        from hubspace.render import doc_publish_item
+        item = doc_publish_item('a"b.md')
+        self.assertNotIn('a"b.md"', item)      # raw quote would break the attr
+        self.assertIn("&quot;", item)
+
 
 class TestRenderMd(unittest.TestCase):
     def test_heading(self):

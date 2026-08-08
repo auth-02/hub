@@ -219,7 +219,7 @@ rows.forEach(r=>r.addEventListener('click',e=>{
 
 document.getElementById('pv-close').addEventListener('click',closePreview);
 
-// Modest preview affordance: comment on the previewed file (opens the composer).
+// Modest preview affordances: comment on, or publish, the previewed file.
 (function(){
   const acts=document.querySelector('#preview .pv-actions');
   if(!acts) return;
@@ -231,6 +231,17 @@ document.getElementById('pv-close').addEventListener('click',closePreview);
     if(window._openComposer)window._openComposer(ctx);
   });
   acts.insertBefore(b,document.getElementById('pv-close'));
+  // S14 / #6 — publish ANY previewed doc (not just task artifacts). Opens the
+  // safe scan→review→publish sheet prefilled to this file; the sheet shows the
+  // honest published / dry-run / error state.
+  const p=document.createElement('button');
+  p.className='pv-btn';p.id='pv-publish';p.type='button';
+  p.title='publish this file to a shareable URL';p.textContent='↗';
+  p.addEventListener('click',()=>{
+    if(!_openPreviewAbs){flash('nothing to publish');return;}
+    if(window._openPublish)window._openPublish({abs:_openPreviewAbs});
+  });
+  acts.insertBefore(p,document.getElementById('pv-close'));
 })();
 
 // ── Floating windows ──────────────────────────────────────────────────────
@@ -255,9 +266,14 @@ function openFloat(abs,title,href){
   ttl.className='float-title';ttl.textContent=title||abs;ttl.title=abs;
   const open=document.createElement('a');
   open.className='float-ctl';open.href=href;open.target='_blank';open.rel='noopener';open.textContent='⤤ open';
+  // S14 / #6 — publish this floating doc via the safe scan→review→publish sheet.
+  const pub=document.createElement('button');
+  pub.className='float-ctl';pub.type='button';pub.textContent='↗ pub';
+  pub.title='publish this file to a shareable URL';
+  pub.addEventListener('click',e=>{e.stopPropagation();if(window._openPublish)window._openPublish({abs:abs});});
   const close=document.createElement('button');
   close.className='float-ctl';close.type='button';close.textContent='✕';
-  head.appendChild(ttl);head.appendChild(open);head.appendChild(close);
+  head.appendChild(ttl);head.appendChild(open);head.appendChild(pub);head.appendChild(close);
   const body=document.createElement('div');
   body.className='float-body';
   const ifr=document.createElement('iframe');
@@ -2095,9 +2111,16 @@ document.getElementById('rebuild').addEventListener('click',e=>{
   // S11 — render the published URL inline in the sheet: a clickable mono link
   // plus a small "copy URL" affordance. This replaces the old "copy this dak
   // command / run it yourself" step — publishing is now one click.
-  function pubShowResult(url){
+  function pubShowResult(url,dryRun){
     const el=document.getElementById('pal-pub-result');if(!el)return;
     el.classList.remove('hidden');
+    // S14 / #3 — never present a dry-run URL as a live "published" link. A dry
+    // run staged a URL but uploaded nothing, so it is NOT live.
+    if(dryRun){
+      el.innerHTML='<span class="pal-pub-live dry">dry-run — not uploaded (URL not live)</span>'+
+        '<span class="pal-pub-url dry">preview: '+esc(url)+'</span>';
+      return;
+    }
     el.innerHTML='<span class="pal-pub-live">✓ published</span>'+
       '<a class="pal-pub-url" href="'+esc(url)+'" target="_blank" rel="noopener">'+esc(url)+'</a>'+
       '<button class="pal-pub-copy" type="button" title="copy URL">copy</button>';
@@ -2118,8 +2141,8 @@ document.getElementById('rebuild').addEventListener('click',e=>{
         pubGoBtn.disabled=false;pubGoBtn.textContent='Publish';
         const d=res.d||{};
         if(res.ok&&d.url){
-          pubShowResult(d.url);
-          flash('published · '+d.url);
+          pubShowResult(d.url,d.dryRun);
+          flash(d.dryRun?('dry-run — not uploaded · '+d.url):('published · '+d.url));
           return;
         }
         const detail=d.detail?(': '+String(d.detail).split('\n').slice(-1)[0]):'';
@@ -2159,6 +2182,9 @@ document.getElementById('rebuild').addEventListener('click',e=>{
         if(res.ok&&d.url){
           const n=(d.findings||[]).length;
           const red=n?(' · '+n+' finding'+(n!==1?'s':'')+' redacted'):'';
+          // S14 / #3 — a dry-run uploaded nothing; don't claim "published" and
+          // don't reload (the server recorded no published-state for it).
+          if(d.dryRun){flash('dry-run — not uploaded (URL not live): '+d.url+red);return;}
           copy(d.url,'published · '+d.url+red);
           // Server recorded published-state + rebuilt; reload so the row's
           // PUBLISHED marker (republish/revoke) shows (matches revoke flow).

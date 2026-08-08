@@ -49,6 +49,64 @@ DOC_PDF_ITEM = (
 )
 
 
+def _esc_attr(s: str) -> str:
+    return (s.replace("&", "&amp;").replace('"', "&quot;")
+             .replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def doc_publish_item(pub_path: str) -> str:
+    """A ⋯ menu item that publishes THIS doc via POST /_publish (S14 / #5).
+
+    ``pub_path`` (scan-root-relative or absolute) is baked into the button so
+    the tiny inline :data:`DOC_PUBLISH_SCRIPT` targets the right file. Present
+    on every publishable doc page (.md/.html); it hands off to dak server-side
+    and shows the honest published / dry-run / error state inline."""
+    return (
+        '<button class="doc-menu-item" onclick="hubPublish(this)" '
+        f'data-pub-path="{_esc_attr(pub_path)}" '
+        'title="Publish this doc to a shareable URL">↗ Publish</button>'
+    )
+
+
+# Tiny self-contained publisher for doc pages (no SPA). Scans server-side first
+# (so any secrets are redacted before the file leaves the machine, mirroring the
+# SPA's redact-everything default), then POSTs /_publish and renders an HONEST
+# result line (#3): a live link only on a real publish, a clearly-marked preview
+# on a dry-run (never shown as "published"), and dak's error detail on failure.
+DOC_PUBLISH_SCRIPT = """
+<script>
+(function(){
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function show(html,cls){var el=document.getElementById('doc-pub-result');
+if(!el){el=document.createElement('div');el.id='doc-pub-result';document.body.appendChild(el);}
+el.className='doc-pub-result '+(cls||'');el.innerHTML=html;}
+window.hubPublish=function(btn){
+var path=btn.getAttribute('data-pub-path');
+btn.disabled=true;btn.textContent='publishing\\u2026';show('publishing\\u2026','');
+fetch('/_publish-scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path})})
+.then(function(r){return r.json();}).catch(function(){return {};})
+.then(function(sc){var f=(sc&&sc.findings)||[];var idx=f.map(function(_x,i){return i;});
+return fetch('/_publish',{method:'POST',headers:{'Content-Type':'application/json'},
+body:JSON.stringify({path:path,redact_indices:idx,review:true})})
+.then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});});})
+.then(function(res){btn.disabled=false;btn.textContent='\\u2197 Publish';
+var d=(res&&res.d)||{};
+if(res&&res.ok&&d.url){
+if(d.dryRun){show('<span class="dpr-tag dry">dry-run \\u2014 not uploaded (URL not live)</span>'+
+'<span class="dpr-preview">preview: '+esc(d.url)+'</span>','dry');}
+else{show('<span class="dpr-tag ok">\\u2713 published</span>'+
+'<a class="dpr-url" href="'+esc(d.url)+'" target="_blank" rel="noopener">'+esc(d.url)+'</a>','ok');}
+}else{var det=d.detail?String(d.detail).split('\\n').slice(-1)[0]
+:(d.error==='dak_unavailable'?'dak not configured \\u2014 run its setup':(d.error||'publish failed'));
+show('<span class="dpr-tag err">publish failed</span><span class="dpr-detail">'+esc(det)+'</span>','err');}
+}).catch(function(){btn.disabled=false;btn.textContent='\\u2197 Publish';
+show('<span class="dpr-tag err">publish failed</span>','err');});
+};
+})();
+</script>
+"""
+
+
 def doc_menu(items: list) -> str:
     """A floating ⋯ dropdown of document actions (fixed top-right).
 
@@ -101,15 +159,25 @@ def render_provenance(prov: dict | None) -> str:
     )
 
 
-def _inject_into_html(src: str, lineage_html: str, favicon: str = "", provenance_html: str = "") -> str:
+def _inject_into_html(src: str, lineage_html: str, favicon: str = "",
+                      provenance_html: str = "", pub_path: str = "") -> str:
     """Inject backlinks CSS + HTML into an existing HTML document."""
     src, outline_html = _add_outline(src)
     head_inject = f"<style>{_BACKLINKS_CSS}{_DOC_CHROME_CSS}</style>"
     if favicon:
         head_inject = f'<link rel="icon" type="image/svg+xml" href="{favicon}">' + head_inject
     src = re.sub(r"</head>", head_inject + "</head>", src, count=1, flags=re.IGNORECASE)
-    # Print button goes right after <body> so it floats over the doc.
-    src = re.sub(r"<body[^>]*>", lambda mo: mo.group(0) + _DOC_PRINT_BTN, src, count=1, flags=re.IGNORECASE)
+    # ⋯ menu (Publish + Save as PDF) goes right after <body> so it floats over
+    # the doc; the tiny publisher script goes at end-of-body.
+    menu = doc_menu([doc_publish_item(pub_path), DOC_PDF_ITEM]) if pub_path else _DOC_PRINT_BTN
+    src = re.sub(r"<body[^>]*>", lambda mo: mo.group(0) + menu, src, count=1, flags=re.IGNORECASE)
+    if pub_path:
+        # lambda replacement so \u escapes in the script aren't re-interpreted.
+        if re.search(r"</body>", src, re.IGNORECASE):
+            src = re.sub(r"</body>", lambda _mo: DOC_PUBLISH_SCRIPT + "</body>",
+                         src, count=1, flags=re.IGNORECASE)
+        else:
+            src += DOC_PUBLISH_SCRIPT
     if outline_html:
         src = re.sub(r"<body[^>]*>", lambda mo: mo.group(0) + outline_html, src, count=1, flags=re.IGNORECASE)
     inject_html = lineage_html + provenance_html

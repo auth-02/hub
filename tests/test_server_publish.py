@@ -133,13 +133,16 @@ class TestPublishEndpoints(unittest.TestCase):
         self.assertEqual(status, 400)
 
     def test_publish_runs_dak_and_returns_url(self):
+        # A REAL (mocked) publish — dryRun omitted → dryRun:false, published-state
+        # recorded. The mock stands in for dak so nothing hits the network.
         fake = _fake_dak()
         with patch.object(server.subprocess, "run", fake):
             status, d = _post(self._port, "/_publish",
                               {"path": "report.md", "redact_indices": [0, 1],
-                               "title": "My Report", "dryRun": True})
+                               "title": "My Report"})
         self.assertEqual(status, 200)
         self.assertTrue(d["ok"])
+        self.assertFalse(d["dryRun"])
         self.assertEqual(d["url"], _FAKE_URL)
         # dak was invoked with the produced (redacted) copy path + the title
         dak_cmd = next(c for c in fake.calls if any("dak.py" in str(x) for x in c))
@@ -190,6 +193,55 @@ class TestPublishEndpoints(unittest.TestCase):
             status, d = _post(self._port, "/_publish", {"path": "report.md"})
         self.assertEqual(status, 403)
         self.assertEqual(d.get("error"), "private")
+
+    def test_publish_dry_run_body_flag(self):
+        # S14 / #3 — body dryRun:true → response carries dryRun:true (honest;
+        # dak invoked with --dry-run, nothing uploaded).
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish",
+                              {"path": "report.md", "review": True, "dryRun": True})
+        self.assertEqual(status, 200)
+        self.assertTrue(d["ok"])
+        self.assertTrue(d["dryRun"])
+        dak_cmd = next(c for c in fake.calls if any("dak.py" in str(x) for x in c))
+        self.assertIn("--dry-run", dak_cmd)
+
+    def test_publish_dry_run_env_var(self):
+        # HUB_PUBLISH_DRYRUN=1 forces dryRun even without the body flag.
+        fake = _fake_dak()
+        with patch.dict(os.environ, {"HUB_PUBLISH_DRYRUN": "1"}), \
+             patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish",
+                              {"path": "report.md", "review": True})
+        self.assertEqual(status, 200)
+        self.assertTrue(d["dryRun"])
+
+    def test_publish_non_dry_run_reports_false(self):
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish",
+                              {"path": "report.md", "review": True})
+        self.assertEqual(status, 200)
+        self.assertFalse(d["dryRun"])
+
+    def test_publish_non_artifact_doc(self):
+        # S14 / #6 — a plain doc that is NOT a task artifact publishes fine; the
+        # endpoint is path-based (+ containment-guarded), not task-scoped.
+        docs = Path(self._scan_root) / "docs"
+        docs.mkdir(exist_ok=True)
+        doc = docs / "guide.md"
+        doc.write_text("# Guide\nnothing secret here\n", encoding="utf-8")
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish",
+                              {"path": "docs/guide.md", "review": True})
+        self.assertEqual(status, 200)
+        self.assertTrue(d["ok"])
+        self.assertEqual(d["url"], _FAKE_URL)
+        self.assertIn("dryRun", d)
+        # dak received a path (no task-only rejection anywhere)
+        self.assertTrue(any(any("dak.py" in str(x) for x in c) for c in fake.calls))
 
 
 if __name__ == "__main__":

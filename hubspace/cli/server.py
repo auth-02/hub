@@ -38,6 +38,7 @@ from ..render import (
     _render_md, _render_csv, _render_xlsx, _inject_into_html,
     _render_lineage_html, _favicon_href, _CSS, _DOC_CHROME_CSS, _PAGE, _add_outline,
     draw_page_html, doc_menu, DOC_PDF_ITEM, render_provenance,
+    doc_publish_item, DOC_PUBLISH_SCRIPT,
 )
 from ..core import metadata as _metadata
 
@@ -207,7 +208,8 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             links = _get_lineage(str(fs_path.resolve()))
             lineage_html = _render_lineage_html(links, self.__class__.server_port) if links else ""
             provenance_html = render_provenance(_metadata.extract_provenance(src))
-            src = _inject_into_html(src, lineage_html, _favicon_href(self.__class__.server_port), provenance_html)
+            src = _inject_into_html(src, lineage_html, _favicon_href(self.__class__.server_port),
+                                    provenance_html, pub_path=self._pub_path(fs_path))
             self._send(200, "text/html; charset=utf-8", src.encode("utf-8"))
         elif fs_path.suffix.lower() == ".txt":
             src = fs_path.read_text(encoding="utf-8", errors="replace")
@@ -698,45 +700,48 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         by handing off to a **subprocess** (dak reaches Cloudflare). Hub's own
         code opens no socket; the invariant holds at the process edge.
 
-        Returns ``(url, None)`` on success, or ``(None, {"error", "detail"})``
-        on failure — ``dak_unavailable`` when the script is missing, or
-        ``publish_failed`` when dak exits non-zero / times out / prints no URL.
-        dak writes the final ``https://…workers.dev`` URL as the last non-empty
-        line of stdout. ``dry_run`` (or ``HUB_PUBLISH_DRYRUN=1``) passes
-        ``--dry-run`` so dak stages a URL without uploading — used by tests.
+        Returns ``(url, dry_run, None)`` on success, or
+        ``(None, dry_run, {"error", "detail"})`` on failure — ``dak_unavailable``
+        when the script is missing, or ``publish_failed`` when dak exits
+        non-zero / times out / prints no URL. ``dry_run`` in the return is the
+        EFFECTIVE flag (S14 / #3): body flag OR ``HUB_PUBLISH_DRYRUN=1`` — so
+        callers can be honest about a staged-but-not-live URL. dak writes the
+        final ``https://…workers.dev`` URL as the last non-empty line of stdout.
+        A dry-run passes ``--dry-run`` so dak stages a URL without uploading.
         """
+        dry = bool(dry_run) or os.environ.get("HUB_PUBLISH_DRYRUN") == "1"
         dak = (_PKG_ROOT / "plugin" / "hub-agent" / "skills"
                / "dak" / "scripts" / "dak.py")
         if not dak.exists():
-            return None, {"error": "dak_unavailable",
-                          "detail": f"dak script not found at {dak} — "
-                                    f"run its one-time setup"}
+            return None, dry, {"error": "dak_unavailable",
+                               "detail": f"dak script not found at {dak} — "
+                                         f"run its one-time setup"}
         cmd = [sys.executable, str(dak), str(publish_path)]
         if mode:
             cmd += ["--mode", mode]
         if slug:
             cmd += ["--slug", slug]
         cmd += ["--title", title]
-        if dry_run or os.environ.get("HUB_PUBLISH_DRYRUN") == "1":
+        if dry:
             cmd.append("--dry-run")
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True,
                                   timeout=120)
         except subprocess.TimeoutExpired:
-            return None, {"error": "publish_failed", "detail": "dak timed out"}
+            return None, dry, {"error": "publish_failed", "detail": "dak timed out"}
         except OSError as e:
-            return None, {"error": "publish_failed", "detail": str(e)}
+            return None, dry, {"error": "publish_failed", "detail": str(e)}
         if proc.returncode != 0:
             tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-8:]
-            return None, {"error": "publish_failed",
-                          "detail": "\n".join(tail) or "dak exited non-zero"}
+            return None, dry, {"error": "publish_failed",
+                               "detail": "\n".join(tail) or "dak exited non-zero"}
         lines = [ln.strip() for ln in (proc.stdout or "").splitlines()
                  if ln.strip()]
         url = lines[-1] if lines else ""
         if not url.startswith("http"):
-            return None, {"error": "publish_failed",
-                          "detail": "dak produced no URL"}
-        return url, None
+            return None, dry, {"error": "publish_failed",
+                               "detail": "dak produced no URL"}
+        return url, dry, None
 
     def _publish_scan(self, body: dict) -> None:
         """Run the shared redaction scanner for one path — the UI's publish gate.
@@ -854,16 +859,20 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         slug = (body.get("slug") or "").strip() or None
 
         # Hand off to the dak subprocess (the network edge). Hub opens no socket.
-        url, err = self._run_dak(publish_path, title, mode=mode, slug=slug,
-                                 dry_run=bool(body.get("dryRun")))
+        url, dry, err = self._run_dak(publish_path, title, mode=mode, slug=slug,
+                                      dry_run=bool(body.get("dryRun")))
         if err is not None:
             _fail(200 if err["error"] == "dak_unavailable" else 502,
-                  {"ok": False, **err})
+                  {"ok": False, "dryRun": dry, **err})
             return
-        _publish.record_published_asset(resolved, url, mode or "snapshot")
+        # S14 / #3 — a dry-run stages a URL WITHOUT uploading, so it is not live.
+        # Never record it as published-state (that drives the row's live marker).
+        if not dry:
+            _publish.record_published_asset(resolved, url, mode or "snapshot")
         self._send(200, "application/json", json.dumps({
             "ok": True,
             "url": url,
+            "dryRun": dry,
             "copy": str(publish_path) if publish_path != resolved else None,
         }).encode())
 
@@ -940,20 +949,24 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 return
 
         # Hand off to the dak subprocess (network edge); Hub opens no socket.
-        url, err = self._run_dak(publish_path, slug, slug=slug,
-                                 dry_run=bool(body.get("dryRun")))
+        url, dry, err = self._run_dak(publish_path, slug, slug=slug,
+                                      dry_run=bool(body.get("dryRun")))
         if err is not None:
             _fail(200 if err["error"] == "dak_unavailable" else 502,
-                  {"ok": False, "findings": findings, **err})
+                  {"ok": False, "dryRun": dry, "findings": findings, **err})
             return
-        _publish.record_published(repo, slug, url, mode="snapshot")
-        # Re-bake the published map into the page so the row marker updates.
-        result = self._rebuild(_active_root)
-        if result.returncode != 0:
-            print(result.stderr or result.stdout, file=sys.stderr)
+        # S14 / #3 — a dry-run is not live; don't record published-state or
+        # re-bake the row's PUBLISHED marker for a URL that never uploaded.
+        if not dry:
+            _publish.record_published(repo, slug, url, mode="snapshot")
+            # Re-bake the published map into the page so the row marker updates.
+            result = self._rebuild(_active_root)
+            if result.returncode != 0:
+                print(result.stderr or result.stdout, file=sys.stderr)
         self._send(200, "application/json", json.dumps({
             "ok": True,
             "url": url,
+            "dryRun": dry,
             "bundle": str(out_path),
             "findings": findings,
         }).encode())
@@ -1152,6 +1165,16 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         body = f"<ul class='dir-list'>{''.join(rows)}</ul>"
         self._serve_page(url_path, path, body)
 
+    @staticmethod
+    def _pub_path(path: Path) -> str:
+        """Path to bake into the doc-page Publish item: scan-root-relative when
+        the file lives under the active root (what /_publish prefers), else the
+        absolute path (still resolved + containment-guarded server-side)."""
+        try:
+            return path.resolve().relative_to(_active_root.resolve()).as_posix()
+        except ValueError:
+            return str(path.resolve())
+
     def _serve_page(self, title: str, path: Path, body: str) -> None:
         try:
             rel = path.resolve().relative_to(_active_root.resolve())
@@ -1200,8 +1223,15 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 )
             except ValueError:
                 pass
+        # S14 / #5 — one-click Publish for any publishable doc (.md/.html). Bake
+        # this file's own path into the item; a tiny inline script does the POST
+        # /_publish and shows the honest published / dry-run / error state.
+        pub_script = ""
+        if path.suffix.lower() in (".md", ".markdown", ".html", ".htm"):
+            menu_items.append(doc_publish_item(self._pub_path(path)))
+            pub_script = DOC_PUBLISH_SCRIPT
         menu_items.append(DOC_PDF_ITEM)
-        body = doc_menu(menu_items) + body
+        body = doc_menu(menu_items) + body + pub_script
 
         html = _PAGE.format(
             title=title,
