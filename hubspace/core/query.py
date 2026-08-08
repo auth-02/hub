@@ -313,8 +313,15 @@ def timeline(conn: sqlite3.Connection | None, slug: str,
                 counter += 1
                 nid = f"n{counter}"
                 at = (str(rec.get("created") or "")[:10]) or _iso_date(mtime)
+                # `label` carries the comment text (not the notes.jsonl filename)
+                # so the Trace spine and graph canvas can render the comment
+                # itself; `path` stays the raw file so lineage/layout are unchanged.
+                body = " ".join(str(rec.get("body") or "").split())
+                label = (body[:57] + "…") if len(body) > 58 else body
                 result["nodes"].append(
-                    {"id": nid, "kind": "note", "path": rel, "at": at}
+                    {"id": nid, "kind": "note", "path": rel, "at": at,
+                     "label": label or "comment",
+                     "author": rec.get("author") or ""}
                 )
                 nids.append(nid)
             node_ids[fid] = nids

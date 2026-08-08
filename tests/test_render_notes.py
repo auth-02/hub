@@ -8,6 +8,7 @@ with no comments still builds cleanly.
 """
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -83,6 +84,42 @@ class TestNotesBaked(unittest.TestCase):
             anchored = next(c for c in comments if c["target"] == "artifacts/flow.html")
             self.assertEqual(anchored["range"], "L41-L48")
             self.assertEqual(anchored["author"], "claude-agent")
+
+    def _extract_lineage_data(self, html: str) -> dict:
+        marker = "const LINEAGE_DATA="
+        i = html.index(marker) + len(marker)
+        j = html.index(";", i)
+        return json.loads(html[i:j])
+
+    def test_notes_jsonl_not_a_list_row_but_still_indexed(self):
+        """S13 — notes.jsonl is internal storage: it never appears as a plain
+        file-list row (nor a NOTE kind chip), yet it stays indexed enough to
+        power NOTES_DATA and the task_has_note lineage relationship."""
+        with tempfile.TemporaryDirectory() as sr, tempfile.TemporaryDirectory() as st:
+            scan_root, state = Path(sr), Path(st)
+            _write_task(scan_root, "add-sso-login", notes=[
+                {"id": "abc123", "target": "manifest.md", "author": "you",
+                 "created": "2026-08-04T10:00:00", "body": "a comment"},
+            ])
+            html = _build_index(scan_root, state)
+
+            # No plain file-list row (<a class="row" ...>) points at notes.jsonl.
+            row_targets = re.findall(r'<a class="row"[^>]*data-abs="([^"]*)"', html)
+            self.assertTrue(row_targets, "expected the manifest to render as a row")
+            self.assertFalse(
+                any(t.endswith("notes.jsonl") for t in row_targets),
+                f"notes.jsonl leaked into the file list: {row_targets}")
+            # The NOTE kind-chip filter is gone (no note rows to filter).
+            self.assertNotIn('data-kind="note"', html)
+
+            # But it is still indexed: the comment survives in NOTES_DATA …
+            notes = self._extract_notes_data(html)
+            (_, comments), = notes.items()
+            self.assertEqual([c["body"] for c in comments], ["a comment"])
+            # … and the task_has_note lineage relationship still counts.
+            lineage = self._extract_lineage_data(html)
+            rels = [e["r"] for edges in lineage.values() for e in edges]
+            self.assertIn("task_has_note", rels)
 
     def test_task_without_notes_builds_and_is_omitted(self):
         with tempfile.TemporaryDirectory() as sr, tempfile.TemporaryDirectory() as st:

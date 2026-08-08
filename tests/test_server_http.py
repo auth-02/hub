@@ -132,6 +132,31 @@ class TestServerHttp(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"Hello", body)
 
+    def test_notes_jsonl_redirects_instead_of_downloading(self):
+        """S13 — a direct GET to a task's comments/notes.jsonl must NOT stream
+        the raw log as octet-stream (which downloads); it bounces to the SPA."""
+        import http.client
+        comments = Path(self._scan_root) / "tasks" / "s13-task" / "comments"
+        comments.mkdir(parents=True, exist_ok=True)
+        raw = b'{"id":"x","target":"manifest.md","author":"you","body":"secret comment"}\n'
+        jsonl = comments / "notes.jsonl"
+        jsonl.write_bytes(raw)
+
+        # Raw request WITHOUT following redirects, so we observe the 302 itself.
+        conn = http.client.HTTPConnection("localhost", self._port, timeout=5)
+        conn.request("GET", str(jsonl))
+        resp = conn.getresponse()
+        status = resp.status
+        ctype = resp.getheader("Content-Type") or ""
+        location = resp.getheader("Location")
+        payload = resp.read()
+        conn.close()
+
+        self.assertEqual(status, 302, "notes.jsonl should redirect, not serve")
+        self.assertEqual(location, "/")
+        self.assertNotIn("octet-stream", ctype)
+        self.assertNotIn(b"secret comment", payload)
+
     def test_post_set_root_valid_path(self):
         payload = self._scan_root.encode("utf-8")
         status, body = _post(self._port, "/_set-root", payload)

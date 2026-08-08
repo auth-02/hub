@@ -181,7 +181,11 @@ function openPreview(row){
   const abs=row.dataset.abs||'';
   _openPreviewAbs=abs;
   const links=LINEAGE_DATA[abs]||[];
-  if(links.length){pvLineage.innerHTML=buildLineage(links);pvLineage.classList.add('show');}
+  if(links.length){
+    pvLineage.innerHTML=buildLineage(links);pvLineage.classList.add('show');
+    const nl=pvLineage.querySelector('.ln-notes-link');
+    if(nl)nl.onclick=()=>{const tk=taskForNoteAbs(nl.dataset.noteAbs);if(tk){closePreview();openTaskNotes(tk);}};
+  }
   else pvLineage.classList.remove('show');
   if(pvAsk) pvAsk.style.display=askAgainCmd(abs)?'':'none';
   pvBody.classList.add('iframe-mode');
@@ -416,6 +420,15 @@ function buildLineage(links){
   ORDER.forEach(r=>{
     if(!groups[r]) return;
     h+=`<div class="ln-group"><span class="ln-type">${LABELS[r]||r}</span>`;
+    if(r==='task_has_note'){
+      // Internal comment log — route to the // NOTES view, never link the raw
+      // notes.jsonl (which would download). data-note-abs lets the delegated
+      // handler resolve the owning task from the path.
+      const l=groups[r][0];
+      h+=`<button class="ln-item ln-notes-link" type="button" data-note-abs="${esc(l.a)}" title="open comments">${groups[r].length} comment${groups[r].length===1?'':'s'} →</button>`;
+      h+='</div>';
+      return;
+    }
     groups[r].forEach(l=>{
       const name=l.p.split('/').pop();
       h+=`<a class="ln-item" href="${fileHref(l.a)}" target="_blank" title="${esc(l.p)}">${esc(name)}</a>`;
@@ -539,6 +552,12 @@ function eventDesc(ev,t){
     const n=(t&&t.plan&&t.plan.length)||0;
     return 'task opened'+(n?' · '+n+' plan item'+(n>1?'s':''):'');
   }
+  // A NOTE event is one comment line — show its text (+ author), never the
+  // notes.jsonl filename. `label` is baked by query.timeline (S13).
+  if(kind==='note'){
+    const body=ev.label||'comment';
+    return ev.author?(body+' — '+ev.author):body;
+  }
   return name||(TL_EVENT_LABEL[kind]||kind);
 }
 
@@ -572,13 +591,20 @@ function renderTimeline(mount,scope,task){
       const kind=ev.kind||'doc';
       const ext=!nodeInTask(ev.path,task.sl);
       const desc=eventDesc(ev,task);
-      return `<div class="tlx-item ${TL_AUTHOR.has(kind)?'tlx-author':'tlx-nav'}${ext?' tlx-ext':''}">
+      // NOTE events open the in-UI // NOTES view; every other event carries no
+      // click here (the spine is a read-only overview).
+      const note=kind==='note';
+      return `<div class="tlx-item ${TL_AUTHOR.has(kind)?'tlx-author':'tlx-nav'}${ext?' tlx-ext':''}${note?' tlx-note':''}"${note?' role="button" tabindex="0"':''}>
         <span class="tlx-when">${esc(fmtEventDate(ev.at))}</span>
         <span class="tlx-dot" style="--kc:${colorForKind(kind)}"></span>
         <span class="tlx-badge" style="--kc:${colorForKind(kind)}">${esc((kind||'').toUpperCase())}</span>
         <span class="tlx-desc">${esc(desc)}</span>
       </div>`;
     }).join('');
+    mount.querySelectorAll('.tlx-note').forEach(it=>{
+      it.onclick=()=>openTaskNotes(task);
+      it.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openTaskNotes(task);}};
+    });
     return evs.length;
   }
   // scope==='global'
@@ -996,6 +1022,27 @@ function renderTraceNotes(t){
   if(addBtn)addBtn.onclick=()=>{if(window._openComposer)window._openComposer({task:t,target:'manifest.md'});};
 }
 
+// Route any "note" affordance (lineage group, spine NOTE event, a comment ref)
+// to the in-UI // NOTES view — NEVER to the raw notes.jsonl file (which would
+// download). Opens the owning task's Trace and scrolls the // NOTES section
+// into view + briefly highlights it.
+function openTaskNotes(t){
+  if(!t) return;
+  const already=_openTraceT&&_openTraceT.sl===t.sl&&_openTraceT.rp===t.rp;
+  if(!already) openTrace(t);
+  requestAnimationFrame(()=>{
+    const el=document.getElementById('trace-notes');
+    if(!el) return;
+    el.scrollIntoView({block:'nearest',behavior:'smooth'});
+    el.classList.remove('notes-flash');void el.offsetWidth;el.classList.add('notes-flash');
+  });
+}
+// Resolve the task that owns a note path (abs or task-relative) from TASKS_DATA.
+function taskForNoteAbs(abs){
+  const c=_ctxForAbs(abs);
+  return c?c.task:null;
+}
+
 function openTrace(t){
   _openTraceT=t;
   const stMap=_ST_MAP;
@@ -1114,6 +1161,17 @@ function openTrace(t){
   let linH='';
   LIN_ORDER.forEach(rel=>{
     if(!groups[rel]) return;
+    // NOTE lineage is internal storage (comments/notes.jsonl), not a document:
+    // show the comment count and route the whole group to the // NOTES view
+    // instead of linking to the raw .jsonl (which would download).
+    if(rel==='task_has_note'){
+      const n=(NOTES_DATA[t.rp+'\t'+t.sl]||[]).length;
+      linH+=`<div class="tl-lbl">${LIN_LABELS[rel]||rel}</div>
+        <div class="tl-files"><button class="tl-file tl-notes-link" type="button">
+        <span>${n} comment${n===1?'':'s'} →</span>
+        <span class="tl-fmeta">notes</span></button></div>`;
+      return;
+    }
     linH+=`<div class="tl-lbl">${LIN_LABELS[rel]||rel}</div>
       <div class="tl-files">`;
     groups[rel].forEach(l=>{
@@ -1127,6 +1185,8 @@ function openTrace(t){
     linH+='</div>';
   });
   lin.innerHTML=linH||'<div class="tl-lbl" style="color:var(--mute)">—</div><div class="tl-files" style="padding:12px 0 12px 16px;border-left:1px solid var(--line);color:var(--mute);font-family:var(--mono);font-size:11px">no children indexed yet</div>';
+  const linNotes=lin.querySelector('.tl-notes-link');
+  if(linNotes)linNotes.onclick=()=>openTaskNotes(t);
 
   // Per-task timeline spine — "how did this task get here" (1c). Same renderer
   // as the head-of-Work timeline, scope='task'. NOTE events (S3b comments/) are
@@ -2332,7 +2392,9 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     svg.setAttribute('viewBox','0 0 '+(maxX+X0)+' '+(maxY+Y0));
     const slug=ST.t?ST.t.sl:'';
     nodesLayer.innerHTML=nodes.map(n=>{
-      const p=ST.pos[n.id];const name=(n.path||'').split('/').pop()||n.id;
+      // NOTE nodes show the comment text (baked `label`), every other kind the
+      // filename — the two renderings (spine + graph) stay in sync.
+      const p=ST.pos[n.id];const name=(n.kind==='note'&&n.label)?n.label:((n.path||'').split('/').pop()||n.id);
       const rel=incomingRel(n.id);
       // Nodes whose path lives outside tasks/<slug>/ are drawn dashed — they are
       // referenced from the task, not owned by it (the comp's DOC treatment).

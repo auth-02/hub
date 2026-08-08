@@ -163,8 +163,23 @@ def _first_run_html(root: Path) -> str:
 
 
 def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]", timeline_json: str = "{}", tasks_json: str = "[]", task_timeline_json: str = "{}", published_json: str = "{}", provenance_json: str = "{}", notes_json: str = "{}") -> str:
-    total     = sum(len(v) for v in groups.values())
-    md_total  = sum(1 for v in groups.values() for f in v if f["ext"] == "md")
+    # `note`-kind files are the per-task append-only comment log
+    # (comments/notes.jsonl). They stay indexed (FTS + task_has_note lineage +
+    # the // NOTES cards read them), but they are internal storage, not a
+    # document to click into — so they never appear as plain list rows, kind
+    # chips, or counts. See _classify() in scan.py: kind 'note' is exclusively
+    # a comments/*.jsonl file.
+    def _listable(f) -> bool:
+        return f.get("kind") != "note"
+
+    vis_groups = {
+        repo: [f for f in files if _listable(f)]
+        for repo, files in groups.items()
+    }
+    vis_groups = {repo: files for repo, files in vis_groups.items() if files}
+
+    total     = sum(len(v) for v in vis_groups.values())
+    md_total  = sum(1 for v in vis_groups.values() for f in v if f["ext"] == "md")
     html_total = total - md_total
     built     = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -174,7 +189,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         return (name == "(root)", -newest)
 
     rows_html = []
-    for repo, files in sorted(groups.items(), key=repo_recency):
+    for repo, files in sorted(vis_groups.items(), key=repo_recency):
         files.sort(key=lambda f: f["mtime"], reverse=True)
         items = []
         for f in files:
@@ -214,7 +229,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
 
     repo_chips = "".join(
         f'<button class="rchip" data-repo="{html.escape(r.lower())}">{html.escape(r)}</button>'
-        for r, _ in sorted(groups.items(), key=repo_recency)
+        for r, _ in sorted(vis_groups.items(), key=repo_recency)
     )
 
     return _TEMPLATE_PATH.read_text(encoding="utf-8").format(
@@ -227,7 +242,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         total=total,
         md_total=md_total,
         html_total=html_total,
-        repo_count=len(groups),
+        repo_count=len(vis_groups),
         body="".join(rows_html) or _first_run_html(ROOT),
         repo_chips=repo_chips,
         fts_json=fts_json,

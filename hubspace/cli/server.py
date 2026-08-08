@@ -178,6 +178,17 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             self._send(404, "text/plain", f"Not found: {fs_path}".encode())
             return
 
+        # A task's append-only comment log (comments/notes.jsonl) is internal
+        # storage, not a document (S13). Serving it as octet-stream triggers a
+        # browser download; instead bounce to the SPA so a direct URL never
+        # downloads. The UI never links here — this is defense-in-depth.
+        if fs_path.suffix.lower() == ".jsonl" and "comments" in fs_path.parts:
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
         if fs_path.is_dir():
             self._serve_dir(fs_path, url_path)
         elif fs_path.suffix.lower() == ".excalidraw":
