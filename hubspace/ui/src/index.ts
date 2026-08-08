@@ -568,8 +568,17 @@ document.addEventListener('keydown',e=>{
   const tag=document.activeElement.tagName;
   if(tag==='INPUT'||tag==='TEXTAREA') return;
   // Reading view is the topmost surface — Esc closes it; list nav stays inert.
+  // But the palette (⌘K/⌘P) and the comment composer (c) must still work when
+  // focus is on the parent chrome (not the doc iframe) — the iframe forwards
+  // these when focus is inside it, so mirror that here for parent focus.
   if(readerEl&&readerEl.classList.contains('show')){
+    const rk=(e.key||'').toLowerCase();
     if(e.key==='Escape'){e.preventDefault();closeReader();}
+    else if((e.metaKey||e.ctrlKey)&&(rk==='k'||rk==='p')&&!e.altKey){
+      e.preventDefault();
+      if(window._openPalette && !document.getElementById('palette').classList.contains('show')) window._openPalette('');
+    }
+    else if(rk==='c'){e.preventDefault();if(typeof readerComment==='function')readerComment();}
     return;
   }
   if(document.getElementById('trace').classList.contains('show')){
