@@ -132,6 +132,18 @@ class TestRenderBundle(_Base):
         self.assertNotIn("hub-comment-line", html)
         self.assertNotIn("hub-line-add", html)
 
+    def test_no_publish_unpublish_inline_script(self):
+        """S27 — the doc-page publish/unpublish control (Republish/Unpublish + its
+        inline script) is a LIVE-served affordance only. A published bundle must
+        stay fully self-contained: it must carry none of that script/markup."""
+        html = bundle.render_task_bundle(self.conn, "cortex", "auth-refactor")
+        self.assertNotIn("hubUnpublish", html)
+        self.assertNotIn("hubRepublish", html)
+        self.assertNotIn("hubPublish", html)
+        self.assertNotIn("doc-pub-actions", html)
+        self.assertNotIn("/_publish-revoke", html)
+        # (existing test_contains_manifest_and_every_child asserts /_publish absent too)
+
     def test_missing_task_raises(self):
         with self.assertRaises(ValueError):
             bundle.render_task_bundle(self.conn, "cortex", "no-such-task")

@@ -188,6 +188,57 @@ class TestDocPublishItem(unittest.TestCase):
         self.assertIn("&quot;", item)
 
 
+class TestDocPubActions(unittest.TestCase):
+    """S27 — the doc-page ⋯ publish-state control block: parity with the task
+    marker (Open / ↻ Republish / ✕ Unpublish when live; a single Publish when
+    not), wrapped so the inline script can rewrite it in place."""
+
+    def test_published_offers_open_republish_unpublish(self):
+        from hubspace.render import doc_pub_actions
+        html = doc_pub_actions("docs/spec.md", "https://x.example/abc")
+        self.assertIn("↗ Open published", html)
+        self.assertIn("↻ Republish", html)
+        self.assertIn("hubRepublish(this)", html)
+        self.assertIn("✕ Unpublish", html)
+        self.assertIn("hubUnpublish(this)", html)
+        self.assertIn("https://x.example/abc", html)
+        # published state offers no bare "Publish" item — Republish takes its place
+        self.assertNotIn("↗ Publish", html)
+        # wrapper carries the path so the in-place swap + republish/unpublish target it
+        self.assertIn('class="doc-pub-actions"', html)
+        self.assertIn('data-pub-path="docs/spec.md"', html)
+
+    def test_unpublished_offers_only_publish(self):
+        from hubspace.render import doc_pub_actions
+        html = doc_pub_actions("docs/spec.md")     # no pub_url → not published
+        self.assertIn("↗ Publish", html)
+        self.assertIn("hubPublish(this)", html)
+        self.assertNotIn("↻ Republish", html)
+        self.assertNotIn("✕ Unpublish", html)
+        self.assertNotIn("↗ Open published", html)
+
+    def test_inject_published_html_has_full_control(self):
+        # A published HTML doc's page gets Open + Republish + Unpublish (+ the
+        # publisher script wiring hubUnpublish/hubRepublish/hubPublish).
+        src = "<html><head></head><body><h1>Doc</h1></body></html>"
+        result = render._inject_into_html(
+            src, "", pub_path="docs/spec.html", pub_url="https://x.example/abc")
+        self.assertIn("↗ Open published", result)
+        self.assertIn("↻ Republish", result)
+        self.assertIn("✕ Unpublish", result)
+        self.assertIn("hubUnpublish", result)
+        self.assertIn("hubRepublish", result)
+        self.assertIn("/_publish-revoke", result)
+
+    def test_inject_unpublished_html_has_only_publish(self):
+        src = "<html><head></head><body><h1>Doc</h1></body></html>"
+        result = render._inject_into_html(src, "", pub_path="docs/spec.html")
+        self.assertIn("↗ Publish", result)
+        self.assertNotIn("↻ Republish", result)
+        self.assertNotIn("✕ Unpublish", result)
+        self.assertNotIn("↗ Open published", result)
+
+
 class TestRenderMd(unittest.TestCase):
     def test_heading(self):
         result = render._render_md("# Hello")

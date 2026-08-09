@@ -7,6 +7,7 @@ from .page import (
     _LINEAGE_ORDER, _LINEAGE_LABELS, _BACKLINKS_CSS, _DOC_CHROME_CSS, _DOC_PRINT_BTN,
     doc_menu, DOC_PDF_ITEM, render_provenance,
     doc_publish_item, doc_published_open_item, DOC_PUBLISH_SCRIPT,
+    doc_republish_item, doc_unpublish_item, doc_pub_actions,
     DOC_PAGE_SCRIPT, doc_edit_item, doc_config_script,
 )
 from .draw import draw_page_html

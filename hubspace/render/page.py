@@ -81,6 +81,49 @@ def doc_publish_item(pub_path: str) -> str:
     )
 
 
+def doc_republish_item() -> str:
+    """A ⋯ menu item that RE-runs the publish for an already-published doc (S27).
+
+    Re-runs the same scan→publish path as :func:`doc_publish_item` (idempotent —
+    S26's deterministic worker slug yields the same live URL). The file's path is
+    read from the enclosing ``.doc-pub-actions`` wrapper, so no attribute here."""
+    return (
+        '<button class="doc-menu-item" onclick="hubRepublish(this)" '
+        'title="Re-publish this doc (same URL)">↻ Republish</button>'
+    )
+
+
+def doc_unpublish_item() -> str:
+    """A ⋯ menu item that takes THIS doc's live URL down via POST /_publish-revoke
+    (S27 — parity with the task-bundle ✕ Unpublish).
+
+    Really deletes the Cloudflare worker (dak unpublish, server-side) and forgets
+    the local entry, then swaps the menu back to a single Publish in place — no
+    reload. The file's path comes from the enclosing ``.doc-pub-actions``."""
+    return (
+        '<button class="doc-menu-item" onclick="hubUnpublish(this)" '
+        'title="Take this doc\'s live URL down">✕ Unpublish</button>'
+    )
+
+
+def doc_pub_actions(pub_path: str, pub_url: str = "") -> str:
+    """The publish-state control block for a doc page's ⋯ menu (S27).
+
+    Wraps the publish affordances in a ``.doc-pub-actions`` span (``data-pub-path``
+    baked on it) so the inline :data:`DOC_PUBLISH_SCRIPT` can rewrite them IN PLACE
+    after a publish/unpublish — no full reload. When ``pub_url`` is present the doc
+    is published, so it offers **↗ Open published / ↻ Republish / ✕ Unpublish**
+    (parity with the task marker); otherwise a single **↗ Publish**. The span uses
+    ``display:contents`` so its children stay direct flex items of the menu list."""
+    if pub_url:
+        inner = (doc_published_open_item(pub_url)
+                 + doc_republish_item() + doc_unpublish_item())
+    else:
+        inner = doc_publish_item(pub_path)
+    return (f'<span class="doc-pub-actions" data-pub-path="{_esc_attr(pub_path)}">'
+            f'{inner}</span>')
+
+
 # Tiny self-contained publisher for doc pages (no SPA). Scans server-side first
 # (so any secrets are redacted before the file leaves the machine, mirroring the
 # SPA's redact-everything default), then POSTs /_publish and renders an HONEST
@@ -90,30 +133,79 @@ DOC_PUBLISH_SCRIPT = """
 <script>
 (function(){
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function fname(path){var p=String(path||'');return p.split('/').pop()||p;}
 function show(html,cls){var el=document.getElementById('doc-pub-result');
 if(!el){el=document.createElement('div');el.id='doc-pub-result';document.body.appendChild(el);}
 el.className='doc-pub-result '+(cls||'');el.innerHTML=html;}
-window.hubPublish=function(btn){
-var path=btn.getAttribute('data-pub-path');
-btn.disabled=true;btn.textContent='publishing\\u2026';show('publishing\\u2026','');
+// ── tiny self-contained sticky toast (mirrors the SPA's flashSticky/flashOpen) ──
+function toastEl(){var t=document.getElementById('doc-toast');
+if(!t){t=document.createElement('div');t.id='doc-toast';t.className='doc-toast';document.body.appendChild(t);}return t;}
+function toastSticky(msg){var t=toastEl();clearTimeout(t._t);t.textContent=msg;t.className='doc-toast show';}
+function toastFlash(msg){var t=toastEl();t.textContent=msg;t.className='doc-toast show';
+clearTimeout(t._t);t._t=setTimeout(function(){t.className='doc-toast';t.textContent='';},2600);}
+function toastOpen(msg,url){var t=toastEl();
+t.innerHTML=esc(msg)+' <a class="doc-toast-open" href="'+esc(url)+'" target="_blank" rel="noopener">open \\u2197</a>';
+t.className='doc-toast show has-open';clearTimeout(t._t);
+t._t=setTimeout(function(){t.className='doc-toast';t.textContent='';},6000);}
+// ── swap the ⋯ menu's publish items IN PLACE (published <-> unpublished) ────────
+function wrapOf(btn){return btn&&btn.closest?btn.closest('.doc-pub-actions'):null;}
+function pathOf(btn){var w=wrapOf(btn);
+return (w&&w.getAttribute('data-pub-path'))||btn.getAttribute('data-pub-path')||'';}
+function setPubActions(wrap,url){
+if(!wrap)return;var path=wrap.getAttribute('data-pub-path')||'';
+if(url){wrap.innerHTML='<a class="doc-menu-item" href="'+esc(url)+'" target="_blank" rel="noopener" '+
+'title="Open this doc\\'s live published URL">\\u2197 Open published</a>'+
+'<button class="doc-menu-item" onclick="hubRepublish(this)" title="Re-publish this doc (same URL)">\\u21bb Republish</button>'+
+'<button class="doc-menu-item" onclick="hubUnpublish(this)" title="Take this doc\\'s live URL down">\\u2715 Unpublish</button>';}
+else{wrap.innerHTML='<button class="doc-menu-item" onclick="hubPublish(this)" data-pub-path="'+esc(path)+'" '+
+'title="Publish this doc to a shareable URL">\\u2197 Publish</button>';}
+}
+// ── publish / republish share one honest scan->review->publish path ────────────
+function doPublish(btn,verb){
+var wrap=wrapOf(btn);var path=pathOf(btn);
+btn.disabled=true;btn.textContent=verb+'\\u2026';toastSticky(verb+' '+fname(path)+'\\u2026');show(verb+'\\u2026','');
 fetch('/_publish-scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path})})
 .then(function(r){return r.json();}).catch(function(){return {};})
 .then(function(sc){var f=(sc&&sc.findings)||[];var idx=f.map(function(_x,i){return i;});
 return fetch('/_publish',{method:'POST',headers:{'Content-Type':'application/json'},
 body:JSON.stringify({path:path,redact_indices:idx,review:true})})
 .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});});})
-.then(function(res){btn.disabled=false;btn.textContent='\\u2197 Publish';
+.then(function(res){btn.disabled=false;
 var d=(res&&res.d)||{};
 if(res&&res.ok&&d.url){
 if(d.dryRun){show('<span class="dpr-tag dry">dry-run \\u2014 not uploaded (URL not live)</span>'+
-'<span class="dpr-preview">preview: '+esc(d.url)+'</span>','dry');}
+'<span class="dpr-preview">preview: '+esc(d.url)+'</span>','dry');
+toastFlash('dry-run \\u2014 not uploaded');}
 else{show('<span class="dpr-tag ok">\\u2713 published</span>'+
-'<a class="dpr-url" href="'+esc(d.url)+'" target="_blank" rel="noopener">'+esc(d.url)+'</a>','ok');}
+'<a class="dpr-url" href="'+esc(d.url)+'" target="_blank" rel="noopener">'+esc(d.url)+'</a>','ok');
+toastOpen('published \\u00b7 '+fname(path),d.url);
+setPubActions(wrap,d.url);}      // swap to Open / Republish / Unpublish in place
 }else{var det=d.detail?String(d.detail).split('\\n').slice(-1)[0]
 :(d.error==='dak_unavailable'?'dak not configured \\u2014 run its setup':(d.error||'publish failed'));
-show('<span class="dpr-tag err">publish failed</span><span class="dpr-detail">'+esc(det)+'</span>','err');}
-}).catch(function(){btn.disabled=false;btn.textContent='\\u2197 Publish';
-show('<span class="dpr-tag err">publish failed</span>','err');});
+show('<span class="dpr-tag err">publish failed</span><span class="dpr-detail">'+esc(det)+'</span>','err');
+toastFlash('publish failed');
+if(!wrap)btn.textContent='\\u2197 Publish';}
+}).catch(function(){btn.disabled=false;if(!wrap)btn.textContent='\\u2197 Publish';
+show('<span class="dpr-tag err">publish failed</span>','err');toastFlash('publish failed');});
+}
+window.hubPublish=function(btn){doPublish(btn,'publishing');};
+window.hubRepublish=function(btn){doPublish(btn,'republishing');};
+// ── unpublish: real dak take-down via /_publish-revoke, then swap in place ──────
+window.hubUnpublish=function(btn){
+var wrap=wrapOf(btn);var path=pathOf(btn);
+btn.disabled=true;btn.textContent='unpublishing\\u2026';toastSticky('unpublishing '+fname(path)+'\\u2026');
+fetch('/_publish-revoke',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path})})
+.then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
+.then(function(res){var d=(res&&res.d)||{};
+if(res&&res.ok&&d.ok){
+setPubActions(wrap,'');           // swap back to a single Publish in place
+show('<span class="dpr-tag ok">'+(d.unpublished?'\\u2713 unpublished':'\\u2713 forgotten locally')+'</span>','ok');
+toastFlash(d.unpublished?'unpublished'
+:('forgotten locally'+(d.detail?(' \\u2014 '+String(d.detail).split('\\n').slice(-1)[0]):'')));
+}else{btn.disabled=false;btn.textContent='\\u2715 Unpublish';
+show('<span class="dpr-tag err">unpublish failed</span>','err');toastFlash('unpublish failed');}
+}).catch(function(){btn.disabled=false;btn.textContent='\\u2715 Unpublish';
+show('<span class="dpr-tag err">unpublish failed</span>','err');toastFlash('unpublish failed');});
 };
 })();
 </script>
@@ -427,8 +519,9 @@ def _inject_into_html(src: str, lineage_html: str, favicon: str = "",
     # ⋯ menu (Open published? + Publish + Save as PDF) goes right after <body>
     # so it floats over the doc; the tiny publisher script goes at end-of-body.
     if pub_path:
-        items = ([doc_published_open_item(pub_url)] if pub_url else []) + \
-                [doc_publish_item(pub_path), DOC_PDF_ITEM]
+        # S27 — one wrapped publish-state control (Publish, or Open/Republish/
+        # Unpublish when live) the inline script rewrites in place, + Save as PDF.
+        items = [doc_pub_actions(pub_path, pub_url), DOC_PDF_ITEM]
         menu = doc_menu(items)
     else:
         menu = _DOC_PRINT_BTN

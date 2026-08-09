@@ -20,6 +20,20 @@
 .doc-pub-result.err{border-color:#c0392b;}
 .doc-pub-result .dpr-url{color:var(--accent);}
 .doc-pub-result .dpr-preview,.doc-pub-result .dpr-detail{color:var(--mute);}
+/* S27 — the publish-state control block inside the ⋯ menu. display:contents so
+   its children (Publish, or Open/Republish/Unpublish) stay direct flex items of
+   the menu list; the inline script rewrites this span in place. */
+.doc-pub-actions{display:contents;}
+/* S27 — tiny sticky toast for doc-page publish/unpublish (mirrors the SPA's
+   flashSticky/flashOpen): "publishing …" while in flight, then a result with an
+   Open link on success. Self-contained; the doc page is standalone, not the SPA. */
+.doc-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(8px);z-index:70;
+  max-width:min(520px,90vw);font-family:var(--mono);font-size:11px;letter-spacing:.04em;
+  background:var(--ink);color:var(--bg);padding:9px 15px;border-radius:4px;
+  box-shadow:0 12px 30px rgba(0,0,0,.28);opacity:0;pointer-events:none;
+  transition:opacity .16s ease,transform .16s ease;}
+.doc-toast.show{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:auto;}
+.doc-toast .doc-toast-open{color:var(--bg);text-decoration:underline;margin-left:8px;}
 /* S6 (2a) — provenance line for agent-generated artifacts (/changelog skill).
    Hub reads who/when/what-range from the file's own front matter; it does not
    generate the file. */

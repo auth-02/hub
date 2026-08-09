@@ -39,6 +39,7 @@ from ..render import (
     _render_lineage_html, _favicon_href, _CSS, _DOC_CHROME_CSS, _PAGE, _add_outline,
     draw_page_html, doc_menu, DOC_PDF_ITEM, render_provenance,
     doc_publish_item, doc_published_open_item, DOC_PUBLISH_SCRIPT,
+    doc_republish_item, doc_unpublish_item, doc_pub_actions,
     DOC_PAGE_SCRIPT, doc_edit_item, doc_config_script,
 )
 from ..core import metadata as _metadata
@@ -1760,12 +1761,13 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         # /_publish and shows the honest published / dry-run / error state.
         pub_script = ""
         if path.suffix.lower() in (".md", ".markdown", ".html", ".htm"):
-            # S20 — if THIS file is already published, offer a jump to its live
-            # URL (best-effort; baked from published.json at render time).
+            # S20/S27 — one wrapped publish-state control. When THIS file is
+            # already published (URL baked from published.json at render time) it
+            # offers Open / ↻ Republish / ✕ Unpublish (parity with the task
+            # marker); otherwise a single Publish. The inline script rewrites it
+            # in place after publish/unpublish — no reload.
             pub_url = self._published_url(path)
-            if pub_url:
-                menu_items.append(doc_published_open_item(pub_url))
-            menu_items.append(doc_publish_item(self._pub_path(path)))
+            menu_items.append(doc_pub_actions(self._pub_path(path), pub_url))
             pub_script = DOC_PUBLISH_SCRIPT
         # S21 — this page's self-sufficient comment/edit context (no SPA parent).
         doc_cfg = self._doc_comment_cfg(path)
