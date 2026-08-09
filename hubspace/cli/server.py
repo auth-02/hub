@@ -25,7 +25,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from urllib.parse import quote, unquote
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 # ── Scan root resolution (shared with hub.py via config.py) ─────────────────
 _HERE = Path(__file__).resolve().parent
@@ -37,8 +37,12 @@ from ..utils.text import esc_html, slugify
 from ..render import (
     _render_md, _render_csv, _render_xlsx, _inject_into_html,
     _render_lineage_html, _favicon_href, _CSS, _DOC_CHROME_CSS, _PAGE, _add_outline,
-    draw_page_html, doc_menu, DOC_PDF_ITEM,
+    draw_page_html, doc_menu, DOC_PDF_ITEM, render_provenance,
+    doc_publish_item, doc_published_open_item, DOC_PUBLISH_SCRIPT,
+    doc_republish_item, doc_unpublish_item, doc_pub_actions,
+    DOC_PAGE_SCRIPT, doc_edit_item, doc_config_script,
 )
+from ..core import metadata as _metadata
 
 
 def _state_dir() -> Path:
@@ -52,6 +56,11 @@ _DB_PATH = _state_dir() / "hub.db"
 # Serialize hub.py rebuilds so the watcher and request-triggered rebuilds
 # (/_set-root, /_rebuild, /_task-status) never run two writers at once.
 _REBUILD_LOCK = threading.Lock()
+
+# Hard cap on a single /_upload request body. base64 inflates ~33%, so this
+# comfortably admits several 64 MB files while refusing an absurd Content-Length
+# before we read it into memory (the per-file 64 MB guard is enforced after).
+_UPLOAD_REQUEST_CAP = 512 * 1024 * 1024
 
 
 def _get_lineage(abs_path: str) -> list:
@@ -112,6 +121,24 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             self._run_rebuild()
             return
 
+        # Settings panel (S15) — current workspace prefs + dak creds (token MASKED)
+        if url_path == "/_settings":
+            self._settings_get()
+            return
+
+        # Directory picker backend (read-only listing for the set-root modal)
+        if url_path == "/_list-dirs":
+            qs = parse_qs(urlparse(self.path).query)
+            self._list_dirs((qs.get("path") or [""])[0])
+            return
+
+        # Raw source of an editable text doc — the reading view's Edit mode reads
+        # this to prefill its textarea (S18). Same containment guard as edits.
+        if url_path == "/_doc-raw":
+            qs = parse_qs(urlparse(self.path).query)
+            self._doc_raw((qs.get("path") or [""])[0])
+            return
+
         # Blank Excalidraw canvas (new, unsaved diagram)
         if url_path == "/draw":
             html_page = draw_page_html(None, None, self.__class__.server_port)
@@ -166,6 +193,17 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             self._send(404, "text/plain", f"Not found: {fs_path}".encode())
             return
 
+        # A task's append-only comment log (comments/notes.jsonl) is internal
+        # storage, not a document (S13). Serving it as octet-stream triggers a
+        # browser download; instead bounce to the SPA so a direct URL never
+        # downloads. The UI never links here — this is defense-in-depth.
+        if fs_path.suffix.lower() == ".jsonl" and "comments" in fs_path.parts:
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+
         if fs_path.is_dir():
             self._serve_dir(fs_path, url_path)
         elif fs_path.suffix.lower() == ".excalidraw":
@@ -183,7 +221,11 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             src = fs_path.read_text(encoding="utf-8", errors="replace")
             links = _get_lineage(str(fs_path.resolve()))
             lineage_html = _render_lineage_html(links, self.__class__.server_port) if links else ""
-            src = _inject_into_html(src, lineage_html, _favicon_href(self.__class__.server_port))
+            provenance_html = render_provenance(_metadata.extract_provenance(src))
+            src = _inject_into_html(src, lineage_html, _favicon_href(self.__class__.server_port),
+                                    provenance_html, pub_path=self._pub_path(fs_path),
+                                    pub_url=self._published_url(fs_path),
+                                    doc_cfg=self._doc_comment_cfg(fs_path))
             self._send(200, "text/html; charset=utf-8", src.encode("utf-8"))
         elif fs_path.suffix.lower() == ".txt":
             src = fs_path.read_text(encoding="utf-8", errors="replace")
@@ -226,6 +268,88 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 self._send(400, "text/plain", str(e).encode())
                 return
             self._new_task(body)
+        elif url_path == "/_upload":
+            self._upload()
+        elif url_path == "/_note":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                self._send(400, "application/json",
+                           json.dumps({"ok": False, "error": "bad_json",
+                                       "detail": str(e)}).encode())
+                return
+            self._note(body)
+        elif url_path == "/_manifest-edit":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                self._send(400, "application/json",
+                           json.dumps({"ok": False, "error": "bad_json",
+                                       "detail": str(e)}).encode())
+                return
+            self._manifest_edit(body)
+        elif url_path == "/_edit-doc":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                self._send(400, "application/json",
+                           json.dumps({"ok": False, "error": "bad_json",
+                                       "detail": str(e)}).encode())
+                return
+            self._edit_doc(body)
+        elif url_path == "/_publish-scan":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                self._send(400, "application/json",
+                           json.dumps({"ok": False, "error": "bad_json",
+                                       "detail": str(e)}).encode())
+                return
+            self._publish_scan(body)
+        elif url_path == "/_publish":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                self._send(400, "application/json",
+                           json.dumps({"ok": False, "error": "bad_json",
+                                       "detail": str(e)}).encode())
+                return
+            self._publish(body)
+        elif url_path == "/_publish-bundle":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                self._send(400, "application/json",
+                           json.dumps({"ok": False, "error": "bad_json",
+                                       "detail": str(e)}).encode())
+                return
+            self._publish_bundle(body)
+        elif url_path == "/_publish-revoke":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                self._send(400, "application/json",
+                           json.dumps({"ok": False, "error": "bad_json",
+                                       "detail": str(e)}).encode())
+                return
+            self._publish_revoke(body)
+        elif url_path == "/_settings":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                self._send(400, "application/json",
+                           json.dumps({"ok": False, "error": "bad_json",
+                                       "detail": str(e)}).encode())
+                return
+            self._settings_post(body)
         elif url_path == "/_task-status":
             length = int(self.headers.get("Content-Length", 0))
             try:
@@ -313,7 +437,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             repo_root = root
 
         try:
-            path = _tasks.write_manifest(repo_root, slug, title, status, plan=plan)
+            path = _tasks.write_manifest(repo_root, slug, title, plan=plan)
         except _tasks.SlugError as e:
             _fail(400, {"ok": False, "error": "invalid_slug", "detail": str(e)})
             return
@@ -326,6 +450,19 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             return
 
         rel = path.relative_to(root).as_posix()
+        # S22: the manifest carries no frontmatter, so persist the chosen status
+        # to the DB/sidecar (the runtime source of truth). `ongoing` would fall
+        # out of the COALESCE default, but writing it explicitly is harmless and
+        # keeps the sidecar authoritative. task_repo is the dir owning tasks/
+        # (== repo_root.name), matching what the scan seed computes.
+        try:
+            from ..core import db as _db
+            conn = _db.open_db(_DB_PATH)  # ensures schema/migrations exist
+            _db.set_status(conn, slug, repo_root.name, status)
+            conn.close()
+        except Exception as e:
+            import sys as _sys3
+            print(f"[new-task] set_status failed: {e}", file=_sys3.stderr)
         # Reconcile immediately so the new task appears on reload (the watcher
         # would also catch it within 3 s, but the UI reloads right after POST).
         result = self._rebuild(_active_root)
@@ -334,6 +471,897 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             print(result.stderr or result.stdout, file=_sys2.stderr)
         self._send(200, "application/json",
                    json.dumps({"ok": True, "rel": rel, "slug": slug}).encode())
+
+    def _upload(self) -> None:
+        """Write dropped files into `<repo>/tasks/<slug>/data/` — the 1d producer.
+
+        Body is JSON: ``{repo, slug, files:[{name, dataBase64}]}`` (a stdlib-only
+        multipart alternative — see the PR notes). Each file is base64-decoded
+        and handed to `tasks.accept_upload`, which enforces all three guards
+        server-side: the 64 MB per-file cap, the hub.toml extension allowlist,
+        and a basename-only filename (no separator / `..` / absolute path). Names
+        are preserved; a collision suffixes `-2`. Repo/slug reuse the same guards
+        as `/_new-task`. A read-only root → 403. A rebuild runs only when at least
+        one file was written; the response reports per-file accept/reject.
+        """
+        from ..core import tasks as _tasks
+        import base64
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        if length > _UPLOAD_REQUEST_CAP:
+            _fail(413, {"ok": False, "error": "too_large"})
+            return
+        try:
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError) as e:
+            _fail(400, {"ok": False, "error": "bad_json", "detail": str(e)})
+            return
+
+        root = _active_root.resolve()
+        repo = (body.get("repo") or "").strip()
+        slug = (body.get("slug") or "").strip()
+        files = body.get("files")
+
+        if not _tasks.valid_slug(slug):
+            _fail(400, {"ok": False, "error": "invalid_slug"})
+            return
+        if repo and repo != "(root)":
+            repo_root = (root / repo).resolve()
+            if not is_within(repo_root, root) or not repo_root.is_dir():
+                _fail(400, {"ok": False, "error": "invalid repo"})
+                return
+        else:
+            repo_root = root
+        task_dir = (repo_root / "tasks" / slug).resolve()
+        if not is_within(task_dir, root) or not task_dir.is_dir():
+            _fail(400, {"ok": False, "error": "invalid task"})
+            return
+        data_dir = task_dir / "data"
+
+        allowed = config.upload_exts(config.load_config())
+        results: list[dict] = []
+        written = 0
+        for f in files if isinstance(files, list) else []:
+            name = (f.get("name") if isinstance(f, dict) else "") or ""
+            b64 = (f.get("dataBase64") if isinstance(f, dict) else "") or ""
+            try:
+                raw = base64.b64decode(b64, validate=False)
+            except Exception:
+                results.append({"name": name, "ok": False, "reason": "could not decode"})
+                continue
+            try:
+                path, reason = _tasks.accept_upload(data_dir, name, raw, allowed)
+            except OSError as e:
+                _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+                return
+            if path is not None:
+                written += 1
+                results.append({"name": name, "ok": True,
+                                "rel": path.relative_to(root).as_posix()})
+            else:
+                results.append({"name": name, "ok": False, "reason": reason})
+
+        if written:
+            result = self._rebuild(_active_root)
+            if result.returncode != 0:
+                import sys as _sys2
+                print(result.stderr or result.stdout, file=_sys2.stderr)
+        self._send(200, "application/json",
+                   json.dumps({"ok": True, "written": written, "results": results}).encode())
+
+    def _note(self, body: dict) -> None:
+        """Append one comment to `<repo>/tasks/<slug>/comments/notes.jsonl` (1e/S7).
+
+        Body is JSON ``{repo, slug, target, range?, body, author?}``. Appends
+        exactly one JSON line to the task's append-only comment log (see
+        docs/HUB-LAYOUT.md §2), anchored to `target` (a task-relative path that
+        must resolve inside the task). Reuses the same repo/slug guards as
+        `/_new-task` and `/_upload`; `tasks.write_note` enforces the
+        target-escape guard and never rewrites existing lines. A read-only root
+        → 403. On success, rebuilds so the comment appears on reload — no DB row
+        is written directly.
+        """
+        from ..core import tasks as _tasks
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        root = _active_root.resolve()
+        repo = (body.get("repo") or "").strip()
+        slug = (body.get("slug") or "").strip()
+        target = (body.get("target") or "").strip()
+        note_body = (body.get("body") or "").strip()
+        author = (body.get("author") or "").strip() or None
+        range_ = (body.get("range") or "").strip() or None
+
+        if not _tasks.valid_slug(slug):
+            _fail(400, {"ok": False, "error": "invalid_slug"})
+            return
+        if not target:
+            _fail(400, {"ok": False, "error": "target required"})
+            return
+        if not note_body:
+            _fail(400, {"ok": False, "error": "body required"})
+            return
+        if repo and repo != "(root)":
+            repo_root = (root / repo).resolve()
+            if not is_within(repo_root, root) or not repo_root.is_dir():
+                _fail(400, {"ok": False, "error": "invalid repo"})
+                return
+        else:
+            repo_root = root
+        task_dir = (repo_root / "tasks" / slug).resolve()
+        if not is_within(task_dir, root) or not task_dir.is_dir():
+            _fail(400, {"ok": False, "error": "invalid task"})
+            return
+
+        try:
+            path, rec = _tasks.write_note(repo_root, slug, target, note_body,
+                                          author=author, range_=range_)
+        except _tasks.SlugError as e:
+            _fail(400, {"ok": False, "error": "invalid_target", "detail": str(e)})
+            return
+        except ValueError as e:
+            _fail(400, {"ok": False, "error": "invalid", "detail": str(e)})
+            return
+        except OSError as e:
+            _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+            return
+
+        rel = path.relative_to(root).as_posix()
+        result = self._rebuild(_active_root)
+        if result.returncode != 0:
+            import sys as _sys2
+            print(result.stderr or result.stdout, file=_sys2.stderr)
+        self._send(200, "application/json",
+                   json.dumps({"ok": True, "rel": rel, "id": rec["id"]}).encode())
+
+    def _manifest_edit(self, body: dict) -> None:
+        """Rewrite ONLY a manifest's `status:` + `## Plan` block — the 1i producer.
+
+        Body is JSON ``{repo, slug, status?, plan?:[{text,done}], base_mtime}``.
+        The file on disk is the source of truth: `tasks.rewrite_manifest` replaces
+        just those two regions, preserving prose/decisions/other frontmatter
+        byte-for-byte. Conflict rule ("hub never wins a race against your
+        editor"): `base_mtime` is the mtime the client last read; if the file's
+        current mtime differs, the edit is DISCARDED and we return 409 so the UI
+        re-reads — never a blind overwrite. On success the frontmatter status and
+        the task_status table/sidecar are both updated (set_status), so file and
+        sidecar stay consistent, then the index rebuilds. Read-only root → 403.
+        """
+        from ..core import tasks as _tasks
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        root = _active_root.resolve()
+        repo = (body.get("repo") or "").strip()
+        slug = (body.get("slug") or "").strip()
+        status = body.get("status")
+        plan = body.get("plan")
+        base_mtime = body.get("base_mtime")
+
+        if not _tasks.valid_slug(slug):
+            _fail(400, {"ok": False, "error": "invalid_slug"})
+            return
+        if status is not None:
+            status = str(status).strip()
+            if status not in ("ongoing", "paused", "completed"):
+                _fail(400, {"ok": False, "error": "invalid_status"})
+                return
+        if plan is not None:
+            if not isinstance(plan, list):
+                _fail(400, {"ok": False, "error": "invalid_plan"})
+                return
+            norm_plan = []
+            for p in plan:
+                if not isinstance(p, dict):
+                    _fail(400, {"ok": False, "error": "invalid_plan"})
+                    return
+                norm_plan.append({"text": str(p.get("text", "")), "done": bool(p.get("done"))})
+            plan = norm_plan
+        if status is None and plan is None:
+            _fail(400, {"ok": False, "error": "nothing to edit"})
+            return
+
+        # Resolve the task dir under the active root, tolerating both layouts:
+        # scan root is a PARENT of the repo (root/<repo>/tasks/<slug>) or IS the
+        # repo itself (root/tasks/<slug>, where task_repo == root.name).
+        candidates = []
+        if repo and repo != "(root)":
+            candidates.append(root / repo / "tasks" / slug)
+        candidates.append(root / "tasks" / slug)
+        task_dir = None
+        for c in candidates:
+            rc = c.resolve()
+            if is_within(rc, root) and rc.is_dir():
+                task_dir = rc
+                break
+        if task_dir is None:
+            _fail(400, {"ok": False, "error": "invalid task"})
+            return
+        manifest = task_dir / "manifest.md"
+        if not manifest.is_file():
+            _fail(400, {"ok": False, "error": "no manifest"})
+            return
+
+        # Conflict rule: refuse if the file changed under the user since they read it.
+        try:
+            cur_mtime = manifest.stat().st_mtime
+        except OSError as e:
+            _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+            return
+        if base_mtime is not None:
+            try:
+                base = float(base_mtime)
+            except (TypeError, ValueError):
+                base = None
+            if base is not None and abs(cur_mtime - base) > 0.001:
+                _fail(409, {"ok": False, "error": "conflict", "mtime": cur_mtime})
+                return
+
+        try:
+            text = manifest.read_text(encoding="utf-8")
+        except OSError as e:
+            _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+            return
+        new_text = _tasks.rewrite_manifest(text, status=status, plan=plan)
+        if new_text != text:
+            try:
+                manifest.write_text(new_text, encoding="utf-8")
+            except OSError as e:
+                _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+                return
+
+        # Keep the sidecar/table in step with the file. seed_status_from_frontmatter
+        # only fills an EMPTY row (user toggle wins), so a status change must be
+        # pushed explicitly or the sidecar would drift from the file.
+        if status is not None:
+            try:
+                from ..core import db as _db
+                conn = _db.open_db(_DB_PATH)  # ensures schema/migrations exist
+                _db.set_status(conn, slug, repo, status)
+                conn.close()
+            except Exception as e:
+                import sys as _sys2
+                print(f"[manifest-edit] set_status failed: {e}", file=_sys2.stderr)
+
+        rel = manifest.relative_to(root).as_posix()
+        result = self._rebuild(_active_root)
+        if result.returncode != 0:
+            import sys as _sys2
+            print(result.stderr or result.stdout, file=_sys2.stderr)
+        try:
+            new_mtime = manifest.stat().st_mtime
+        except OSError:
+            new_mtime = cur_mtime
+        self._send(200, "application/json",
+                   json.dumps({"ok": True, "rel": rel, "mtime": new_mtime}).encode())
+
+    def _resolve_in_root(self, raw: str):
+        """Resolve a client path (absolute or scan-root-relative) inside the root.
+
+        Returns the resolved Path when it stays within the active scan root, else
+        None. The single containment guard shared by /_doc-raw and /_edit-doc —
+        the same rule GET / _publish-scan use (never an arbitrary filesystem
+        read/write outside the scan root)."""
+        raw = (raw or "").strip()
+        if not raw:
+            return None
+        root = _active_root.resolve()
+        p = Path(raw)
+        if not p.is_absolute():
+            p = root / raw.lstrip("/")
+        resolved = p.resolve()
+        if not is_within(resolved, root):
+            return None
+        return resolved
+
+    def _doc_raw(self, raw: str) -> None:
+        """Return the raw UTF-8 text of an editable doc for the Edit-mode textarea.
+
+        Query param ``?path=<abs-or-rel>``; the path must resolve INSIDE the
+        active scan root (containment guard) and be an editable text doc (same
+        allowlist as /_edit-doc — HTML and internal comment logs are refused). On
+        success returns ``text/plain`` with an ``X-Doc-Mtime`` header carrying the
+        current mtime, so the client can capture ``base_mtime`` for the next save
+        without a second request."""
+        from ..core import tasks as _tasks
+
+        resolved = self._resolve_in_root(raw)
+        if resolved is None:
+            self._send(403, "text/plain", b"Forbidden")
+            return
+        if not resolved.is_file():
+            self._send(404, "text/plain", b"Not found")
+            return
+        if _tasks.editable_doc_reason(resolved) is not None:
+            self._send(400, "text/plain", b"Not an editable text document")
+            return
+        try:
+            text = resolved.read_text(encoding="utf-8", errors="replace")
+            mtime = resolved.stat().st_mtime
+        except OSError as e:
+            self._send(403, "text/plain", str(e).encode())
+            return
+        body = text.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("X-Doc-Mtime", repr(mtime))
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _edit_doc(self, body: dict) -> None:
+        """Whole-file save of ANY editable hub document — the S18 general editor.
+
+        Body is JSON ``{path, content, base_mtime}``. `path` (absolute or
+        scan-root-relative) must resolve INSIDE the active scan root and be an
+        editable TEXT doc: ``.md``/``.markdown``/``.txt`` and the S16 script/probe
+        text files. Refused: ``.html``/``.htm`` (raw HTML editing would break
+        rendered artifacts — out of scope), a task's internal ``comments/`` log,
+        anything escaping the scan root, and a read-only root (403). Conflict rule
+        (identical to /_manifest-edit): `base_mtime` is the mtime the client last
+        read; if the file changed under them → 409 and the write is DISCARDED so
+        the UI can re-read. On success the file is overwritten UTF-8, the index
+        rebuilds (so lineage/FTS reconcile), and the new mtime is returned so the
+        client can update its base for the next save."""
+        from ..core import tasks as _tasks
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        raw = (body.get("path") or "").strip()
+        content = body.get("content")
+        base_mtime = body.get("base_mtime")
+        if not raw:
+            _fail(400, {"ok": False, "error": "path required"})
+            return
+        if not isinstance(content, str):
+            _fail(400, {"ok": False, "error": "content required"})
+            return
+        resolved = self._resolve_in_root(raw)
+        if resolved is None:
+            _fail(403, {"ok": False, "error": "forbidden"})
+            return
+        if not resolved.is_file():
+            _fail(404, {"ok": False, "error": "not_found"})
+            return
+        reason = _tasks.editable_doc_reason(resolved)
+        if reason == "html_unsupported":
+            _fail(400, {"ok": False, "error": "html_unsupported",
+                        "detail": "HTML documents can't be edited inline "
+                                  "(it would break the rendered artifact)."})
+            return
+        if reason is not None:
+            _fail(400, {"ok": False, "error": reason,
+                        "detail": "Only text/markdown documents are editable."})
+            return
+        try:
+            new_mtime = _tasks.write_doc(resolved, content, base_mtime)
+        except _tasks.DocConflict as e:
+            _fail(409, {"ok": False, "error": "conflict", "mtime": e.mtime})
+            return
+        except ValueError as e:
+            _fail(400, {"ok": False, "error": "invalid", "detail": str(e)})
+            return
+        except OSError as e:
+            _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+            return
+
+        root = _active_root.resolve()
+        try:
+            rel = resolved.relative_to(root).as_posix()
+        except ValueError:
+            rel = str(resolved)
+        # Reconcile so the index/lineage/FTS reflect the edit on reload.
+        result = self._rebuild(_active_root)
+        if result.returncode != 0:
+            import sys as _sys2
+            print(result.stderr or result.stdout, file=_sys2.stderr)
+        self._send(200, "application/json",
+                   json.dumps({"ok": True, "rel": rel, "mtime": new_mtime}).encode())
+
+    def _run_dak(self, publish_path, title: str, *, mode=None, slug=None,
+                 dry_run: bool = False):
+        """Spawn the bundled ``dak`` skill to upload ``publish_path``.
+
+        This is the ONE place Hub crosses the network boundary — and it does so
+        by handing off to a **subprocess** (dak reaches Cloudflare). Hub's own
+        code opens no socket; the invariant holds at the process edge.
+
+        Returns ``(url, dry_run, None)`` on success, or
+        ``(None, dry_run, {"error", "detail"})`` on failure — ``dak_unavailable``
+        when the script is missing, or ``publish_failed`` when dak exits
+        non-zero / times out / prints no URL. ``dry_run`` in the return is the
+        EFFECTIVE flag (S14 / #3): body flag OR ``HUB_PUBLISH_DRYRUN=1`` — so
+        callers can be honest about a staged-but-not-live URL. dak writes the
+        final ``https://…workers.dev`` URL as the last non-empty line of stdout.
+        A dry-run passes ``--dry-run`` so dak stages a URL without uploading.
+        """
+        dry = bool(dry_run) or os.environ.get("HUB_PUBLISH_DRYRUN") == "1"
+        dak = (_PKG_ROOT / "plugin" / "hub-agent" / "skills"
+               / "dak" / "scripts" / "dak.py")
+        if not dak.exists():
+            return None, dry, {"error": "dak_unavailable",
+                               "detail": f"dak script not found at {dak} — "
+                                         f"run its one-time setup"}
+        cmd = [sys.executable, str(dak), str(publish_path)]
+        if mode:
+            cmd += ["--mode", mode]
+        if slug:
+            cmd += ["--slug", slug]
+        cmd += ["--title", title]
+        if dry:
+            cmd.append("--dry-run")
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=120)
+        except subprocess.TimeoutExpired:
+            return None, dry, {"error": "publish_failed", "detail": "dak timed out"}
+        except OSError as e:
+            return None, dry, {"error": "publish_failed", "detail": str(e)}
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-8:]
+            return None, dry, {"error": "publish_failed",
+                               "detail": "\n".join(tail) or "dak exited non-zero"}
+        lines = [ln.strip() for ln in (proc.stdout or "").splitlines()
+                 if ln.strip()]
+        url = lines[-1] if lines else ""
+        if not url.startswith("http"):
+            return None, dry, {"error": "publish_failed",
+                               "detail": "dak produced no URL"}
+        return url, dry, None
+
+    def _run_dak_unpublish(self, worker: str):
+        """Spawn ``dak unpublish <worker>`` to take a Cloudflare worker DOWN (S26).
+
+        The revoke twin of :meth:`_run_dak` — same network-boundary discipline:
+        Hub opens no socket; dak (the subprocess) reaches Cloudflare and deletes
+        the worker. Returns ``(True, None)`` when the worker is gone (dak exits
+        zero — including the "already deleted" path, which dak also reports as
+        success), or ``(False, {"error", "detail"})`` on failure —
+        ``dak_unavailable`` when the script is missing, ``unpublish_failed``
+        when dak exits non-zero / times out. Non-crashing: the caller still
+        forgets the local entry and reports the detail.
+        """
+        dak = (_PKG_ROOT / "plugin" / "hub-agent" / "skills"
+               / "dak" / "scripts" / "dak.py")
+        if not dak.exists():
+            return False, {"error": "dak_unavailable",
+                           "detail": f"dak script not found at {dak} — "
+                                     f"run its one-time setup"}
+        cmd = [sys.executable, str(dak), "unpublish", str(worker)]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=120)
+        except subprocess.TimeoutExpired:
+            return False, {"error": "unpublish_failed",
+                           "detail": "dak timed out"}
+        except OSError as e:
+            return False, {"error": "unpublish_failed", "detail": str(e)}
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-8:]
+            return False, {"error": "unpublish_failed",
+                           "detail": "\n".join(tail) or "dak exited non-zero"}
+        return True, None
+
+    @staticmethod
+    def _file_worker_slug(resolved: Path, root: Path) -> str:
+        """Deterministic dak worker name for a single file (S26).
+
+        Derives ``repo``/``task_slug`` from the files index (best-effort — an
+        unindexed file degrades to a repo-less, scan-root-relative slug) and
+        hands off to :func:`core.publish.file_worker_slug`, which encodes the
+        rules: under a task → ``repo-taskslug-filestem``; else →
+        ``repo-relpathNoExt``; the ``(root)`` pseudo-repo drops the repo prefix.
+        Same string every time for the same file → an idempotent, suffix-free URL.
+        """
+        from ..core import publish as _publish
+        from ..core import query
+        try:
+            rel = resolved.relative_to(root).as_posix()
+        except ValueError:
+            rel = resolved.name
+        repo = task_slug = None
+        conn = query.connect()
+        if conn is not None:
+            try:
+                row = conn.execute(
+                    "SELECT repo, task_slug FROM files WHERE rel=? OR abs=? LIMIT 1",
+                    (rel, str(resolved))).fetchone()
+                if row:
+                    repo, task_slug = row[0], row[1]
+            except Exception:
+                pass
+            finally:
+                conn.close()
+        # repo-relative path (strip the leading "<repo>/" that rel carries).
+        repo_rel = rel
+        if repo and repo != "(root)" and rel.startswith(repo + "/"):
+            repo_rel = rel[len(repo) + 1:]
+        suffix = resolved.suffix
+        rel_no_ext = (repo_rel[:-len(suffix)]
+                      if suffix and repo_rel.endswith(suffix) else repo_rel)
+        return _publish.file_worker_slug(repo, rel_no_ext, task_slug=task_slug,
+                                         file_stem=resolved.stem)
+
+    @staticmethod
+    def _resolve_worker(name, default_worker: str, data: dict,
+                        self_key: str | None):
+        """Pick the dak worker slug for a publish (S28). Returns ``(worker, err)``
+        where ``err`` is ``None`` on success or ``(status, payload)`` to fail with.
+
+        Precedence: an explicit non-blank ``name`` (slugified + validated via
+        :func:`core.publish.slug_from_name`) wins; a name that slugifies to
+        nothing is REJECTED (``invalid_name``) rather than silently defaulted. A
+        blank/absent name reuses the worker already recorded for ``self_key`` so a
+        republish stays idempotent to whatever slug was actually used (custom or
+        S26 default); with no record it falls back to ``default_worker``.
+
+        Collision guard: an explicit name matching an EXISTING different-source
+        entry's worker is REJECTED (``name_taken``, 409) so we never hijack
+        another publish's Cloudflare worker. Same-source republish is fine — that
+        entry is ``self_key`` and is excluded.
+        """
+        from ..core import publish as _publish
+        raw = (name or "").strip()
+        if raw:
+            custom = _publish.slug_from_name(raw)
+            if not custom:
+                return None, (400, {"ok": False, "error": "invalid_name",
+                                    "detail": f"'{raw}' has no URL-safe characters"})
+            owner = _publish.worker_owner(data, custom, self_key)
+            if owner:
+                return None, (409, {"ok": False, "error": "name_taken",
+                                    "worker": custom,
+                                    "detail": f"name already used by {owner}"})
+            return custom, None
+        # No explicit name → reuse the recorded worker (idempotent republish of a
+        # custom-named publish), else the deterministic default.
+        entry = data.get(self_key) if self_key else None
+        return ((entry or {}).get("worker") or default_worker), None
+
+    def _publish_scan(self, body: dict) -> None:
+        """Run the shared redaction scanner for one path — the UI's publish gate.
+
+        Body is JSON ``{path}`` (absolute, from a file row's data-abs, or
+        scan-root-relative). The path must resolve INSIDE the active scan root
+        (same containment rule as GET) — no arbitrary filesystem reads. Returns
+        ``{ok, findings, private}`` using the exact same core.publish.scan the
+        CLI uses, so both surfaces share ONE scanner. Hub makes no network call
+        here; this only reads a local file. When the workspace is private we
+        still report ``private: true`` so the UI can refuse consistently.
+        """
+        from ..core import publish as _publish
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        raw = (body.get("path") or "").strip()
+        if not raw:
+            _fail(400, {"ok": False, "error": "path required"})
+            return
+        root = _active_root.resolve()
+        p = Path(raw)
+        if not p.is_absolute():
+            p = root / raw.lstrip("/")
+        resolved = p.resolve()
+        if not is_within(resolved, root):
+            _fail(403, {"ok": False, "error": "forbidden"})
+            return
+        if not resolved.is_file():
+            _fail(404, {"ok": False, "error": "not_found"})
+            return
+        try:
+            text = resolved.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            _fail(403, {"ok": False, "error": "read_failed", "detail": str(e)})
+            return
+        findings = _publish.scan(text)
+        private = config.is_private(config.load_config())
+        # S28 — the deterministic default worker so the UI can show it as the
+        # "publish as" placeholder (the URL name used when the field is blank).
+        self._send(200, "application/json",
+                   json.dumps({"ok": True, "findings": findings,
+                               "private": private,
+                               "worker": self._file_worker_slug(resolved, root)}).encode())
+
+    def _publish(self, body: dict) -> None:
+        """One-click asset publish (roadmap 1f, S11): prepare, run dak, return URL.
+
+        Body is JSON ``{path, redact_indices?:[int], title?, mode?, slug?,
+        dryRun?}``. Re-runs the scan server-side (the client's finding list is
+        advisory only) and, for the ``redact_indices`` subset the user left
+        toggled on, writes a sanitized copy to ``state_dir()/publish`` (the
+        ORIGINAL is never touched) via the same core.publish.redact the CLI uses.
+
+        Then it hands off to the bundled **dak** subprocess (see :meth:`_run_dak`)
+        which performs the Cloudflare upload — Hub itself opens no socket — and
+        returns ``{ok, url}``, recording the published-state under the asset's
+        path. The gate is preserved: refuses when the workspace is private, and
+        refuses when the scan found things the client did not opt to review
+        (no ``redact_indices`` key and no ``review`` flag).
+        """
+        from ..core import publish as _publish
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        if config.is_private(config.load_config()):
+            _fail(403, {"ok": False, "error": "private"})
+            return
+        raw = (body.get("path") or "").strip()
+        if not raw:
+            _fail(400, {"ok": False, "error": "path required"})
+            return
+        root = _active_root.resolve()
+        p = Path(raw)
+        if not p.is_absolute():
+            p = root / raw.lstrip("/")
+        resolved = p.resolve()
+        if not is_within(resolved, root) or not resolved.is_file():
+            _fail(400, {"ok": False, "error": "invalid path"})
+            return
+        try:
+            text = resolved.read_text(encoding="utf-8", errors="replace")
+        except OSError as e:
+            _fail(403, {"ok": False, "error": "read_failed", "detail": str(e)})
+            return
+
+        findings = _publish.scan(text)
+        # Gate: findings must be reviewed. Presence of the redact_indices key
+        # (even empty → "I looked, redact none") or a truthy `review` flag is
+        # the client's acknowledgement. Unreviewed findings → refuse.
+        idx = body.get("redact_indices")
+        reviewed = ("redact_indices" in body) or bool(body.get("review"))
+        if findings and not reviewed:
+            _fail(403, {"ok": False, "error": "unreviewed_findings",
+                        "findings": findings})
+            return
+
+        publish_path = resolved
+        if isinstance(idx, list) and idx and findings:
+            chosen = [findings[i] for i in idx
+                      if isinstance(i, int) and 0 <= i < len(findings)]
+            if chosen:
+                redacted = _publish.redact(text, chosen)
+                copy_dir = config.state_dir() / "publish"
+                copy_dir.mkdir(parents=True, exist_ok=True)
+                copy = copy_dir / f"{resolved.stem}.redacted{resolved.suffix}"
+                try:
+                    copy.write_text(redacted, encoding="utf-8")
+                except OSError as e:
+                    _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+                    return
+                publish_path = copy
+
+        title = (body.get("title") or resolved.stem).strip() or resolved.stem
+        # S26 — publish in dak LIVE mode with a DETERMINISTIC worker slug so the
+        # URL carries NO random suffix and republishing the SAME file overwrites
+        # the SAME URL (idempotent). The worker is derived from the file's place
+        # in the tree (repo + task or repo-relative path), looked up in the index.
+        default_worker = self._file_worker_slug(resolved, root)
+        # S28 — an optional user-supplied `name` picks the worker slug (→ URL). A
+        # blank/absent name reuses the recorded worker (idempotent republish keeps
+        # a custom name) else the S26 deterministic default.
+        data = _publish.load_published()
+        self_key = (_publish.find_asset_key(data, resolved)
+                    or _publish.published_asset_key(resolved))
+        worker, err = self._resolve_worker(
+            body.get("name"), default_worker, data, self_key)
+        if err is not None:
+            _fail(err[0], err[1])
+            return
+
+        # Hand off to the dak subprocess (the network edge). Hub opens no socket.
+        url, dry, err = self._run_dak(publish_path, title, mode="live", slug=worker,
+                                      dry_run=bool(body.get("dryRun")))
+        if err is not None:
+            _fail(200 if err["error"] == "dak_unavailable" else 502,
+                  {"ok": False, "dryRun": dry, **err})
+            return
+        # S14 / #3 — a dry-run stages a URL WITHOUT uploading, so it is not live.
+        # Never record it as published-state (that drives the row's live marker).
+        if not dry:
+            _publish.record_published_asset(resolved, url, mode="live", worker=worker)
+        self._send(200, "application/json", json.dumps({
+            "ok": True,
+            "url": url,
+            "mode": "live",
+            "worker": worker,
+            "dryRun": dry,
+            "copy": str(publish_path) if publish_path != resolved else None,
+        }).encode())
+
+    def _publish_bundle(self, body: dict) -> None:
+        """One-click task-bundle publish (roadmap 1g, S11): render, run dak, URL.
+
+        The UI twin of `hub publish --task`. Body is JSON
+        ``{slug, repo?, include_external?, redact?, review?, dryRun?}``. Renders
+        the bundle with the same pure :func:`render.bundle.render_task_bundle`
+        the CLI uses, writes it under ``state_dir()/publish`` (NEVER the scan
+        root), runs the SAME S5a scan over the produced HTML, then hands off to
+        the bundled **dak** subprocess for the upload (:meth:`_run_dak`) — Hub
+        opens no socket itself. On success it records the published-state in the
+        S5b ``published.json`` sidecar, rebuilds so the row marker updates, and
+        returns ``{ok, url}``. Refuses when private, and refuses when the scan
+        found things and the client neither redacted nor reviewed them.
+        """
+        from ..core import publish as _publish
+        from ..core import query
+        from ..render import bundle as _bundle
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        if config.is_private(config.load_config()):
+            _fail(403, {"ok": False, "error": "private"})
+            return
+        slug = (body.get("slug") or "").strip()
+        repo = (body.get("repo") or "").strip() or None
+        include_external = bool(body.get("include_external"))
+        want_redact = bool(body.get("redact"))
+        if not slug:
+            _fail(400, {"ok": False, "error": "slug required"})
+            return
+
+        conn = query.connect()
+        try:
+            try:
+                html = _bundle.render_task_bundle(
+                    conn, repo, slug, include_external=include_external)
+            except ValueError as e:
+                _fail(404, {"ok": False, "error": "no_such_task", "detail": str(e)})
+                return
+        finally:
+            if conn is not None:
+                conn.close()
+
+        out_dir = config.state_dir() / "publish"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{(repo or 'root')}-{slug}.html"
+        try:
+            out_path.write_text(html, encoding="utf-8")
+        except OSError as e:
+            _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+            return
+
+        findings = _publish.scan(html)
+        # Gate: refuse unreviewed findings (client must redact or explicitly
+        # review). One-click UI sends redact:true so task secrets are sanitized.
+        reviewed = want_redact or bool(body.get("review"))
+        if findings and not reviewed:
+            _fail(403, {"ok": False, "error": "unreviewed_findings",
+                        "findings": findings})
+            return
+
+        publish_path = out_path
+        if want_redact and findings:
+            redacted = _publish.redact(html, findings)
+            publish_path = out_path.with_suffix(".redacted.html")
+            try:
+                publish_path.write_text(redacted, encoding="utf-8")
+            except OSError as e:
+                _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+                return
+
+        # S26 — publish in dak LIVE mode with a DETERMINISTIC worker slug so the
+        # URL has NO random suffix and republishing the SAME task overwrites the
+        # SAME URL (idempotent). repo/slug → "<repo>-<slug>" (bare slug at root).
+        default_worker = _publish.task_worker_slug(repo, slug)
+        # S28 — optional user-supplied `name` picks the worker slug; blank/absent
+        # reuses the recorded worker (idempotent republish) else the S26 default.
+        data = _publish.load_published()
+        self_key = _publish.published_key(repo, slug)
+        worker, w_err = self._resolve_worker(
+            body.get("name"), default_worker, data, self_key)
+        if w_err is not None:
+            _fail(w_err[0], w_err[1])
+            return
+
+        # Hand off to the dak subprocess (network edge); Hub opens no socket.
+        url, dry, err = self._run_dak(publish_path, slug, mode="live", slug=worker,
+                                      dry_run=bool(body.get("dryRun")))
+        if err is not None:
+            _fail(200 if err["error"] == "dak_unavailable" else 502,
+                  {"ok": False, "dryRun": dry, "findings": findings, **err})
+            return
+        # S14 / #3 — a dry-run is not live; don't record published-state or
+        # re-bake the row's PUBLISHED marker for a URL that never uploaded.
+        if not dry:
+            _publish.record_published(repo, slug, url, mode="live", worker=worker)
+            # Re-bake the published map into the page so the row marker updates.
+            result = self._rebuild(_active_root)
+            if result.returncode != 0:
+                print(result.stderr or result.stdout, file=sys.stderr)
+        self._send(200, "application/json", json.dumps({
+            "ok": True,
+            "url": url,
+            "mode": "live",
+            "worker": worker,
+            "dryRun": dry,
+            "bundle": str(out_path),
+            "findings": findings,
+        }).encode())
+
+    def _publish_revoke(self, body: dict) -> None:
+        """UNPUBLISH a published entry (task OR single file): take the Cloudflare
+        worker DOWN via dak, forget the local entry, then rebuild so the marker
+        clears.
+
+        Body is JSON either ``{slug, repo?}`` (a task bundle, the S5b flow) or
+        ``{path}`` (a single published file/artifact — S20). S26: revoke now
+        means a REAL unpublish. Hub derives the deterministic dak **worker** name
+        from the stored entry (its ``worker`` field, else parsed from the stored
+        ``url``, else recomputed deterministically), hands off to the dak
+        SUBPROCESS (``dak unpublish <worker>`` — the network edge; Hub opens no
+        socket) to delete the worker, THEN forgets the local sidecar entry. It
+        never hard-crashes: if dak / the worker is unavailable, it STILL forgets
+        locally and reports the detail. Returns ``{ok, removed, unpublished,
+        detail?}`` so the UI can say "unpublished" vs "forgotten locally (worker
+        take-down failed: …)". The rebuild re-bakes the (now smaller) published
+        map so every surface's PUBLISHED marker updates.
+        """
+        from ..core import publish as _publish
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        data = _publish.load_published()
+        raw = (body.get("path") or "").strip()
+        if raw:
+            # Single-file revoke: resolve the path the SAME way /_publish records
+            # it (root-relative → absolute, then .resolve()), so the asset key
+            # matches what record_published_asset wrote.
+            root = _active_root.resolve()
+            p = Path(raw)
+            if not p.is_absolute():
+                p = root / raw.lstrip("/")
+            resolved = p.resolve()
+            key = _publish.find_asset_key(data, resolved)
+            entry = data.get(key) if key else None
+            worker = ((entry or {}).get("worker")
+                      or _publish.worker_from_url((entry or {}).get("url"))
+                      or self._file_worker_slug(resolved, root))
+            unpublished, u_err = self._unpublish_worker(worker)
+            removed = _publish.revoke_published_asset(resolved)
+        else:
+            slug = (body.get("slug") or "").strip()
+            repo = (body.get("repo") or "").strip() or None
+            if not slug:
+                _fail(400, {"ok": False, "error": "slug or path required"})
+                return
+            entry = data.get(_publish.published_key(repo, slug))
+            worker = ((entry or {}).get("worker")
+                      or _publish.worker_from_url((entry or {}).get("url"))
+                      or _publish.task_worker_slug(repo, slug))
+            unpublished, u_err = self._unpublish_worker(worker)
+            removed = _publish.revoke_published(repo, slug)
+        result = self._rebuild(_active_root)
+        if result.returncode != 0:
+            import sys as _sys2
+            print(result.stderr or result.stdout, file=_sys2.stderr)
+        payload = {"ok": True, "removed": removed, "unpublished": unpublished}
+        if u_err:
+            payload["detail"] = u_err.get("detail")
+            payload["error"] = u_err.get("error")
+        self._send(200, "application/json", json.dumps(payload).encode())
+
+    def _unpublish_worker(self, worker: str | None):
+        """Best-effort ``dak unpublish <worker>`` — returns ``(ok, err_or_None)``.
+
+        A falsy worker (nothing to take down) is a no-op reported as
+        ``(False, None)`` so revoke still forgets the local entry. Wraps
+        :meth:`_run_dak_unpublish` so both revoke branches share one code path.
+        """
+        if not worker:
+            return False, None
+        ok, err = self._run_dak_unpublish(worker)
+        return ok, err
 
     def _save_draw(self, rel, scene, dir_=None, name=None) -> None:
         """Persist an Excalidraw scene into the vault.
@@ -387,6 +1415,204 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             return
         out_rel = target.relative_to(root).as_posix()
         self._send(200, "application/json", json.dumps({"ok": True, "rel": out_rel}).encode())
+
+    def _list_dirs(self, raw: str) -> None:
+        """List immediate subdirectories of a path — the set-root picker backend.
+
+        Read-only: never writes, never scans file contents, just enumerates dirs
+        so the browser can navigate the server's filesystem (a native folder
+        picker can't hand the server a real path). Query param ``?path=<abs>``;
+        empty → the current scan root (falling back to ``$HOME`` if that isn't a
+        readable dir). Returns JSON::
+
+            {"path": "<abs, normalized>",
+             "parent": "<abs or null at fs root>",
+             "dirs": [{"name": "...", "path": "<abs child>"}, ...]}
+
+        Subdirectories only, sorted case-insensitively. Skips non-dirs, hidden
+        dirs (leading dot), and any entry the process can't read. A bad or
+        unreadable ``path`` returns ``{"error": ..., "path": ...}`` with 400 —
+        never a traceback/500.
+        """
+        raw = (raw or "").strip()
+        if raw:
+            base = Path(raw).expanduser()
+        else:
+            base = _active_root
+            if not base.is_dir():
+                base = Path.home()
+        try:
+            p = base.resolve()
+        except OSError as e:
+            self._send(400, "application/json",
+                       json.dumps({"error": str(e), "path": raw}).encode())
+            return
+        if not p.is_dir():
+            self._send(400, "application/json",
+                       json.dumps({"error": "not a directory", "path": str(p)}).encode())
+            return
+
+        dirs = []
+        try:
+            with os.scandir(p) as it:
+                for entry in it:
+                    if entry.name.startswith("."):
+                        continue
+                    try:
+                        if not entry.is_dir(follow_symlinks=True):
+                            continue
+                    except OSError:
+                        continue
+                    dirs.append({"name": entry.name, "path": str(p / entry.name)})
+        except (PermissionError, OSError) as e:
+            self._send(400, "application/json",
+                       json.dumps({"error": str(e), "path": str(p)}).encode())
+            return
+
+        dirs.sort(key=lambda d: d["name"].lower())
+        parent = None if p.parent == p else str(p.parent)
+        self._send(200, "application/json",
+                   json.dumps({"path": str(p), "parent": parent, "dirs": dirs}).encode())
+
+    # ── Settings (S15) ──────────────────────────────────────────────────────
+    def _settings_get(self) -> None:
+        """Return current workspace prefs + dak creds — token ALWAYS masked.
+
+        Workspace prefs come from the hub.toml the Settings panel owns
+        (`config.config_path()`), so what the panel shows is what it will write.
+        The dak block never carries the real token: only ``api_token_set`` (and
+        the safe account_id/subdomain). See config.masked_dak_config.
+        """
+        cfg = config.load_config(config.config_path().parent)
+        port = cfg.get("port")
+        if isinstance(port, bool):
+            port = None
+        elif isinstance(port, int):
+            pass
+        elif isinstance(port, str) and port.strip().isdigit():
+            port = int(port.strip())
+        else:
+            port = None
+        hub = {
+            "default_view": config.resolve_default_view(cfg),
+            "port": port,
+            "exclude_dirs": sorted(config.config_exclude_dirs(cfg)),
+            "private": config.is_private(cfg),
+            "upload_exts": sorted(config.upload_exts(cfg)),
+            "scan_root": str(_active_root),
+        }
+        self._send(200, "application/json",
+                   json.dumps({"ok": True, "hub": hub,
+                               "dak": config.masked_dak_config()}).encode())
+
+    @staticmethod
+    def _split_list(raw) -> list:
+        """Normalize a comma/whitespace list (or an actual list) → [str]."""
+        if isinstance(raw, list):
+            items = [str(x).strip() for x in raw]
+        else:
+            items = re.split(r"[,\s]+", str(raw or ""))
+        return [x for x in (i.strip() for i in items) if x]
+
+    def _settings_post(self, body: dict) -> None:
+        """Write workspace prefs → hub.toml and dak creds → ~/.dak/config.json.
+
+        SECURITY: the API token is written ONLY to ~/.dak/config.json, never to
+        hub.toml (which is indexed and can be embedded/published). config.write_config
+        enforces this at the sink via a fixed key allowlist; here we additionally
+        never copy a dak field into the hub values. The token is overwritten only
+        when the client sends a real new value (not the mask sentinel / not empty),
+        so re-saving other fields keeps the existing token. Nothing here logs the
+        token. Rebuilds after a hub.toml change; a port change is flagged in
+        ``notes`` because hub.toml `port` is read at process start.
+        """
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        hub_in = body.get("hub") if isinstance(body.get("hub"), dict) else {}
+        dak_in = body.get("dak") if isinstance(body.get("dak"), dict) else {}
+        notes: list[str] = []
+
+        # ── validate + normalize workspace prefs ─────────────────────────────
+        hub_vals: dict = {}
+        if "default_view" in hub_in:
+            v = str(hub_in.get("default_view") or "").strip()
+            if v:
+                if v not in ("work", "list", "board", "calendar"):
+                    _fail(400, {"ok": False, "error": "invalid_view"})
+                    return
+                hub_vals["default_view"] = v
+        if "port" in hub_in:
+            raw = hub_in.get("port")
+            if raw not in (None, ""):
+                try:
+                    pi = int(raw)
+                except (TypeError, ValueError):
+                    _fail(400, {"ok": False, "error": "invalid_port"})
+                    return
+                if not (1 <= pi <= 65535):
+                    _fail(400, {"ok": False, "error": "invalid_port"})
+                    return
+                hub_vals["port"] = pi
+        if "exclude_dirs" in hub_in:
+            dirs = self._split_list(hub_in.get("exclude_dirs"))
+            for d in dirs:
+                if "/" in d or "\\" in d or d in (".", ".."):
+                    _fail(400, {"ok": False, "error": "invalid_exclude_dir",
+                                "detail": d})
+                    return
+            hub_vals["exclude_dirs"] = dirs
+        if "upload_exts" in hub_in:
+            exts = []
+            for e in self._split_list(hub_in.get("upload_exts")):
+                e = e.lower()
+                exts.append(e if e.startswith(".") else "." + e)
+            hub_vals["upload_exts"] = exts
+        if "private" in hub_in:
+            pv = hub_in.get("private")
+            if isinstance(pv, str):
+                pv = pv.strip().lower() in ("1", "true", "yes", "on")
+            hub_vals["private"] = bool(pv)
+
+        # ── validate dak creds (token handled specially) ─────────────────────
+        dak_vals: dict = {}
+        for k in ("account_id", "subdomain"):
+            if k in dak_in and dak_in.get(k) is not None:
+                dak_vals[k] = str(dak_in.get(k)).strip()
+        tok = dak_in.get("api_token")
+        if tok is not None:
+            tok = str(tok)
+            if tok.strip() and tok != config.DAK_MASK:
+                dak_vals["api_token"] = tok.strip()
+
+        # ── write hub.toml (workspace prefs) + note a port change ────────────
+        if hub_vals:
+            cfg_path = config.config_path()
+            if "port" in hub_vals:
+                prev = config.resolve_port(config.load_config(cfg_path.parent))
+                if str(hub_vals["port"]) != str(prev):
+                    notes.append("Port change takes effect after you restart the server.")
+            try:
+                config.write_config(hub_vals, cfg_path)
+            except OSError as e:
+                _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+                return
+            # Re-bake the index so default_view / repo chips reflect the change.
+            result = self._rebuild(_active_root)
+            if result.returncode != 0:
+                import sys as _sys2
+                print(result.stderr or result.stdout, file=_sys2.stderr)
+
+        # ── write dak creds (token to ~/.dak/config.json ONLY) ───────────────
+        if dak_vals:
+            try:
+                config.write_dak_config(dak_vals)
+            except OSError as e:
+                _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+                return
+
+        self._send(200, "application/json",
+                   json.dumps({"ok": True, "notes": notes}).encode())
 
     def _run_rebuild(self) -> None:
         result = self._rebuild(_active_root)
@@ -446,6 +1672,101 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         body = f"<ul class='dir-list'>{''.join(rows)}</ul>"
         self._serve_page(url_path, path, body)
 
+    @staticmethod
+    def _published_url(path: Path) -> str:
+        """The live published URL recorded for ``path``, or "" if unpublished.
+
+        Reads the already-written ``published.json`` sidecar, matching the asset
+        entry by realpath (via publish.find_asset_key) so a lookup by the
+        unresolved path still finds a record stored under the resolved abs under a
+        symlinked scan root. Best-effort; any read/parse failure yields "" so doc
+        pages always render."""
+        try:
+            from ..core import publish as _publish
+            data = _publish.load_published()
+            key = _publish.find_asset_key(data, path)
+            entry = data.get(key) if key else None
+            return (entry or {}).get("url", "") or ""
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _doc_comment_cfg(path: Path) -> dict:
+        """Build this doc page's self-sufficient comment/edit context (S21).
+
+        Returns a dict baked into ``window.HUB_DOC`` by :func:`doc_config_script`
+        so the standalone page renders its OWN inline comments and can compose a
+        new one (POST /_note) with no SPA parent. Always carries ``path`` +
+        ``editable``; when the file lives under a task it also carries
+        ``repo``/``slug``/``target`` (enabling the composer) and this file's baked
+        ``notes``. Best-effort — any failure yields the minimal path/editable dict
+        so the page still renders."""
+        from ..core import tasks as _tasks
+
+        try:
+            resolved = path.resolve()
+            editable = _tasks.editable_doc_reason(resolved) is None
+        except Exception:
+            editable = False
+            resolved = path
+        # path baked as scan-root-relative when possible (what /_doc-raw prefers).
+        cfg: dict = {"path": HubHandler._pub_path(path), "editable": editable}
+
+        # Find the owning task dir: the ancestor whose parent is named "tasks".
+        task_dir = None
+        try:
+            for parent in resolved.parents:
+                if parent.parent.name == "tasks":
+                    task_dir = parent
+                    break
+        except Exception:
+            task_dir = None
+        if task_dir is None:
+            return cfg  # not under a task → no commenting, still editable/raw
+
+        root = _active_root.resolve()
+        repo_dir = task_dir.parent.parent  # <root> or <root>/<repo>
+        try:
+            if repo_dir == root:
+                repo = "(root)"
+            else:
+                rel = repo_dir.relative_to(root).as_posix()
+                repo = rel or "(root)"
+        except ValueError:
+            return cfg  # task lives outside the active scan root
+        slug = task_dir.name
+        try:
+            target = resolved.relative_to(task_dir).as_posix()
+        except ValueError:
+            return cfg
+
+        notes = []
+        try:
+            for rec in _tasks.read_notes(task_dir):
+                if (rec.get("target") or "manifest.md") != target:
+                    continue
+                notes.append({
+                    "author": rec.get("author") or "anon",
+                    "body": rec.get("body") or "",
+                    "range": rec.get("range") or "",
+                    "created": rec.get("created") or "",
+                })
+        except Exception:
+            notes = []
+
+        cfg.update({"repo": repo, "slug": slug, "target": target, "notes": notes})
+        return cfg
+
+    @staticmethod
+    def _pub_path(path: Path) -> str:
+        """Path to bake into the doc-page Publish item: scan-root-relative when
+        the file lives under the active root (what /_publish prefers), else the
+        absolute path (still resolved + containment-guarded server-side)."""
+        try:
+            return path.resolve().relative_to(_active_root.resolve()).as_posix()
+        except ValueError:
+            return str(path.resolve())
+
     def _serve_page(self, title: str, path: Path, body: str) -> None:
         try:
             rel = path.resolve().relative_to(_active_root.resolve())
@@ -462,12 +1783,21 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         links = _get_lineage(str(path.resolve()))
         lineage_html = _render_lineage_html(links, self.__class__.server_port)
 
-        if lineage_html:
+        # S6 (2a) — provenance line for agent-generated artifacts (.md/.txt),
+        # read from the file's own front matter. Empty for ordinary files.
+        provenance_html = ""
+        if path.suffix.lower() in (".md", ".markdown", ".txt"):
+            provenance_html = render_provenance(
+                _metadata.extract_provenance(_metadata.read_safe(str(path)))
+            )
+        inject_html = lineage_html + provenance_html
+
+        if inject_html:
             m = re.search(r"</h1>", body)
             if m:
-                body = body[:m.end()] + lineage_html + body[m.end():]
+                body = body[:m.end()] + inject_html + body[m.end():]
             else:
-                body = lineage_html + body
+                body = inject_html + body
 
         # Floating ⋯ actions menu (top-right). Task manifests also get a "New draw"
         # item that opens a blank canvas scoped to this task's draws/ folder.
@@ -485,8 +1815,29 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 )
             except ValueError:
                 pass
+        # S14 / #5 — one-click Publish for any publishable doc (.md/.html). Bake
+        # this file's own path into the item; a tiny inline script does the POST
+        # /_publish and shows the honest published / dry-run / error state.
+        pub_script = ""
+        if path.suffix.lower() in (".md", ".markdown", ".html", ".htm"):
+            # S20/S27 — one wrapped publish-state control. When THIS file is
+            # already published (URL baked from published.json at render time) it
+            # offers Open / ↻ Republish / ✕ Unpublish (parity with the task
+            # marker); otherwise a single Publish. The inline script rewrites it
+            # in place after publish/unpublish — no reload.
+            pub_url = self._published_url(path)
+            menu_items.append(doc_pub_actions(self._pub_path(path), pub_url))
+            pub_script = DOC_PUBLISH_SCRIPT
+        # S21 — this page's self-sufficient comment/edit context (no SPA parent).
+        doc_cfg = self._doc_comment_cfg(path)
+        # ✎ Edit-in-place for any editable text doc (mirrors the /_edit-doc gate).
+        if doc_cfg.get("editable"):
+            menu_items.append(doc_edit_item())
         menu_items.append(DOC_PDF_ITEM)
-        body = doc_menu(menu_items) + body
+        # S21 — self-contained inline comments + "+" gutter composer + editor,
+        # baked with this file's own context. Never present in published bundles.
+        page_scripts = pub_script + doc_config_script(doc_cfg) + DOC_PAGE_SCRIPT
+        body = doc_menu(menu_items) + body + page_scripts
 
         html = _PAGE.format(
             title=title,

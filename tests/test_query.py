@@ -101,6 +101,50 @@ class TestGetTask(_Base):
         self.assertIsNone(query.get_task(None, "auth-refactor"))
 
 
+class TestNotes(_Base):
+    """S7 — comments live in comments/notes.jsonl; one NOTE event per line."""
+
+    def _add_notes(self, *lines):
+        p = self.root / "cortex/tasks/auth-refactor/comments/notes.jsonl"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("".join(l + "\n" for l in lines), encoding="utf-8")
+        os.utime(p, (_TS, _TS))
+        db.upsert(self.conn,
+                  _meta(str(p), "tasks/auth-refactor/comments/notes.jsonl", "note"),
+                  "comments", "")
+        self.conn.commit()
+        db.build_lineage(self.conn)
+        return p
+
+    def test_get_task_returns_comments_parsed_from_lines(self):
+        self._add_notes(
+            '{"id":"a","target":"manifest.md","author":"you",'
+            '"created":"2026-07-22T09:00:00","body":"first note"}',
+            '{"id":"b","target":"artifacts/report.md","range":"L1-L3",'
+            '"author":"you","created":"2026-07-23T09:00:00","body":"second note"}')
+        t = query.get_task(self.conn, "auth-refactor")
+        self.assertEqual([c["body"] for c in t["comments"]], ["first note", "second note"])
+        self.assertEqual(t["comments"][1]["range"], "L1-L3")
+
+    def test_get_task_no_comments_is_empty_list(self):
+        t = query.get_task(self.conn, "auth-refactor")
+        self.assertEqual(t["comments"], [])
+
+    def test_timeline_yields_one_note_event_per_line(self):
+        self._add_notes(
+            '{"id":"a","target":"manifest.md","created":"2026-07-22T09:00:00","body":"one"}',
+            '{"id":"b","target":"manifest.md","created":"2026-07-23T09:00:00","body":"two"}')
+        tl = query.timeline(self.conn, "auth-refactor")
+        note_nodes = [n for n in tl["nodes"] if n["kind"] == "note"]
+        self.assertEqual(len(note_nodes), 2)  # 2 lines → 2 NOTE nodes
+        self.assertEqual({n["at"] for n in note_nodes}, {"2026-07-22", "2026-07-23"})
+        # each note line node gets its own task_has_note edge from the manifest
+        note_ids = {n["id"] for n in note_nodes}
+        note_edges = [e for e in tl["edges"] if e["rel"] == "task_has_note"]
+        self.assertEqual(len(note_edges), 2)
+        self.assertTrue(all(e["from"] == "n1" and e["to"] in note_ids for e in note_edges))
+
+
 class TestTrace(_Base):
     def test_manifest_down_edges(self):
         t = query.trace(self.conn, "tasks/auth-refactor/manifest.md")

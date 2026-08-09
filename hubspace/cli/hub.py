@@ -29,6 +29,7 @@ from .. import __version__
 from ..core import config
 from ..core import db
 from ..core import metadata
+from ..core import query
 from ..core.scan import _included, _meta
 from ..utils.paths import env_path
 from ..utils.text import relative_time
@@ -72,6 +73,8 @@ EXCLUDE_DIRS = {
 }
 EXCLUDE_DIRS |= config.config_exclude_dirs(CONFIG)
 DEFAULT_VIEW = config.resolve_default_view(CONFIG)
+UPLOAD_EXTS = config.upload_exts(CONFIG)  # allowlist mirrored to the UI (1d)
+PRIVATE = config.is_private(CONFIG)       # baked → JS PRIVATE; drops Publish row (1f)
 
 def log(msg: str) -> None:
     print(msg)
@@ -159,9 +162,24 @@ def _first_run_html(root: Path) -> str:
     )
 
 
-def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]", timeline_json: str = "{}", tasks_json: str = "[]") -> str:
-    total     = sum(len(v) for v in groups.values())
-    md_total  = sum(1 for v in groups.values() for f in v if f["ext"] == "md")
+def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: str = "{}", task_status_json: str = "{}", activity_json: str = "[]", timeline_json: str = "{}", tasks_json: str = "[]", task_timeline_json: str = "{}", published_json: str = "{}", provenance_json: str = "{}", notes_json: str = "{}") -> str:
+    # `note`-kind files are the per-task append-only comment log
+    # (comments/notes.jsonl). They stay indexed (FTS + task_has_note lineage +
+    # the // NOTES cards read them), but they are internal storage, not a
+    # document to click into — so they never appear as plain list rows, kind
+    # chips, or counts. See _classify() in scan.py: kind 'note' is exclusively
+    # a comments/*.jsonl file.
+    def _listable(f) -> bool:
+        return f.get("kind") != "note"
+
+    vis_groups = {
+        repo: [f for f in files if _listable(f)]
+        for repo, files in groups.items()
+    }
+    vis_groups = {repo: files for repo, files in vis_groups.items() if files}
+
+    total     = sum(len(v) for v in vis_groups.values())
+    md_total  = sum(1 for v in vis_groups.values() for f in v if f["ext"] == "md")
     html_total = total - md_total
     built     = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -171,7 +189,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         return (name == "(root)", -newest)
 
     rows_html = []
-    for repo, files in sorted(groups.items(), key=repo_recency):
+    for repo, files in sorted(vis_groups.items(), key=repo_recency):
         files.sort(key=lambda f: f["mtime"], reverse=True)
         items = []
         for f in files:
@@ -211,7 +229,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
 
     repo_chips = "".join(
         f'<button class="rchip" data-repo="{html.escape(r.lower())}">{html.escape(r)}</button>'
-        for r, _ in sorted(groups.items(), key=repo_recency)
+        for r, _ in sorted(vis_groups.items(), key=repo_recency)
     )
 
     return _TEMPLATE_PATH.read_text(encoding="utf-8").format(
@@ -224,7 +242,7 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         total=total,
         md_total=md_total,
         html_total=html_total,
-        repo_count=len(groups),
+        repo_count=len(vis_groups),
         body="".join(rows_html) or _first_run_html(ROOT),
         repo_chips=repo_chips,
         fts_json=fts_json,
@@ -233,8 +251,14 @@ def render(groups: dict[str, list[dict]], fts_json: str = "[]", lineage_json: st
         activity_json=activity_json,
         timeline_json=timeline_json,
         tasks_json=tasks_json,
+        task_timeline_json=task_timeline_json,
         server_origin_json=json.dumps(_SERVER_ORIGIN),
         default_view_json=json.dumps(DEFAULT_VIEW),
+        upload_exts_json=json.dumps(sorted(UPLOAD_EXTS)),
+        private_json=json.dumps(PRIVATE),
+        published_json=published_json,
+        provenance_json=provenance_json,
+        notes_json=notes_json,
     )
 
 
@@ -323,6 +347,45 @@ def _cmd_new_task(slug: str, target: Path, with_dirs: list[str] | None = None) -
             print(f"  created  tasks/{slug}/{sub}/")
 
 
+def _cmd_note(path_arg: str, message: str, range_: str | None = None) -> None:
+    """hub note <path> -m "..." [--range L41-L48] — annotate a task file.
+
+    `<path>` is the target file the note is about. Walks up to the nearest
+    `tasks/<slug>/` to find the owning task, then writes the note into that
+    task's `comments/` via the shared `tasks.write_note` (same writer as
+    `POST /_note`). Errors clearly when `<path>` is not under any task.
+    """
+    from ..core import tasks as _tasks
+
+    target = Path(path_arg).expanduser()
+    if not target.is_absolute():
+        target = Path.cwd() / target
+    ctx = _tasks.find_task_for(target)
+    if ctx is None:
+        print(f"  error: {path_arg} is not under a tasks/<slug>/ directory")
+        sys.exit(1)
+    repo_root, slug, target_rel = ctx
+    try:
+        author = subprocess.run(
+            ["git", "-C", str(repo_root), "config", "user.name"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout.strip() or None
+    except Exception:
+        author = None
+    try:
+        note_file, rec = _tasks.write_note(repo_root, slug, target_rel, message,
+                                           author=author, range_=range_)
+    except (_tasks.SlugError, ValueError) as e:
+        print(f"  error: {e}")
+        sys.exit(1)
+    try:
+        rel = note_file.relative_to(repo_root).as_posix()
+    except ValueError:
+        rel = str(note_file)
+    # One line appended to the task's append-only comment log.
+    print(f"  appended  {rel}  (comment {rec['id']} → {rec['target']})")
+
+
 def _cmd_trace(path: str, as_json: bool) -> None:
     """hub trace <path> — print the lineage graph around a file (query.trace)."""
     from ..core import query
@@ -350,8 +413,14 @@ def _cmd_trace(path: str, as_json: bool) -> None:
             print(f"      {s['rel']} [{s['kind']}]")
 
 
-def _cmd_timeline(slug: str, as_json: bool, repo: str | None) -> None:
-    """hub timeline <slug> — print the 2b timeline (JSON) or a chronological list."""
+def _cmd_timeline(slug: str, as_json: bool, as_graph: bool, repo: str | None) -> None:
+    """hub timeline <slug> — the 2b timeline: chronological list, JSON, or graph.
+
+    `--graph` emits the same nodes/edges contract as `--json` (they describe the
+    same graph — layout and colours are the canvas's business, per 2b) and, when
+    a server port is configured, also prints the canvas URL that opens the
+    graph-order canvas for this task.
+    """
     from ..core import query
     conn = query.connect()
     try:
@@ -359,8 +428,15 @@ def _cmd_timeline(slug: str, as_json: bool, repo: str | None) -> None:
     finally:
         if conn is not None:
             conn.close()
-    if as_json:
+    if as_json or as_graph:
         print(json.dumps(result))
+        if as_graph:
+            port = config.resolve_port(CONFIG)
+            if port and result["nodes"]:
+                url = f"http://localhost:{port}/?graph={quote(slug)}"
+                if result.get("task") and repo:
+                    url += f"&repo={quote(repo)}"
+                print(f"# canvas: {url}", file=sys.stderr)
         return
     nodes = sorted(result["nodes"], key=lambda n: (n["at"], n["path"]))
     if not nodes:
@@ -369,6 +445,230 @@ def _cmd_timeline(slug: str, as_json: bool, repo: str | None) -> None:
     print(f"timeline: {result['task']}  ({len(nodes)} events)")
     for n in nodes:
         print(f"  {n['at']}  {n['kind']:9} {n['path']}")
+
+
+def _cmd_draw(name: str | None, task: str | None, repo: str | None) -> None:
+    """hub draw [--task <slug>] [--repo R] [name] — create a blank .excalidraw scene.
+
+    With `--task`, the scene lands in that task's `draws/` (created lazily) at
+    `tasks/<slug>/draws/<name>.excalidraw`; otherwise it is a top-level draw in
+    the scan root. Shares the slug guard with `hub new task` and the draw-stem
+    sanitiser with the server, and never clobbers an existing diagram (a colliding
+    name suffixes `-N`). This is the `D` palette row's CLI equivalent.
+    """
+    from ..core import tasks as _tasks, graph as _graph
+    from .server import _safe_draw_stem
+
+    root = ROOT
+    if repo:
+        if not _tasks.valid_slug(repo):
+            print(f"  error: bad repo '{repo}'")
+            sys.exit(1)
+        root = root / repo
+    if task is not None:
+        if not _tasks.valid_slug(task):
+            print(f"  error: task slug must be lowercase-hyphenated (got '{task}')")
+            sys.exit(1)
+        manifest = root / "tasks" / task / "manifest.md"
+        if not manifest.exists():
+            print(f"  error: not a task — no tasks/{task}/manifest.md under {root}")
+            sys.exit(1)
+        base = root / "tasks" / task / "draws"
+    else:
+        base = root
+    stem = _safe_draw_stem(name)
+    target = base / f"{stem}.excalidraw"
+    n = 2
+    while target.exists():
+        target = base / f"{stem}-{n}.excalidraw"
+        n += 1
+    base.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(_graph.blank_scene()), encoding="utf-8")
+    try:
+        shown = target.relative_to(ROOT).as_posix()
+    except ValueError:
+        shown = str(target)
+    print(f"  created  {shown}")
+
+
+def _dak_script() -> Path:
+    """Path to the bundled dak skill script (may not exist in an installed wheel).
+
+    The hub-agent plugin — dak included — is excluded from the wheel, so in a
+    pip/pipx install this file is absent and we fall back to printing the exact
+    command for the user to run. In a source checkout it is present and we shell
+    out to it. Hub NEVER imports dak; the subprocess boundary is the only link.
+    """
+    return (_HERE.parent / "plugin" / "hub-agent" / "skills"
+            / "dak" / "scripts" / "dak.py")
+
+
+def _cmd_publish(path_arg: str, *, reviewed: bool, do_redact: bool,
+                 dry_run: bool, title: str | None, mode: str | None,
+                 slug: str | None) -> None:
+    """hub publish <path> — the privacy gate + handoff to dak (roadmap 1f).
+
+    Hub does the LOCAL work only: run the redaction scan and (with --redact)
+    prepare a sanitized copy. The actual upload is dak's job — Hub either shells
+    out to the bundled dak script or, if it is absent, prints the exact command.
+    Hub itself makes no network call.
+
+    Gate: findings block publishing unless --i-have-reviewed (publish as-is) or
+    --redact (publish a sanitized copy). With neither flag it is a scan only and
+    exits non-zero when findings exist. `[hub] private = true` refuses entirely.
+    """
+    from ..core import publish as _publish
+
+    if config.is_private(CONFIG):
+        print("  refusing: this workspace is private ([hub] private = true)")
+        sys.exit(2)
+
+    target = Path(path_arg).expanduser()
+    if not target.is_absolute():
+        target = Path.cwd() / target
+    if not target.is_file():
+        print(f"  error: not a file: {path_arg}")
+        sys.exit(1)
+
+    text = metadata.read_safe(str(target))
+    findings = _publish.scan(text)
+
+    if findings:
+        print(f"  {_publish.summary(findings)}")
+    else:
+        print("  ✓ scan clean — no findings")
+
+    publishing = reviewed or do_redact
+    if not publishing:
+        # scan-only mode (--redact-scan or no gate flag)
+        sys.exit(1 if findings else 0)
+
+    # An approved publish. Decide what file dak receives.
+    if do_redact and findings:
+        redacted = _publish.redact(text, findings)
+        copy_dir = config.state_dir() / "publish"
+        copy_dir.mkdir(parents=True, exist_ok=True)
+        copy = copy_dir / f"{target.stem}.redacted{target.suffix}"
+        copy.write_text(redacted, encoding="utf-8")
+        print(f"  redacted copy → {copy}  (original untouched)")
+        publish_path = copy
+    else:
+        publish_path = target
+
+    dak = _dak_script()
+    cmd = ["python3", str(dak), str(publish_path)]
+    if mode:
+        cmd += ["--mode", mode]
+    if slug:
+        cmd += ["--slug", slug]
+    cmd += ["--title", title or target.stem]
+    if dry_run:
+        cmd += ["--dry-run"]
+
+    if not dak.exists():
+        print("  dak not bundled here — run this to publish:")
+        print("    " + " ".join(cmd))
+        return
+    print("  handing off to dak:")
+    print("    " + " ".join(cmd))
+    result = subprocess.run(cmd)
+    sys.exit(result.returncode)
+
+
+def _cmd_publish_task(slug: str, *, repo: str | None, include_external: bool,
+                      out: str | None, reviewed: bool, do_redact: bool,
+                      dry_run: bool, title: str | None, mode: str | None) -> None:
+    """hub publish --task <slug> — freeze a task subtree to self-contained HTML,
+    run the SAME S5a redaction gate over it, then hand off to dak (roadmap 1g).
+
+    Hub's work is pure local rendering (:mod:`render.bundle`) + the shared
+    privacy scan (:mod:`core.publish`); the upload is dak's job. The bundle is
+    written under ``state_dir()/publish/`` — NEVER into the scan root. On a real
+    (non-dry-run) publish that dak accepts, the published-state sidecar records
+    ``{url, at, mode}`` so the hub can show a PUBLISHED marker. ``[hub] private``
+    refuses entirely.
+    """
+    from ..core import publish as _publish
+    from ..core import query
+    from ..render import bundle as _bundle
+
+    if config.is_private(CONFIG):
+        print("  refusing: this workspace is private ([hub] private = true)")
+        sys.exit(2)
+
+    conn = query.connect()
+    try:
+        try:
+            html = _bundle.render_task_bundle(
+                conn, repo, slug, include_external=include_external)
+        except ValueError as e:
+            print(f"  error: {e}")
+            sys.exit(1)
+    finally:
+        if conn is not None:
+            conn.close()
+
+    # Write the bundle under state_dir()/publish — never into the scan root.
+    if out:
+        out_path = Path(out).expanduser()
+        if not out_path.is_absolute():
+            out_path = Path.cwd() / out_path
+    else:
+        stem = f"{(repo or 'root')}-{slug}"
+        out_path = config.state_dir() / "publish" / f"{stem}.html"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(html, encoding="utf-8")
+    print(f"  bundle → {out_path}")
+
+    # Same gate as `hub publish <path>`: scan the PRODUCED HTML.
+    findings = _publish.scan(html)
+    if findings:
+        print(f"  {_publish.summary(findings)}")
+    else:
+        print("  ✓ scan clean — no findings")
+
+    publishing = reviewed or do_redact
+    if not publishing:
+        sys.exit(1 if findings else 0)
+
+    publish_path = out_path
+    if do_redact and findings:
+        redacted = _publish.redact(html, findings)
+        publish_path = out_path.with_suffix(".redacted.html")
+        publish_path.write_text(redacted, encoding="utf-8")
+        print(f"  redacted copy → {publish_path}  (bundle untouched)")
+
+    dak = _dak_script()
+    cmd = ["python3", str(dak), str(publish_path)]
+    if mode:
+        cmd += ["--mode", mode]
+    cmd += ["--slug", slug, "--title", title or slug]
+    if dry_run:
+        cmd += ["--dry-run"]
+
+    if not dak.exists():
+        print("  dak not bundled here — run this to publish:")
+        print("    " + " ".join(cmd))
+        return
+    print("  handing off to dak:")
+    print("    " + " ".join(cmd))
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
+    # Record published-state only on a real, accepted publish (not dry-run).
+    if result.returncode == 0 and not dry_run:
+        import re
+        url = ""
+        for line in (result.stdout or "").splitlines():
+            m = re.search(r"https?://\S+", line)
+            if m:
+                url = m.group(0)
+                break
+        _publish.record_published(repo, slug, url, mode=mode or "snapshot")
+        print(f"  recorded published-state ({_publish.published_path()})")
+    sys.exit(result.returncode)
 
 
 def main() -> None:
@@ -385,6 +685,7 @@ def main() -> None:
             "  hub init                           scaffold tasks/ in the current directory\n"
             "  hub new task add-sso-login         create a task (manifest.md only)\n"
             "  hub new task add-sso-login --with all   ...and pre-create runs/ artifacts/ data/\n"
+            "  hub note tasks/add-sso-login/artifacts/flow.html -m \"rotation window feels short\"\n"
             "  hub serve --port 8787              serve the hub over HTTP (watches + rebuilds)\n"
         ),
     )
@@ -409,6 +710,13 @@ def main() -> None:
              "Safe to re-run on an existing task to add them later.",
     )
 
+    # hub note <path> -m "..." — annotate a task file (roadmap 1e / 2c).
+    note_p = sub.add_parser("note", help="Annotate a task file (hub note <path> -m <msg>)")
+    note_p.add_argument("path", help="Target file the note is about (under a tasks/<slug>/)")
+    note_p.add_argument("-m", "--message", required=True, help="The note body")
+    note_p.add_argument("--range", dest="range", default=None, metavar="L..",
+                        help="Optional line range the note is about, e.g. L41-L48")
+
     # hub mcp serve — MCP stdio server (JSON-RPC 2.0 over newline-delimited
     # stdin/stdout). A daemon, so it has no palette/UI row (roadmap note on 1h).
     mcp_p = sub.add_parser("mcp", help="Run the read-only MCP stdio server (hub mcp serve)")
@@ -423,7 +731,42 @@ def main() -> None:
     timeline_p = sub.add_parser("timeline", help="Show a task timeline (query.timeline)")
     timeline_p.add_argument("slug", help="Task slug (lowercase-hyphenated)")
     timeline_p.add_argument("--json", action="store_true", help="Emit the raw 2b JSON contract")
+    timeline_p.add_argument("--graph", action="store_true",
+                            help="Emit the 2b graph contract (nodes/edges) + canvas URL")
     timeline_p.add_argument("--repo", default=None, help="Owning repo (disambiguates a slug)")
+
+    # hub draw [--task <slug>] [--repo R] [name] — create a blank .excalidraw scene.
+    draw_p = sub.add_parser("draw", help="Create a blank Excalidraw scene (hub draw [--task <slug>] [name])")
+    draw_p.add_argument("name", nargs="?", default=None, help="Diagram name (default: timestamp slug)")
+    draw_p.add_argument("--task", default=None, help="Scope the draw to a task's draws/ folder")
+    draw_p.add_argument("--repo", default=None, help="Owning repo (a subdir of the scan root)")
+
+    # hub publish <path> — privacy gate (scan → review/redact) + handoff to dak.
+    # Hub does the local scan only; dak (a separate script) does the upload.
+    pub_p = sub.add_parser("publish", help="Scan + publish an asset or a whole task via dak (hub publish <path> | --task <slug>)")
+    pub_p.add_argument("path", nargs="?", default=None,
+                       help="File to publish (absolute or CWD-relative). Omit with --task.")
+    # 1g — freeze a whole task subtree to a self-contained bundle and publish it.
+    pub_p.add_argument("--task", default=None,
+                       help="Publish a whole task subtree as one self-contained HTML bundle")
+    pub_p.add_argument("--include-external", dest="include_external", action="store_true",
+                       help="Inline cross-task lineage refs (default: mark them excluded)")
+    pub_p.add_argument("--out", default=None,
+                       help="Bundle output path (default: state_dir()/publish/<repo>-<slug>.html)")
+    pub_p.add_argument("--revoke", action="store_true",
+                       help="With --task: forget the local published-state entry and exit")
+    gate = pub_p.add_mutually_exclusive_group()
+    gate.add_argument("--redact-scan", action="store_true",
+                      help="Only run the scan and exit non-zero if findings exist (default)")
+    gate.add_argument("--i-have-reviewed", dest="reviewed", action="store_true",
+                      help="Publish the file as-is despite findings (you reviewed them)")
+    gate.add_argument("--redact", dest="do_redact", action="store_true",
+                      help="Publish a sanitized copy with findings redacted (original untouched)")
+    pub_p.add_argument("--dry-run", action="store_true", help="Pass --dry-run through to dak")
+    pub_p.add_argument("--title", default=None, help="Title for the published page")
+    pub_p.add_argument("--mode", choices=["snapshot", "live"], default=None, help="dak publish mode")
+    pub_p.add_argument("--slug", default=None, help="dak URL slug")
+    pub_p.add_argument("--repo", default=None, help="With --task: owning repo (disambiguates a slug)")
 
     # hub agent {install|uninstall|status} — persistent launchd agent (macOS).
     # Reusable by both the package launchd script and the plugin daemon script;
@@ -454,6 +797,9 @@ def main() -> None:
     if args.cmd == "new" and getattr(args, "kind", None) == "task":
         _cmd_new_task(args.slug, Path.cwd(), getattr(args, "with_dirs", None))
         return
+    if args.cmd == "note":
+        _cmd_note(args.path, args.message, getattr(args, "range", None))
+        return
     if args.cmd == "agent":
         from .agent import run as agent_run
         agent_run(args)
@@ -466,7 +812,42 @@ def main() -> None:
         _cmd_trace(args.path, args.json)
         return
     if args.cmd == "timeline":
-        _cmd_timeline(args.slug, args.json, args.repo)
+        _cmd_timeline(args.slug, args.json, args.graph, args.repo)
+        return
+    if args.cmd == "draw":
+        _cmd_draw(args.name, args.task, args.repo)
+        return
+    if args.cmd == "publish":
+        if args.task:
+            if args.revoke:
+                from ..core import publish as _publish
+                removed = _publish.revoke_published(args.repo, args.task)
+                print("  revoked" if removed else "  no published-state entry to revoke")
+                return
+            _cmd_publish_task(
+                args.task,
+                repo=args.repo,
+                include_external=args.include_external,
+                out=args.out,
+                reviewed=args.reviewed,
+                do_redact=args.do_redact,
+                dry_run=args.dry_run,
+                title=args.title,
+                mode=args.mode,
+            )
+            return
+        if not args.path:
+            print("  error: give a file path or --task <slug>")
+            sys.exit(1)
+        _cmd_publish(
+            args.path,
+            reviewed=args.reviewed,
+            do_redact=args.do_redact,
+            dry_run=args.dry_run,
+            title=args.title,
+            mode=args.mode,
+            slug=args.slug,
+        )
         return
 
     if args.root:
@@ -503,6 +884,17 @@ def main() -> None:
     for ot in orphan_tasks:
         if (ot["sl"], ot["rp"]) not in existing_keys:
             all_tasks.append(ot)
+
+    # S4a — per-task timeline (the "how this evolved" spine in Trace). Reuse the
+    # 2b contract (query.timeline) so the client renders already-indexed lineage
+    # with no new endpoint. Keyed by "<repo>\t<slug>" for O(1) client lookup.
+    # Bake the full 2b contract ({nodes, edges}) — S4a lists the nodes by date,
+    # S4b (2b) re-renders the same events + edges in graph order on the canvas.
+    task_timelines: dict = {}
+    for t in all_tasks:
+        tl = query.timeline(conn, t["sl"], repo=t["rp"])
+        if tl.get("nodes"):
+            task_timelines[f'{t["rp"]}\t{t["sl"]}'] = {"nodes": tl["nodes"], "edges": tl.get("edges", [])}
     conn.close()
 
     for t in all_tasks:
@@ -518,9 +910,58 @@ def main() -> None:
         {"tasks": timeline_tasks, "commits": git_commits},
         separators=(",", ":"),
     )
+    task_timeline_json = json.dumps(task_timelines, separators=(",", ":"))
+
+    # S12 — bake each task's stored comments so the Trace overlay can render the
+    # // NOTES cards (author · time · body). Comments live in an append-only
+    # JSONL at tasks/<slug>/comments/notes.jsonl; read_notes() returns [] when the
+    # file is absent, so a task with no comments is simply omitted. Keyed by
+    # "<repo>\t<slug>" to match TASK_TIMELINE_DATA. Bodies stay raw data — the UI
+    # escapes them on render.
+    from ..core import tasks as _tasks
+    notes_map: dict = {}
+    for t in all_tasks:
+        if not t.get("abs"):
+            continue
+        task_dir = Path(t["abs"]).parent
+        comments = _tasks.read_notes(task_dir)
+        if not comments:
+            continue
+        notes_map[f'{t["rp"]}\t{t["sl"]}'] = [
+            {"author": c.get("author"), "created": c.get("created"),
+             "body": c.get("body"), "target": c.get("target"),
+             "range": c.get("range")}
+            for c in comments
+        ]
+    notes_json = json.dumps(notes_map, separators=(",", ":"))
+
+    # 1g — bake the published-state sidecar so a published task row can show a
+    # PUBLISHED marker (URL + republish/revoke). Read-only; a missing file → {}.
+    from ..core import publish as _publish
+    # Re-key single-file asset entries to the files-index abs form (unresolved,
+    # what each row bakes as data-abs) so the UI's PUBLISHED_DATA lookup hits even
+    # when the scan root is symlinked (e.g. /var → /private/var). See
+    # publish.realign_asset_keys.
+    _all_abs = [f["abs"] for files in groups.values() for f in files if f.get("abs")]
+    _pub_data = _publish.realign_asset_keys(_publish.load_published(), _all_abs)
+    published_json = json.dumps(_pub_data, separators=(",", ":"))
+
+    # S6 (2a) — bake per-artifact provenance so the UI can show an "ask again"
+    # affordance (copy-only) on agent-generated artifacts. Read straight from
+    # each file's own front matter; only artifacts carry it, so the map is tiny.
+    provenance: dict = {}
+    for repo, files in groups.items():
+        for f in files:
+            if f.get("kind") == "artifact" and Path(f["abs"]).suffix.lower() in (
+                ".html", ".htm", ".md", ".markdown"
+            ):
+                prov = metadata.extract_provenance(metadata.read_safe(f["abs"]))
+                if prov:
+                    provenance[f["abs"]] = prov
+    provenance_json = json.dumps(provenance, separators=(",", ":"))
 
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    OUTPUT.write_text(render(groups, fts_json, lineage_json, task_status_json, activity_json, timeline_json, tasks_json), encoding="utf-8")
+    OUTPUT.write_text(render(groups, fts_json, lineage_json, task_status_json, activity_json, timeline_json, tasks_json, task_timeline_json, published_json, provenance_json, notes_json), encoding="utf-8")
     total = sum(len(v) for v in groups.values())
     log(f"[hub] scanned {ROOT} -> {OUTPUT} ({total} files, {len(groups)} groups, {len(all_tasks)} tasks)")
 

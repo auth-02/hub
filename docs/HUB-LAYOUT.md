@@ -48,6 +48,8 @@ The differentiated structure. A task is a directory under `<repo>/tasks/<slug>/`
 │   └── <name>.{md,html} ← ARTIFACT
 ├── draws/               (optional, created on demand)
 │   └── <name>.excalidraw ← DRAW
+├── comments/            (optional, created on demand)
+│   └── notes.jsonl      ← NOTE (append-only; one JSON comment per line)
 └── data/                (optional, created on demand)
     └── <name>.{xlsx,csv,json,…}  ← DATA
 ```
@@ -56,8 +58,9 @@ The differentiated structure. A task is a directory under `<repo>/tasks/<slug>/`
 - `manifest.md` is what makes the directory a task, and is the **only** thing a
   producer must create. Without it, the directory's files are still indexed but
   show **no trace** (see §6, orphans).
-- The `runs/`, `artifacts/`, `draws/`, and `data/` subdirs are **optional and
-  created lazily** — only when a file first needs to land in one. A fresh task is
+- The `runs/`, `artifacts/`, `draws/`, `comments/`, and `data/` subdirs are
+  **optional and created lazily** — only when a file first needs to land in one.
+  A fresh task is
   just its `manifest.md`; empty scaffolding directories are noise. Producers must
   not pre-create them.
 - `runs/` is partitioned by ISO date directories. The run's date comes from the
@@ -67,6 +70,23 @@ The differentiated structure. A task is a directory under `<repo>/tasks/<slug>/`
   the other subdirs, DRAW is resolved by extension, not by this path (§3), so a
   `.excalidraw` file anywhere is still a DRAW — `draws/` is where the UI's *New
   draw* action and the `hub draw` verb put one when scoped to a task.
+- A task's **code / script / probe files are indexed too** (S16), so they show
+  up in the task's trace instead of being invisible. Any file with a code or
+  text-probe extension (`.py .sh .sql .js .ts .toml .yaml .json .txt …`) that
+  lives **anywhere inside the task subtree** is classified `SCRIPT` (§3). This is
+  scoped strictly to `tasks/<slug>/**` — scripts elsewhere in a repo are *not*
+  swept in — and binaries are never indexed.
+- `comments/` holds **notes** in a single append-only log, `notes.jsonl`,
+  created on demand. Each line is one JSON comment object
+  (`{id, target, range?, author, created, body}`): `target` is the task-relative
+  file the comment is about (defaults to `manifest.md` for a general comment),
+  `range` is an optional line range (`L41-L48`, omitted for general comments),
+  and `id` is a short, stable, deterministic id. Adding a comment **appends one
+  line** and never rewrites or reorders existing lines. The log is a real,
+  diffable, git-tracked, agent-readable file at a predictable path — untouched by
+  `rm hub.db` (the JSONL is the source of truth). Written by `hub note <path>`,
+  the floating comment composer (`c`), or the `POST /_note` endpoint; hub never
+  scaffolds it.
 
 > **`prompts/` is not part of the task unit.** The PROMPT kind (§3) is owned by
 > any pre-existing `prompts/` folder a repo or task already keeps for its own
@@ -88,8 +108,10 @@ Kind is derived purely from path. First match wins, top to bottom:
 | `<repo>/tasks/<slug>/manifest.md`         | TASK     |
 | `<repo>/tasks/<slug>/runs/**`             | RUN      |
 | `<repo>/tasks/<slug>/artifacts/**`        | ARTIFACT |
+| `<repo>/tasks/<slug>/**` with a code/probe ext | SCRIPT |
 | `<repo>/tasks/<slug>/prompts/**`          | PROMPT   |
 | `<repo>/tasks/<slug>/data/**`             | DATA     |
+| `<repo>/tasks/<slug>/comments/notes.jsonl` | NOTE    |
 | `<repo>/docs/**.md`                       | DOC      |
 | any other `.md` / `.html`                 | MD       |
 
@@ -98,6 +120,14 @@ any name- or path-based rule — an Excalidraw canvas is a DRAW wherever it live
 (its conventional home is a task's `draws/`, §2). `MD` is the catch-all and is
 never an error — a repo of loose notes is a valid, fully searchable hub.
 
+`SCRIPT` (S16) is resolved by extension but **only inside a task subtree**
+(`tasks/<slug>/**`) — a code/probe file anywhere else in the vault is not
+indexed. Within the task it wins over the generic `artifacts/` bucket (a probe
+`.py` in `artifacts/` is a SCRIPT, not an ARTIFACT) and covers loose code in the
+task root or a `scripts/`/`probes/` dir, but it does **not** override the
+structured `runs/`, `prompts/`, `data/`, or `comments/` dirs — a `.txt` in
+`prompts/` is still a PROMPT and a `.json` in `data/` is still DATA.
+
 PROMPT is recognized only where a `prompts/` folder already exists; nothing in
 hub or `hub new` creates one (see §2).
 
@@ -105,9 +135,24 @@ hub or `hub new` creates one (see §2).
 
 ## 4. Frontmatter
 
-YAML frontmatter is **optional everywhere**. Hub degrades to sensible defaults.
+YAML frontmatter is **read if present but optional everywhere**. Hub degrades to
+sensible defaults. **Hub no longer *writes* frontmatter** — `hub new` and the
+`POST /_new-task` endpoint emit just a `# Title` H1 (plus an optional `## Plan`).
+A frontmatter block a human or agent authored is still parsed (its `title`/
+`status` are honoured), so both shapes are fully supported.
 
 ### 4.1 Manifest (TASK)
+
+A manifest Hub produces is simply:
+
+```markdown
+# Auth Refactor
+
+## Plan
+- [ ] first step
+```
+
+Frontmatter, if you choose to write it by hand, is still read:
 
 ```yaml
 ---
@@ -119,10 +164,17 @@ tags: [auth, security] # optional
 ---
 ```
 
-- `status` is the **only field that affects the board.** Allowed values:
-  `ongoing`, `paused`, `completed`. If absent or unrecognized, the task is
-  treated as `ongoing` so it is never dropped — but explicit status is
-  recommended.
+- **Status lives in the DB/sidecar, not the file.** It is resolved at runtime
+  from the `task_status` table (backed by the `task-status.json` sidecar, which
+  survives DB resets and branch switches), defaulting to `ongoing`. Frontmatter
+  `status:` is read only as a one-time seed when no status row exists yet (a
+  board toggle or a `hub new --status` choice always wins). Allowed values:
+  `ongoing`, `paused`, `completed`; anything absent/unrecognized → `ongoing`, so
+  a task is never dropped.
+- Editing a task's status in the board persists to the sidecar. If the manifest
+  already has a frontmatter block, its `status:` line is updated in place too;
+  a frontmatter-less manifest (the new default) is left untouched and the status
+  is written to the sidecar only — Hub never injects a frontmatter block.
 - A `plan` checklist in the body (`- [x]` / `- [ ]`) is parsed for the progress
   shown in the trace panel. It is convention, not required.
 
@@ -212,9 +264,10 @@ Producers must not use these for content; hub owns or ignores them:
 - `hub.toml`, `.scan_root`, `.hub.log` — hub config/state.
 - The hub state directory (`$XDG_STATE_HOME/hub` or `~/.local/state/hub`) — never
   inside the scan root.
-- `manifest.md`, `runs/`, `artifacts/`, `draws/`, `prompts/`, `data/` —
-  structural, as defined above. (`prompts/` is reserved when present, but never
-  created by hub.)
+- `manifest.md`, `runs/`, `artifacts/`, `draws/`, `prompts/`, `data/`,
+  `comments/`, `comments/notes.jsonl` — structural, as defined above.
+  (`prompts/` is reserved when present, but never created by hub; `comments/`
+  and its `notes.jsonl` log are created on demand by `hub note` / the composer.)
 
 ---
 
@@ -225,7 +278,7 @@ human) must write to light up the full experience — just the manifest:
 
 ```
 cortex/tasks/auth-refactor/
-└── manifest.md          # ---\nstatus: ongoing\ntitle: Auth Refactor\n---\n# Auth Refactor\n
+└── manifest.md          # # Auth Refactor\n   (no frontmatter; status defaults to ongoing in the DB/sidecar)
 ```
 
 `runs/`, `artifacts/`, and `data/` appear later, each created on demand by the

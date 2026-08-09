@@ -37,6 +37,12 @@ class TestClassify(unittest.TestCase):
         p = Path("/repo/tasks/slug/data/input.csv")
         self.assertEqual(scan._classify(p, "tasks/slug/data/input.csv"), "data")
 
+    def test_comments_notes_jsonl_returns_note(self):
+        # S7 — the append-only comment log classifies as kind:note.
+        p = Path("/repo/tasks/slug/comments/notes.jsonl")
+        self.assertEqual(
+            scan._classify(p, "tasks/slug/comments/notes.jsonl"), "note")
+
     def test_inside_prompts_dir_at_repo_root_returns_none(self):
         # Top-level prompts/ is not in the spec; only tasks/<slug>/prompts/** → prompt
         p = Path("/repo/prompts/system.txt")
@@ -46,6 +52,40 @@ class TestClassify(unittest.TestCase):
         # Bug-fix: tasks/<slug>/prompts/ must classify as prompt, not task
         p = Path("/repo/tasks/slug/prompts/system.txt")
         self.assertEqual(scan._classify(p, "tasks/slug/prompts/system.txt"), "prompt")
+
+    def test_script_py_in_task_root_is_script(self):
+        # S16 — a loose .py in the task root classifies as script.
+        p = Path("/repo/tasks/slug/probe.py")
+        self.assertEqual(scan._classify(p, "tasks/slug/probe.py"), "script")
+
+    def test_script_sh_in_scripts_dir_is_script(self):
+        p = Path("/repo/tasks/slug/scripts/run.sh")
+        self.assertEqual(scan._classify(p, "tasks/slug/scripts/run.sh"), "script")
+
+    def test_script_wins_over_artifacts(self):
+        # S16 — a probe .py in artifacts/ is a script, not an artifact.
+        p = Path("/repo/tasks/slug/artifacts/probe.py")
+        self.assertEqual(scan._classify(p, "tasks/slug/artifacts/probe.py"), "script")
+
+    def test_md_in_artifacts_still_artifact(self):
+        # Non-script exts under artifacts/ keep their kind (regression).
+        p = Path("/repo/tasks/slug/artifacts/note.md")
+        self.assertEqual(scan._classify(p, "tasks/slug/artifacts/note.md"), "artifact")
+
+    def test_script_does_not_override_prompts(self):
+        # A .txt in prompts/ stays a PROMPT, not a script.
+        p = Path("/repo/tasks/slug/prompts/system.txt")
+        self.assertEqual(scan._classify(p, "tasks/slug/prompts/system.txt"), "prompt")
+
+    def test_script_does_not_override_data(self):
+        # A .json in data/ stays DATA, not a script.
+        p = Path("/repo/tasks/slug/data/blob.json")
+        self.assertEqual(scan._classify(p, "tasks/slug/data/blob.json"), "data")
+
+    def test_py_outside_task_not_classified_as_script(self):
+        # Out-of-task code never becomes a script (and _included keeps it out).
+        p = Path("/repo/src/app.py")
+        self.assertIsNone(scan._classify(p, "src/app.py"))
 
     def test_non_manifest_in_tasks_gets_md_catch_all(self):
         # Only manifest.md gets kind=task; other .md in tasks root get MD catch-all
@@ -224,6 +264,28 @@ class TestIncluded(unittest.TestCase):
         self.assertTrue(scan._included(Path("/repo/diagram.excalidraw")))
         self.assertTrue(scan._included(Path("/repo/deep/nested/flow.excalidraw")))
 
+    def test_jsonl_in_comments_dir_included(self):
+        # S7 — the comment log is swept in only under a comments/ dir.
+        self.assertTrue(scan._included(Path("/repo/tasks/slug/comments/notes.jsonl")))
+
+    def test_jsonl_outside_comments_dir_excluded(self):
+        # A stray .jsonl anywhere else is NOT indexed.
+        self.assertFalse(scan._included(Path("/repo/data/events.jsonl")))
+        self.assertFalse(scan._included(Path("/repo/notes.jsonl")))
+
+    def test_script_in_task_subtree_included(self):
+        # S16 — code/probe files inside a task subtree are indexed for lineage.
+        self.assertTrue(scan._included(Path("/repo/tasks/slug/artifacts/probe.py")))
+        self.assertTrue(scan._included(Path("/repo/tasks/slug/scripts/run.sh")))
+        self.assertTrue(scan._included(Path("/repo/tasks/slug/query.sql")))
+        self.assertTrue(scan._included(Path("/repo/tasks/slug/probes/out.txt")))
+
+    def test_script_outside_task_subtree_excluded(self):
+        # S16 — scripts are NOT swept vault-wide; only inside tasks/<slug>/**.
+        self.assertFalse(scan._included(Path("/repo/app.py")))
+        self.assertFalse(scan._included(Path("/repo/src/lib/util.py")))
+        self.assertFalse(scan._included(Path("/repo/scripts/deploy.sh")))
+
 
 class TestSkillSlug(unittest.TestCase):
     def test_skill_md_returns_parent_dir_as_slug(self):
@@ -330,6 +392,33 @@ class TestCmdNewTask(unittest.TestCase):
         self.assertTrue((d / "data").is_dir())
         # manifest untouched on the second run
         self.assertTrue((d / "manifest.md").exists())
+
+
+class TestRenderTemplate(unittest.TestCase):
+    """S4a — render() fills the template (incl. the task_timeline placeholder)
+    with no str.format KeyError, and bakes the per-task timeline into the page."""
+
+    def test_render_fills_all_placeholders(self):
+        # No missing/extra placeholder blows up str.format(); empty groups render.
+        out = hub.render({})
+        self.assertIn("<!DOCTYPE html>", out)
+        self.assertIn("TASK_TIMELINE_DATA", out)
+
+    def test_task_timeline_placeholder_is_baked(self):
+        payload = ('{"cortex\\tauth-refactor":'
+                   '[{"id":"n1","kind":"task","path":"tasks/auth-refactor/manifest.md",'
+                   '"at":"2026-07-22"}]}')
+        out = hub.render({}, task_timeline_json=payload)
+        self.assertIn("const TASK_TIMELINE_DATA=" + payload, out)
+
+    def test_drawer_chrome_is_gone(self):
+        # The timeline drawer (tl-tab / tl-drawer / feed-drawer) was retired; the
+        # global timeline now mounts at the head of Work.
+        out = hub.render({})
+        for gone in ('id="tl-tab"', 'id="tl-drawer"', 'feed-drawer'):
+            self.assertNotIn(gone, out)
+        self.assertIn('id="tl-panel"', out)
+        self.assertIn('id="hub-timeline"', out)
 
 
 if __name__ == "__main__":

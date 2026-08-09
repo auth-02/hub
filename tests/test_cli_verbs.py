@@ -60,7 +60,11 @@ class TestArgParsing(unittest.TestCase):
 
     def test_timeline_args(self):
         cap = self._parse(["timeline", "my-task", "--json", "--repo", "cortex"])
-        self.assertEqual(cap["timeline"], ("my-task", True, "cortex"))
+        self.assertEqual(cap["timeline"], ("my-task", True, False, "cortex"))
+
+    def test_timeline_graph_arg(self):
+        cap = self._parse(["timeline", "my-task", "--graph"])
+        self.assertEqual(cap["timeline"], ("my-task", False, True, None))
 
 
 class TestCmdOutput(unittest.TestCase):
@@ -89,13 +93,19 @@ class TestCmdOutput(unittest.TestCase):
         self.assertIn("task_has_run", out)
 
     def test_timeline_json_contract(self):
-        out = self._run(hub_cli._cmd_timeline, "t", True, None)
+        out = self._run(hub_cli._cmd_timeline, "t", True, False, None)
+        data = json.loads(out)
+        self.assertEqual(set(data), {"task", "nodes", "edges"})
+        self.assertEqual(len(data["nodes"]), 2)
+
+    def test_timeline_graph_emits_contract(self):
+        out = self._run(hub_cli._cmd_timeline, "t", False, True, None)
         data = json.loads(out)
         self.assertEqual(set(data), {"task", "nodes", "edges"})
         self.assertEqual(len(data["nodes"]), 2)
 
     def test_timeline_human(self):
-        out = self._run(hub_cli._cmd_timeline, "t", False, None)
+        out = self._run(hub_cli._cmd_timeline, "t", False, False, None)
         self.assertIn("timeline: t", out)
         self.assertIn("2026-07-22", out)
 

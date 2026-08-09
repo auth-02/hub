@@ -139,6 +139,15 @@ class TestInjectIntoHtml(unittest.TestCase):
         result = render._inject_into_html(src, "", favicon="http://localhost:8787/favicon.svg")
         self.assertIn('rel="icon"', result)
 
+    def test_self_sufficient_doc_script_injected_into_html(self):
+        # S21 — injected HTML docs served live carry the self-sufficient companion
+        # script (window.HUB_DOC + "+" gutter), NOT the old parent-frame forwarder.
+        src = "<html><head></head><body><h1>T</h1></body></html>"
+        result = render._inject_into_html(src, "", doc_cfg={"path": "x.html"})
+        self.assertIn("window.HUB_DOC", result)
+        self.assertIn("hub-line-add", result)
+        self.assertNotIn("window.parent===window", result)
+
     def test_print_button_injected(self):
         src = "<html><head></head><body></body></html>"
         result = render._inject_into_html(src, "")
@@ -146,11 +155,132 @@ class TestInjectIntoHtml(unittest.TestCase):
         self.assertIn("doc-menu", result)
         self.assertIn("window.print()", result)
 
+    def test_publish_item_injected_with_path(self):
+        # S14 / #5 — an HTML doc served with a pub_path gets the ↗ Publish menu
+        # item (path baked in) + the tiny publisher script.
+        src = "<html><head></head><body><h1>Doc</h1></body></html>"
+        result = render._inject_into_html(src, "", pub_path="docs/spec.html")
+        self.assertIn("↗ Publish", result)
+        self.assertIn('data-pub-path="docs/spec.html"', result)
+        self.assertIn("hubPublish", result)
+        self.assertIn("/_publish", result)
+
+    def test_no_publish_item_without_path(self):
+        # No pub_path → the plain print-only menu, no publish affordance.
+        src = "<html><head></head><body></body></html>"
+        result = render._inject_into_html(src, "")
+        self.assertNotIn("↗ Publish", result)
+        self.assertNotIn("hubPublish", result)
+
+
+class TestDocPublishItem(unittest.TestCase):
+    def test_item_bakes_path_and_targets_publish(self):
+        from hubspace.render import doc_publish_item
+        item = doc_publish_item("tasks/x/manifest.md")
+        self.assertIn('data-pub-path="tasks/x/manifest.md"', item)
+        self.assertIn("hubPublish(this)", item)
+        self.assertIn("↗ Publish", item)
+
+    def test_item_escapes_attribute(self):
+        from hubspace.render import doc_publish_item
+        item = doc_publish_item('a"b.md')
+        self.assertNotIn('a"b.md"', item)      # raw quote would break the attr
+        self.assertIn("&quot;", item)
+
+
+class TestDocPubActions(unittest.TestCase):
+    """S27 — the doc-page ⋯ publish-state control block: parity with the task
+    marker (Open / ↻ Republish / ✕ Unpublish when live; a single Publish when
+    not), wrapped so the inline script can rewrite it in place."""
+
+    def test_published_offers_open_republish_unpublish(self):
+        from hubspace.render import doc_pub_actions
+        html = doc_pub_actions("docs/spec.md", "https://x.example/abc")
+        self.assertIn("↗ Open published", html)
+        self.assertIn("↻ Republish", html)
+        self.assertIn("hubRepublish(this)", html)
+        self.assertIn("✕ Unpublish", html)
+        self.assertIn("hubUnpublish(this)", html)
+        self.assertIn("https://x.example/abc", html)
+        # published state offers no bare "Publish" item — Republish takes its place
+        self.assertNotIn("↗ Publish", html)
+        # wrapper carries the path so the in-place swap + republish/unpublish target it
+        self.assertIn('class="doc-pub-actions"', html)
+        self.assertIn('data-pub-path="docs/spec.md"', html)
+
+    def test_unpublished_offers_only_publish(self):
+        from hubspace.render import doc_pub_actions
+        html = doc_pub_actions("docs/spec.md")     # no pub_url → not published
+        self.assertIn("↗ Publish", html)
+        self.assertIn("hubPublish(this)", html)
+        self.assertNotIn("↻ Republish", html)
+        self.assertNotIn("✕ Unpublish", html)
+        self.assertNotIn("↗ Open published", html)
+
+    def test_inject_published_html_has_full_control(self):
+        # A published HTML doc's page gets Open + Republish + Unpublish (+ the
+        # publisher script wiring hubUnpublish/hubRepublish/hubPublish).
+        src = "<html><head></head><body><h1>Doc</h1></body></html>"
+        result = render._inject_into_html(
+            src, "", pub_path="docs/spec.html", pub_url="https://x.example/abc")
+        self.assertIn("↗ Open published", result)
+        self.assertIn("↻ Republish", result)
+        self.assertIn("✕ Unpublish", result)
+        self.assertIn("hubUnpublish", result)
+        self.assertIn("hubRepublish", result)
+        self.assertIn("/_publish-revoke", result)
+
+    def test_inject_unpublished_html_has_only_publish(self):
+        src = "<html><head></head><body><h1>Doc</h1></body></html>"
+        result = render._inject_into_html(src, "", pub_path="docs/spec.html")
+        self.assertIn("↗ Publish", result)
+        self.assertNotIn("↻ Republish", result)
+        self.assertNotIn("✕ Unpublish", result)
+        self.assertNotIn("↗ Open published", result)
+
+
+class TestDocPublishScriptS29(unittest.TestCase):
+    """S29 — themed publish-name input replaces the native prompt, and the
+    triple/stuck 'publishing…' status collapses to a single transient toast."""
+
+    def test_no_native_prompt_in_publish_path(self):
+        from hubspace.render import DOC_PUBLISH_SCRIPT
+        # The name is asked via the themed popover, never the OS prompt dialog.
+        self.assertNotIn("window.prompt(", DOC_PUBLISH_SCRIPT)
+
+    def test_themed_name_popover_emitted(self):
+        from hubspace.render import DOC_PUBLISH_SCRIPT
+        # A self-contained themed input container + Publish/Cancel is built.
+        self.assertIn("doc-pub-namebox", DOC_PUBLISH_SCRIPT)
+        self.assertIn("askName", DOC_PUBLISH_SCRIPT)
+        self.assertIn("dpn-input", DOC_PUBLISH_SCRIPT)
+
+    def test_no_stuck_menu_label(self):
+        from hubspace.render import DOC_PUBLISH_SCRIPT
+        # The old stuck "<verb>…" / "unpublishing…" menu-button labels are gone.
+        self.assertNotIn("btn.textContent=verb", DOC_PUBLISH_SCRIPT)
+        self.assertNotIn("unpublishing\\u2026'", DOC_PUBLISH_SCRIPT)
+        # The action closes the ⋯ menu instead of relabelling a menu item.
+        self.assertIn("closeMenu", DOC_PUBLISH_SCRIPT)
+
+    def test_single_transient_status_no_result_box(self):
+        from hubspace.render import DOC_PUBLISH_SCRIPT
+        # The redundant in-flight doc-pub-result box is dropped; only the toast
+        # remains as the single transient indicator.
+        self.assertNotIn("doc-pub-result", DOC_PUBLISH_SCRIPT)
+        self.assertIn("doc-toast", DOC_PUBLISH_SCRIPT)
+
+    def test_chrome_css_styles_the_popover(self):
+        # The popover is styled from source chrome.css (ui/public → static).
+        src = (Path(__file__).resolve().parent.parent
+               / "hubspace" / "ui" / "public" / "chrome.css")
+        self.assertIn(".doc-pub-namebox", src.read_text(encoding="utf-8"))
+
 
 class TestRenderMd(unittest.TestCase):
     def test_heading(self):
         result = render._render_md("# Hello")
-        self.assertIn("<h1>", result)
+        self.assertIn("<h1", result)
         self.assertIn("Hello", result)
 
     def test_bold(self):
@@ -163,17 +293,17 @@ class TestRenderMd(unittest.TestCase):
 
     def test_code_fence(self):
         result = render._render_md("```python\nprint('hi')\n```")
-        self.assertIn("<pre>", result)
+        self.assertIn("<pre", result)
         self.assertIn("<code", result)
 
     def test_unordered_list(self):
         result = render._render_md("- item one\n- item two")
-        self.assertIn("<ul>", result)
-        self.assertIn("<li>", result)
+        self.assertIn("<ul", result)
+        self.assertIn("<li", result)
 
     def test_ordered_list(self):
         result = render._render_md("1. first\n2. second")
-        self.assertIn("<ol>", result)
+        self.assertIn("<ol", result)
 
     def test_link(self):
         result = render._render_md("[click](http://example.com)")
@@ -183,7 +313,7 @@ class TestRenderMd(unittest.TestCase):
         src = "---\ntitle: T\n---\n# Heading"
         result = render._render_md(src)
         self.assertNotIn("title:", result)
-        self.assertIn("<h1>", result)
+        self.assertIn("<h1", result)
 
     def test_inline_code(self):
         result = render._render_md("use `foo()` here")
@@ -192,12 +322,12 @@ class TestRenderMd(unittest.TestCase):
     def test_table(self):
         src = "| A | B |\n|---|---|\n| 1 | 2 |"
         result = render._render_md(src)
-        self.assertIn("<table>", result)
+        self.assertIn("<table", result)
         self.assertIn("<th ", result)  # class attribute added by typed-column renderer
 
     def test_blockquote(self):
         result = render._render_md("> quoted text")
-        self.assertIn("<blockquote>", result)
+        self.assertIn("<blockquote", result)
 
 
 class TestRenderCsv(unittest.TestCase):
@@ -213,7 +343,7 @@ class TestRenderCsv(unittest.TestCase):
         name = self._write_csv("Name,Age\nAlice,30\nBob,25")
         try:
             result = render._render_csv(__import__("pathlib").Path(name))
-            self.assertIn("<table>", result)
+            self.assertIn("<table", result)
             self.assertIn("Alice", result)
             self.assertIn("Name", result)
         finally:
@@ -223,7 +353,7 @@ class TestRenderCsv(unittest.TestCase):
         name = self._write_csv("Name\tScore\nAlice\t100", suffix=".tsv")
         try:
             result = render._render_csv(__import__("pathlib").Path(name))
-            self.assertIn("<table>", result)
+            self.assertIn("<table", result)
             self.assertIn("Score", result)
         finally:
             os.unlink(name)
@@ -345,7 +475,7 @@ class TestRenderMdExtended(unittest.TestCase):
     def test_nested_list_items(self):
         src = "- parent\n  - child"
         result = render._render_md(src)
-        self.assertIn("<ul>", result)
+        self.assertIn("<ul", result)
 
     def test_xss_in_code_fence_escaped(self):
         src = "```\n<script>alert(1)</script>\n```"
