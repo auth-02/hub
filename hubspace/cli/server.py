@@ -989,6 +989,42 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         return _publish.file_worker_slug(repo, rel_no_ext, task_slug=task_slug,
                                          file_stem=resolved.stem)
 
+    @staticmethod
+    def _resolve_worker(name, default_worker: str, data: dict,
+                        self_key: str | None):
+        """Pick the dak worker slug for a publish (S28). Returns ``(worker, err)``
+        where ``err`` is ``None`` on success or ``(status, payload)`` to fail with.
+
+        Precedence: an explicit non-blank ``name`` (slugified + validated via
+        :func:`core.publish.slug_from_name`) wins; a name that slugifies to
+        nothing is REJECTED (``invalid_name``) rather than silently defaulted. A
+        blank/absent name reuses the worker already recorded for ``self_key`` so a
+        republish stays idempotent to whatever slug was actually used (custom or
+        S26 default); with no record it falls back to ``default_worker``.
+
+        Collision guard: an explicit name matching an EXISTING different-source
+        entry's worker is REJECTED (``name_taken``, 409) so we never hijack
+        another publish's Cloudflare worker. Same-source republish is fine — that
+        entry is ``self_key`` and is excluded.
+        """
+        from ..core import publish as _publish
+        raw = (name or "").strip()
+        if raw:
+            custom = _publish.slug_from_name(raw)
+            if not custom:
+                return None, (400, {"ok": False, "error": "invalid_name",
+                                    "detail": f"'{raw}' has no URL-safe characters"})
+            owner = _publish.worker_owner(data, custom, self_key)
+            if owner:
+                return None, (409, {"ok": False, "error": "name_taken",
+                                    "worker": custom,
+                                    "detail": f"name already used by {owner}"})
+            return custom, None
+        # No explicit name → reuse the recorded worker (idempotent republish of a
+        # custom-named publish), else the deterministic default.
+        entry = data.get(self_key) if self_key else None
+        return ((entry or {}).get("worker") or default_worker), None
+
     def _publish_scan(self, body: dict) -> None:
         """Run the shared redaction scanner for one path — the UI's publish gate.
 
@@ -1027,9 +1063,12 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             return
         findings = _publish.scan(text)
         private = config.is_private(config.load_config())
+        # S28 — the deterministic default worker so the UI can show it as the
+        # "publish as" placeholder (the URL name used when the field is blank).
         self._send(200, "application/json",
                    json.dumps({"ok": True, "findings": findings,
-                               "private": private}).encode())
+                               "private": private,
+                               "worker": self._file_worker_slug(resolved, root)}).encode())
 
     def _publish(self, body: dict) -> None:
         """One-click asset publish (roadmap 1f, S11): prepare, run dak, return URL.
@@ -1105,7 +1144,18 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         # URL carries NO random suffix and republishing the SAME file overwrites
         # the SAME URL (idempotent). The worker is derived from the file's place
         # in the tree (repo + task or repo-relative path), looked up in the index.
-        worker = self._file_worker_slug(resolved, root)
+        default_worker = self._file_worker_slug(resolved, root)
+        # S28 — an optional user-supplied `name` picks the worker slug (→ URL). A
+        # blank/absent name reuses the recorded worker (idempotent republish keeps
+        # a custom name) else the S26 deterministic default.
+        data = _publish.load_published()
+        self_key = (_publish.find_asset_key(data, resolved)
+                    or _publish.published_asset_key(resolved))
+        worker, err = self._resolve_worker(
+            body.get("name"), default_worker, data, self_key)
+        if err is not None:
+            _fail(err[0], err[1])
+            return
 
         # Hand off to the dak subprocess (the network edge). Hub opens no socket.
         url, dry, err = self._run_dak(publish_path, title, mode="live", slug=worker,
@@ -1202,7 +1252,16 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         # S26 — publish in dak LIVE mode with a DETERMINISTIC worker slug so the
         # URL has NO random suffix and republishing the SAME task overwrites the
         # SAME URL (idempotent). repo/slug → "<repo>-<slug>" (bare slug at root).
-        worker = _publish.task_worker_slug(repo, slug)
+        default_worker = _publish.task_worker_slug(repo, slug)
+        # S28 — optional user-supplied `name` picks the worker slug; blank/absent
+        # reuses the recorded worker (idempotent republish) else the S26 default.
+        data = _publish.load_published()
+        self_key = _publish.published_key(repo, slug)
+        worker, w_err = self._resolve_worker(
+            body.get("name"), default_worker, data, self_key)
+        if w_err is not None:
+            _fail(w_err[0], w_err[1])
+            return
 
         # Hand off to the dak subprocess (network edge); Hub opens no socket.
         url, dry, err = self._run_dak(publish_path, slug, mode="live", slug=worker,

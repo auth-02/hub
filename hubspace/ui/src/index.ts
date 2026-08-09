@@ -2280,6 +2280,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
   const pubFileSel=document.getElementById('pal-pub-file');
   const pubFileDD=themeSelect(pubFileSel);
   const pubTitle=document.getElementById('pal-pub-title');
+  const pubName=document.getElementById('pal-pub-name');   // S28 — optional URL name
   const pubScanEl=document.getElementById('pal-pub-scan');
   const pubListEl=document.getElementById('pal-pub-list');
   const pubGoBtn=document.getElementById('pal-pub-go');
@@ -2326,6 +2327,8 @@ document.getElementById('rebuild').addEventListener('click',e=>{
       .then(r=>r.json()).then(d=>{
         pubFindings=(d&&d.findings)||[];
         pubKeep=pubFindings.map(()=>true);  // default: redact everything
+        // S28 — show the deterministic default worker as the "publish as" hint.
+        if(pubName&&d&&d.worker)pubName.placeholder=d.worker;
         pubRenderFindings();
       }).catch(()=>{pubScanEl.textContent='scan failed';pubScanEl.className='pal-pub-scan warn';});
   }
@@ -2344,6 +2347,7 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     if(want&&opts.some(o=>o.abs===want))pubFileSel.value=want;
     pubFileDD.refresh();
     pubTitle.value='';
+    if(pubName)pubName.value='';
     pubScan();
     setTimeout(()=>{pubFileSel.focus();},0);
   }
@@ -2387,7 +2391,8 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     const redact_indices=pubKeep.map((k,i)=>k?i:-1).filter(i=>i>=0);
     pubGoBtn.disabled=true;pubGoBtn.textContent='publishing…';
     fetch('/_publish',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({path:abs,redact_indices:redact_indices,review:true,title:pubTitle.value.trim()})})
+      body:JSON.stringify({path:abs,redact_indices:redact_indices,review:true,
+        title:pubTitle.value.trim(),name:(pubName?pubName.value.trim():'')})})
       .then(r=>r.json().then(d=>({ok:r.ok,d:d})).catch(()=>({ok:r.ok,d:{}})))
       .then(res=>{
         pubGoBtn.disabled=false;pubGoBtn.textContent='Publish';
@@ -2402,6 +2407,8 @@ document.getElementById('rebuild').addEventListener('click',e=>{
         const detail=d.detail?(': '+String(d.detail).split('\n').slice(-1)[0]):'';
         flash(d.error==='private'?'this workspace is private':
               d.error==='dak_unavailable'?'dak not set up — run its one-time setup':
+              d.error==='name_taken'?('name already taken'+detail):
+              d.error==='invalid_name'?('invalid publish name'+detail):
               ('publish failed'+detail));
       }).catch(()=>{pubGoBtn.disabled=false;pubGoBtn.textContent='Publish';flash('publish failed');});
   }
@@ -2426,10 +2433,14 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     if(typeof PRIVATE!=='undefined'&&PRIVATE){flash('this workspace is private');return;}
     const t=task||currentTask();
     if(!t){flash('no task to bundle');return;}
+    // S28 — optional custom URL name. Blank/cancel keeps the S26 default (and a
+    // republish stays idempotent to whatever worker was recorded server-side).
+    const nm=window.prompt('publish as… (URL name; blank = default)','');
+    if(nm===null)return;
     closePalette();
     flashSticky('publishing bundle for '+t.sl+'…');
     fetch('/_publish-bundle',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({slug:t.sl,repo:t.rp,redact:true,review:true})})
+      body:JSON.stringify({slug:t.sl,repo:t.rp,redact:true,review:true,name:nm.trim()})})
       .then(r=>r.json().then(d=>({ok:r.ok,d:d})).catch(()=>({ok:r.ok,d:{}})))
       .then(res=>{
         const d=res.d||{};
@@ -2452,6 +2463,8 @@ document.getElementById('rebuild').addEventListener('click',e=>{
         const detail=d.detail?(': '+String(d.detail).split('\n').slice(-1)[0]):'';
         flash(d.error==='private'?'this workspace is private':
               d.error==='dak_unavailable'?'dak not set up — run its one-time setup':
+              d.error==='name_taken'?('name already taken'+detail):
+              d.error==='invalid_name'?('invalid publish name'+detail):
               ('publish failed'+detail));
       }).catch(()=>flash('publish failed'));
   }

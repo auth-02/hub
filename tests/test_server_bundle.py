@@ -331,6 +331,55 @@ class TestBundleEndpoints(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertFalse(d.get("ok", True))
 
+    # ── S28: optional custom publish name on the task bundle ───────────────────
+    def test_bundle_custom_name_sets_slug(self):
+        # A user-supplied `name` → dak --slug is that name; the recorded worker
+        # matches, so a later republish/unpublish follows the ACTUAL worker.
+        sidecar = Path(self._state) / "published.json"
+        _publish.revoke_published("cortex", "auth-refactor", path=sidecar)
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish-bundle",
+                              {"slug": "auth-refactor", "repo": "cortex",
+                               "name": "My Report!"})
+        self.assertEqual(status, 200)
+        self.assertEqual(d["worker"], "my-report")
+        dak = next(c for c in fake.calls if any("dak.py" in str(x) for x in c))
+        self.assertEqual(dak[dak.index("--slug") + 1], "my-report")
+        pub = _publish.load_published(sidecar)
+        self.assertEqual(
+            pub[_publish.published_key("cortex", "auth-refactor")]["worker"],
+            "my-report")
+        _publish.revoke_published("cortex", "auth-refactor", path=sidecar)
+
+    def test_bundle_blank_name_uses_default(self):
+        sidecar = Path(self._state) / "published.json"
+        _publish.revoke_published("cortex", "auth-refactor", path=sidecar)
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish-bundle",
+                              {"slug": "auth-refactor", "repo": "cortex", "name": ""})
+        self.assertEqual(status, 200)
+        self.assertEqual(d["worker"], "cortex-auth-refactor")
+        _publish.revoke_published("cortex", "auth-refactor", path=sidecar)
+
+    def test_bundle_name_collision_rejected(self):
+        # Naming a bundle the same as an existing DIFFERENT-source entry → 409
+        # name_taken; dak is never spawned (no silent hijack).
+        sidecar = Path(self._state) / "published.json"
+        _publish.record_published("other-repo", "other-task",
+                                  "https://taken.example.workers.dev",
+                                  path=sidecar, worker="taken-name")
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish-bundle",
+                              {"slug": "auth-refactor", "repo": "cortex",
+                               "name": "taken-name"})
+        self.assertEqual(status, 409)
+        self.assertEqual(d.get("error"), "name_taken")
+        self.assertEqual(fake.calls, [])
+        _publish.revoke_published("other-repo", "other-task", path=sidecar)
+
 
 if __name__ == "__main__":
     unittest.main()

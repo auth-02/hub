@@ -200,6 +200,45 @@ def file_worker_slug(repo: str | None, rel_no_ext: str,
     return _worker_slugify(base)
 
 
+def slug_from_name(name: str | None) -> str | None:
+    """Slugify a USER-PROVIDED publish name into a dak-safe worker slug (S28).
+
+    Same rules as the deterministic worker slugs (lowercase, non-alnum runs → '-',
+    collapsed, trimmed, ≤63, DNS/worker-safe) so a name the user types deploys to
+    exactly the worker Hub records and dak creates. Returns ``None`` when the name
+    is empty or slugifies to nothing (e.g. all punctuation) — unlike
+    :func:`_worker_slugify` there is NO ``"artifact"`` fallback: an empty result
+    is a SIGNAL the caller must act on (reject, or fall back to the deterministic
+    default), never a silent rename.
+    """
+    if not name or not name.strip():
+        return None
+    s = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
+    s = re.sub(r"-{2,}", "-", s).strip("-")
+    return s[:63].strip("-") or None
+
+
+def worker_owner(data: dict, worker: str,
+                 self_key: str | None = None) -> str | None:
+    """Return the sidecar key of an EXISTING entry already using dak `worker`,
+    excluding `self_key` (the entry we are about to (re)publish). ``None`` when no
+    OTHER entry claims that worker — i.e. the name is free to use.
+
+    The S28 custom-name collision guard: naming a publish the same as an existing
+    DIFFERENT-source publish would hijack its Cloudflare worker (and a later
+    unpublish would take the wrong one down), so the server refuses. Matches on
+    the recorded ``worker`` field, falling back to the worker parsed from the
+    stored ``url`` for pre-S26 entries that predate the field.
+    """
+    for key, entry in data.items():
+        if key == self_key or not isinstance(entry, dict):
+            continue
+        w = entry.get("worker") or worker_from_url(entry.get("url"))
+        if w and w == worker:
+            return key
+    return None
+
+
 def worker_from_url(url: str | None) -> str | None:
     """Extract the dak worker name from a ``https://<worker>.<sub>.workers.dev`` URL.
 

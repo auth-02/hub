@@ -110,6 +110,12 @@ class TestPublishEndpoints(unittest.TestCase):
         shutil.rmtree(cls._scan_root, ignore_errors=True)
         shutil.rmtree(cls._state, ignore_errors=True)
 
+    def tearDown(self):
+        # Keep published-state from leaking across tests: a recorded worker is
+        # reused on a no-name republish (S28), which would otherwise couple the
+        # order-independent tests to each other.
+        (Path(self._state) / "published.json").unlink(missing_ok=True)
+
     def test_scan_returns_findings(self):
         status, d = _post(self._port, "/_publish-scan", {"path": str(self.asset)})
         self.assertEqual(status, 200)
@@ -264,6 +270,108 @@ class TestPublishEndpoints(unittest.TestCase):
         self.assertIn("dryRun", d)
         # dak received a path (no task-only rejection anywhere)
         self.assertTrue(any(any("dak.py" in str(x) for x in c) for c in fake.calls))
+
+    # ── S28: optional custom publish name (worker/URL slug) ────────────────────
+    def _clear_sidecar(self):
+        (Path(self._state) / "published.json").unlink(missing_ok=True)
+
+    def _slug_of(self, calls):
+        dak = next(c for c in calls if any("dak.py" in str(x) for x in c))
+        return dak[dak.index("--slug") + 1]
+
+    def test_publish_custom_name_sets_slug(self):
+        # A user-supplied name → dak --slug is that name, recorded worker matches.
+        self._clear_sidecar()
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish",
+                              {"path": "report.md", "review": True,
+                               "name": "my-cool-report"})
+        self.assertEqual(status, 200)
+        self.assertTrue(d["ok"])
+        self.assertEqual(d["worker"], "my-cool-report")
+        self.assertEqual(self._slug_of(fake.calls), "my-cool-report")
+        pub = _publish.load_published(Path(self._state) / "published.json")
+        self.assertEqual(pub[_publish.published_asset_key(self.asset)]["worker"],
+                         "my-cool-report")
+
+    def test_publish_name_slugified(self):
+        # Unsafe chars are slugified to a dak/DNS-safe worker before hand-off.
+        self._clear_sidecar()
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish",
+                              {"path": "report.md", "review": True,
+                               "name": "My Cool Report!"})
+        self.assertEqual(status, 200)
+        self.assertEqual(d["worker"], "my-cool-report")
+        self.assertEqual(self._slug_of(fake.calls), "my-cool-report")
+
+    def test_publish_name_empty_after_slug_rejected(self):
+        # A name that slugifies to nothing is rejected (not silently defaulted),
+        # and dak is never spawned.
+        self._clear_sidecar()
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish",
+                              {"path": "report.md", "review": True, "name": "!!!"})
+        self.assertEqual(status, 400)
+        self.assertEqual(d.get("error"), "invalid_name")
+        self.assertEqual(fake.calls, [])
+
+    def test_publish_blank_name_uses_default(self):
+        # Blank/absent name → the S26 deterministic default worker (unchanged).
+        self._clear_sidecar()
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish",
+                              {"path": "report.md", "review": True, "name": "  "})
+        self.assertEqual(status, 200)
+        self.assertEqual(d["worker"], "report")
+        self.assertEqual(self._slug_of(fake.calls), "report")
+
+    def test_publish_name_collision_rejected(self):
+        # Naming a publish the same as an EXISTING different-source entry is a
+        # collision → 409 name_taken (never a silent hijack), dak not spawned.
+        self._clear_sidecar()
+        other = Path(self._scan_root) / "other.md"
+        other.write_text("clean doc\n", encoding="utf-8")
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            s1, d1 = _post(self._port, "/_publish",
+                           {"path": "other.md", "review": True, "name": "shared"})
+        self.assertEqual(s1, 200)
+        self.assertEqual(d1["worker"], "shared")
+        fake2 = _fake_dak()
+        with patch.object(server.subprocess, "run", fake2):
+            s2, d2 = _post(self._port, "/_publish",
+                           {"path": "report.md", "review": True, "name": "shared"})
+        self.assertEqual(s2, 409)
+        self.assertEqual(d2.get("error"), "name_taken")
+        self.assertEqual(fake2.calls, [])
+
+    def test_publish_republish_reuses_recorded_name(self):
+        # Publish with a custom name, then republish with NO name → the recorded
+        # worker is reused (idempotent to the custom URL, not the default).
+        self._clear_sidecar()
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            _post(self._port, "/_publish",
+                  {"path": "report.md", "review": True, "name": "kept-name"})
+        fake2 = _fake_dak()
+        with patch.object(server.subprocess, "run", fake2):
+            status, d = _post(self._port, "/_publish",
+                              {"path": "report.md", "review": True})
+        self.assertEqual(status, 200)
+        self.assertEqual(d["worker"], "kept-name")
+        self.assertEqual(self._slug_of(fake2.calls), "kept-name")
+
+    def test_publish_scan_returns_default_worker(self):
+        # The scan endpoint surfaces the deterministic default worker so the UI
+        # can show it as the "publish as" placeholder.
+        status, d = _post(self._port, "/_publish-scan", {"path": "report.md"})
+        self.assertEqual(status, 200)
+        self.assertEqual(d.get("worker"), "report")
 
 
 if __name__ == "__main__":

@@ -241,6 +241,42 @@ class TestWorkerSlug(unittest.TestCase):
         self.assertEqual(data[publish.published_key("acme", "hello")]["mode"], "live")
 
 
+class TestCustomName(unittest.TestCase):
+    """S28 — user-supplied publish name → slug + collision helpers."""
+
+    def test_slug_from_name_slugifies(self):
+        self.assertEqual(publish.slug_from_name("My Cool Report!"), "my-cool-report")
+        self.assertEqual(publish.slug_from_name("already-safe"), "already-safe")
+
+    def test_slug_from_name_dns_safe_and_capped(self):
+        s = publish.slug_from_name("A" * 80)
+        self.assertLessEqual(len(s), 63)
+        self.assertTrue(all(c.isalnum() or c == "-" for c in s))
+        self.assertFalse(s.startswith("-") or s.endswith("-"))
+
+    def test_slug_from_name_empty_signals_none(self):
+        # Empty or all-punctuation → None (a signal), NOT the "artifact" fallback.
+        self.assertIsNone(publish.slug_from_name(""))
+        self.assertIsNone(publish.slug_from_name("   "))
+        self.assertIsNone(publish.slug_from_name(None))
+        self.assertIsNone(publish.slug_from_name("!!!"))
+
+    def test_worker_owner_detects_other_source(self):
+        data = {
+            "asset\t/a": {"url": "https://x", "worker": "shared"},
+            "asset\t/b": {"url": "https://y", "worker": "unique"},
+        }
+        # "shared" is owned by /a; excluding /a (self) frees it, /b does not.
+        self.assertEqual(publish.worker_owner(data, "shared"), "asset\t/a")
+        self.assertIsNone(publish.worker_owner(data, "shared", "asset\t/a"))
+        self.assertIsNone(publish.worker_owner(data, "unused"))
+
+    def test_worker_owner_falls_back_to_url(self):
+        # Pre-S26 entry with no worker field → parsed from the stored URL.
+        data = {"k": {"url": "https://legacy-name.sub.workers.dev"}}
+        self.assertEqual(publish.worker_owner(data, "legacy-name"), "k")
+
+
 class TestIsPrivate(unittest.TestCase):
     def test_bool_true(self):
         self.assertTrue(config.is_private({"private": True}))

@@ -161,14 +161,16 @@ else{wrap.innerHTML='<button class="doc-menu-item" onclick="hubPublish(this)" da
 'title="Publish this doc to a shareable URL">\\u2197 Publish</button>';}
 }
 // ── publish / republish share one honest scan->review->publish path ────────────
-function doPublish(btn,verb){
+// S28 — `name` (optional) picks the URL worker slug on a FRESH publish; republish
+// passes nothing so the server reuses the recorded worker (stays idempotent).
+function doPublish(btn,verb,name){
 var wrap=wrapOf(btn);var path=pathOf(btn);
 btn.disabled=true;btn.textContent=verb+'\\u2026';toastSticky(verb+' '+fname(path)+'\\u2026');show(verb+'\\u2026','');
 fetch('/_publish-scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path})})
 .then(function(r){return r.json();}).catch(function(){return {};})
 .then(function(sc){var f=(sc&&sc.findings)||[];var idx=f.map(function(_x,i){return i;});
 return fetch('/_publish',{method:'POST',headers:{'Content-Type':'application/json'},
-body:JSON.stringify({path:path,redact_indices:idx,review:true})})
+body:JSON.stringify({path:path,redact_indices:idx,review:true,name:(name||'')})})
 .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});});})
 .then(function(res){btn.disabled=false;
 var d=(res&&res.d)||{};
@@ -188,7 +190,8 @@ if(!wrap)btn.textContent='\\u2197 Publish';}
 }).catch(function(){btn.disabled=false;if(!wrap)btn.textContent='\\u2197 Publish';
 show('<span class="dpr-tag err">publish failed</span>','err');toastFlash('publish failed');});
 }
-window.hubPublish=function(btn){doPublish(btn,'publishing');};
+window.hubPublish=function(btn){var nm=window.prompt('publish as\\u2026 (URL name; blank = default)','');
+if(nm===null)return;doPublish(btn,'publishing',nm.trim());};
 window.hubRepublish=function(btn){doPublish(btn,'republishing');};
 // ── unpublish: real dak take-down via /_publish-revoke, then swap in place ──────
 window.hubUnpublish=function(btn){
