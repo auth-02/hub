@@ -218,6 +218,14 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 self._save_draw(body.get("rel"), body.get("scene"), body.get("dir"), body.get("name"))
             except (ValueError, KeyError) as e:
                 self._send(400, "text/plain", str(e).encode())
+        elif url_path == "/_new-task":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except ValueError as e:
+                self._send(400, "text/plain", str(e).encode())
+                return
+            self._new_task(body)
         elif url_path == "/_task-status":
             length = int(self.headers.get("Content-Length", 0))
             try:
@@ -263,6 +271,69 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             self._send(200, "text/plain", b"ok")
         else:
             self._send(500, "text/plain", result.stderr.encode())
+
+    def _new_task(self, body: dict) -> None:
+        """Write exactly one file — `<repo>/tasks/<slug>/manifest.md` — then rebuild.
+
+        The palette's one write surface (see docs/HUB-LAYOUT.md §2). No folders
+        beyond the task dir, no DB row: the rebuild (same path /_set-root uses)
+        reconciles the new file. Guards: unsafe slug → 400, collision → 409 with
+        a suggested `-N` slug, read-only root → 403. Never overwrites a manifest.
+        """
+        from ..core import tasks as _tasks
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        root = _active_root.resolve()
+        repo = (body.get("repo") or "").strip()
+        title = (body.get("title") or "").strip()
+        slug = (body.get("slug") or "").strip() or slugify(title)
+        status = (body.get("status") or "ongoing").strip()
+        if status not in ("ongoing", "paused", "completed"):
+            status = "ongoing"
+        plan_raw = body.get("plan") or []
+        if isinstance(plan_raw, str):
+            plan = [ln.strip() for ln in plan_raw.splitlines() if ln.strip()]
+        else:
+            plan = [str(x).strip() for x in plan_raw if str(x).strip()]
+
+        if not title:
+            _fail(400, {"ok": False, "error": "title required"})
+            return
+
+        # Resolve repo root under the active scan root. Empty / "(root)" → the
+        # scan root itself (the "(root)" pseudo-repo in HUB-LAYOUT §1).
+        if repo and repo != "(root)":
+            repo_root = (root / repo).resolve()
+            if not is_within(repo_root, root) or not repo_root.is_dir():
+                _fail(400, {"ok": False, "error": "invalid repo"})
+                return
+        else:
+            repo_root = root
+
+        try:
+            path = _tasks.write_manifest(repo_root, slug, title, status, plan=plan)
+        except _tasks.SlugError as e:
+            _fail(400, {"ok": False, "error": "invalid_slug", "detail": str(e)})
+            return
+        except _tasks.TaskExists as e:
+            _fail(409, {"ok": False, "error": "exists",
+                        "slug": e.slug, "suggestion": e.suggestion, "rel": e.rel})
+            return
+        except OSError as e:
+            _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+            return
+
+        rel = path.relative_to(root).as_posix()
+        # Reconcile immediately so the new task appears on reload (the watcher
+        # would also catch it within 3 s, but the UI reloads right after POST).
+        result = self._rebuild(_active_root)
+        if result.returncode != 0:
+            import sys as _sys2
+            print(result.stderr or result.stdout, file=_sys2.stderr)
+        self._send(200, "application/json",
+                   json.dumps({"ok": True, "rel": rel, "slug": slug}).encode())
 
     def _save_draw(self, rel, scene, dir_=None, name=None) -> None:
         """Persist an Excalidraw scene into the vault.

@@ -699,3 +699,348 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     .then(()=>softReload())
     .catch(()=>flash('rebuild failed'));
 });
+
+// ── Command palette (roadmap 1a/1b/2c) ──────────────────────────────────────
+// The ONE write surface. Client-only over data already on the page; the sole
+// network call is POST /_new-task. Distinct from the #q filter (a lens over the
+// current view) — the palette *leaves* the view.
+(function(){
+  const IS_MAC=/Mac|iPhone|iPad|iPod/.test((navigator.platform||'')+' '+(navigator.userAgent||''));
+  const MOD=IS_MAC?'⌘':'Ctrl';
+  const pal=document.getElementById('palette');
+  const palInput=document.getElementById('pal-input');
+  const palResults=document.getElementById('pal-results');
+  const palScope=document.getElementById('pal-scope');
+  const searchScreen=document.getElementById('pal-search-screen');
+  const ntScreen=document.getElementById('pal-newtask-screen');
+  const help=document.getElementById('pal-help');
+  const modLabel=document.getElementById('pal-help-mod');
+  if(modLabel) modLabel.textContent=MOD+'K';
+
+  // ── recents (client-only, cross-reload) ──
+  let recents=[];
+  try{recents=JSON.parse(localStorage.getItem('hub_pal_recent')||'[]');}catch(_){recents=[];}
+  function pushRecent(id){
+    recents=[id,...recents.filter(x=>x!==id)].slice(0,8);
+    try{localStorage.setItem('hub_pal_recent',JSON.stringify(recents));}catch(_){}
+  }
+  const recRank=id=>{const i=recents.indexOf(id);return i<0?99:i;};
+
+  // ── fuzzy scorer: subsequence match, boundary + streak bonuses ──
+  function fuzzy(q,s){
+    q=q.toLowerCase();s=(s||'').toLowerCase();
+    if(!q) return 0;
+    let qi=0,score=0,last=-2;
+    for(let i=0;i<s.length&&qi<q.length;i++){
+      if(s[i]===q[qi]){
+        score+= (i===last+1)?3:1;
+        if(i===0||/[\s/\-_.]/.test(s[i-1])) score+=2;
+        last=i;qi++;
+      }
+    }
+    return qi===q.length?score:-1;
+  }
+
+  function slugifyJS(s){
+    return String(s).toLowerCase().replace(/<[^>]+>/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+  }
+  function repoList(){
+    const s=new Set();
+    document.querySelectorAll('.rchip').forEach(el=>s.add(el.textContent.trim()));
+    TASKS_DATA.forEach(t=>{if(t.rp)s.add(t.rp);});
+    if(!s.size)s.add('(root)');
+    return [...s];
+  }
+
+  const SEC_ORDER=['action','task','file','repo'];
+  const SEC_LABEL={action:'Make',task:'Tasks',file:'Files',repo:'Repos'};
+  const SEC_CLS={action:'make',task:'tasks',file:'files',repo:'repos'};
+  const SCOPE_TYPE={'>':'action','@':'task','/':'file','#':'repo'};
+  const SCOPE_LABEL={'>':'ACTIONS','@':'TASKS','/':'FILES','#':'REPOS'};
+
+  // ── static action rows (Make section — WRITE, oxblood) ──
+  function actions(){
+    return [
+      {type:'action',write:true,id:'act:new-task',key:'N',ic:'✎',label:'New task',
+       cli:'hub new task <slug>',prim:()=>openNewTask('')},
+      {type:'action',write:true,id:'act:new-draw',key:'D',ic:'✎',label:'New draw',
+       cli:'hub draw',prim:()=>{closePalette();window.open('/draw','_blank','noopener');}},
+      {type:'action',write:true,id:'act:new-note',key:'C',ic:'✎',label:'New note',
+       cli:'hub note <path>',prim:()=>{flash('New note lands in a later layer');}},
+      {type:'action',write:true,id:'act:add-data',ic:'✎',label:'Add data',
+       cli:'hub data <path>',prim:()=>{flash('Add data lands in a later layer');}},
+      {type:'action',write:true,id:'act:publish',ic:'✎',label:'Publish',
+       cli:'hub publish',prim:()=>{flash('Publish lands in a later layer');}},
+    ];
+  }
+  function taskItems(){
+    return TASKS_DATA.map(t=>({
+      type:'task',id:'task:'+t.rp+':'+t.sl,label:tagName(t.sl),
+      sub:t.rp+' · tasks/'+t.sl,cli:'hub trace tasks/'+t.sl,abs:t.abs,
+      _match:t.sl+' '+t.rp,copyText:'tasks/'+t.sl,
+      prim:()=>{closePalette();openTrace(t);},
+      shift:()=>{closePalette();if(t.abs)openFloat(t.abs,tagName(t.sl),fileHref(t.abs));},
+    }));
+  }
+  function fileItems(){
+    const out=[];
+    rows.forEach(r=>{
+      const abs=r.dataset.abs;if(!abs)return;
+      const path=r.querySelector('.path')?r.querySelector('.path').textContent:abs;
+      const repo=(r.dataset.search||'').split(' ')[0];
+      out.push({type:'file',id:'file:'+abs,label:path,sub:repo,abs:abs,href:r.href,
+        _match:r.dataset.search||path,copyText:abs,
+        prim:()=>{closePalette();window.open(r.href,'_blank','noopener');},
+        shift:()=>{closePalette();openFloat(abs,path,r.href);}});
+    });
+    return out;
+  }
+  function repoItems(){
+    return repoList().map(rp=>({type:'repo',id:'repo:'+rp,label:rp,sub:'filter to this repo',
+      copyText:rp,
+      prim:()=>{closePalette();toggleRepo(rp.toLowerCase());}}));
+  }
+
+  let scope='';           // one of > @ / #  or ''
+  let palItems=[];        // flat, currently-rendered items
+  let palSel=0;
+
+  function currentTerm(){
+    let v=palInput.value;
+    if(scope) return v;          // scope already stripped from value
+    if(v && SCOPE_TYPE[v[0]]) return v.slice(1).trimStart();
+    return v;
+  }
+
+  function render(){
+    let raw=palInput.value;
+    // Detect a scope prefix typed inline (only meaningful as first char)
+    if(!scope && raw && SCOPE_TYPE[raw[0]]){
+      scope=raw[0];
+      palInput.value=raw.slice(1).trimStart();
+    }
+    palScope.classList.toggle('show',!!scope);
+    palScope.textContent=scope?SCOPE_LABEL[scope]:'';
+    const term=palInput.value.trim();
+
+    let pool=[...actions(),...taskItems(),...fileItems(),...repoItems()];
+    if(scope) pool=pool.filter(it=>it.type===SCOPE_TYPE[scope]);
+
+    const bySec={action:[],task:[],file:[],repo:[]};
+    pool.forEach(it=>{
+      const hay=it.label+' '+(it._match||it.sub||'');
+      const sc=fuzzy(term,hay);
+      if(term && sc<0) return;
+      it._score=sc;bySec[it.type].push(it);
+    });
+    Object.keys(bySec).forEach(k=>{
+      bySec[k].sort((a,b)=> term ? (b._score-a._score)||(recRank(a.id)-recRank(b.id))
+                                 : (recRank(a.id)-recRank(b.id)));
+    });
+
+    const flat=[];let html='';
+    const total=SEC_ORDER.reduce((n,s)=>n+bySec[s].length,0);
+    if(term && total===0){
+      // Empty state → a dead-end becomes a producer.
+      const it={type:'create',id:'create',write:true,ic:'✎',label:'Create task "'+term+'"',
+        cli:'hub new task '+slugifyJS(term),prim:()=>openNewTask(term)};
+      it.shift=it.prim;
+      flat.push(it);
+      html+='<div class="pal-sec make">Make</div>'+rowHTML(it,0);
+    } else {
+      SEC_ORDER.forEach(s=>{
+        if(!bySec[s].length) return;
+        html+='<div class="pal-sec '+SEC_CLS[s]+'">'+SEC_LABEL[s]+'</div>';
+        bySec[s].forEach(it=>{html+=rowHTML(it,flat.length);flat.push(it);});
+      });
+      if(!flat.length) html='<div class="pal-empty">no matches</div>';
+    }
+    palResults.innerHTML=html;
+    palItems=flat;
+    palSel=flat.length?0:-1;
+    paintSel();
+  }
+
+  function rowHTML(it,idx){
+    const cls='pal-row'+(it.write?' write':'');
+    const key=it.key?'<span class="pal-key">'+it.key+'</span>':'<span class="pal-key">·</span>';
+    const ic=it.ic?'<span class="pal-ic">'+it.ic+'</span>':'<span class="pal-ic">'+(it.type==='task'?'◇':it.type==='repo'?'▦':'▪')+'</span>';
+    const sub=it.sub?'<span class="pal-sub">'+esc(it.sub)+'</span>':'';
+    const right=it.cli?'<span class="pal-cli">'+esc(it.cli)+'</span>'
+              :it.type==='file'?'<span class="pal-badge">file</span>':'';
+    return '<div class="'+cls+'" data-i="'+idx+'">'+key+ic+
+      '<span class="pal-main"><span class="pal-label">'+esc(it.label)+'</span>'+sub+'</span>'+right+'</div>';
+  }
+
+  function paintSel(){
+    [...palResults.querySelectorAll('.pal-row')].forEach(el=>{
+      el.classList.toggle('sel',+el.dataset.i===palSel);
+    });
+    const sel=palResults.querySelector('.pal-row.sel');
+    if(sel) sel.scrollIntoView({block:'nearest'});
+  }
+  function move(d){
+    if(!palItems.length) return;
+    palSel=(palSel+d+palItems.length)%palItems.length;
+    paintSel();
+  }
+  function activate(it,mode){
+    if(!it) return;
+    if(mode==='alt'){
+      if(it.type==='action'||it.type==='create'||it.type==='task') copy(it.cli||it.copyText,'copied: '+(it.cli||it.copyText));
+      else copy(it.copyText,'copied path');
+      return;
+    }
+    pushRecent(it.id);
+    if(mode==='shift'&&it.shift) it.shift();
+    else it.prim();
+  }
+
+  // ── palette open/close ──
+  function openPalette(scopeChar){
+    help.classList.remove('show');
+    ntScreen.classList.add('hidden');searchScreen.classList.remove('hidden');
+    scope=scopeChar&&SCOPE_TYPE[scopeChar]?scopeChar:'';
+    pal.classList.add('show');
+    palInput.value='';
+    render();
+    setTimeout(()=>{palInput.focus();},0);
+  }
+  function closePalette(){pal.classList.remove('show');scope='';}
+  window._openPalette=openPalette;
+
+  palInput.addEventListener('input',render);
+  palInput.addEventListener('keydown',e=>{
+    if(e.key==='ArrowDown'||(e.ctrlKey&&e.key==='n')){e.preventDefault();move(1);}
+    else if(e.key==='ArrowUp'||(e.ctrlKey&&e.key==='p')){e.preventDefault();move(-1);}
+    else if(e.key==='Enter'){e.preventDefault();
+      activate(palItems[palSel], e.altKey?'alt':e.shiftKey?'shift':'prim');}
+    else if(e.key==='Escape'){e.preventDefault();
+      if(scope){scope='';palScope.classList.remove('show');render();}
+      else closePalette();}
+    else if(e.key==='Backspace'&&scope&&palInput.value===''){scope='';render();}
+  });
+  palResults.addEventListener('click',e=>{
+    const row=e.target.closest('.pal-row');if(!row)return;
+    activate(palItems[+row.dataset.i], e.altKey?'alt':e.shiftKey?'shift':'prim');
+  });
+  pal.addEventListener('click',e=>{if(e.target===pal)closePalette();});
+  document.getElementById('pal-help-open').addEventListener('click',()=>help.classList.add('show'));
+  document.getElementById('pal-help-close').addEventListener('click',()=>help.classList.remove('show'));
+  help.addEventListener('click',e=>{if(e.target===help)help.classList.remove('show');});
+
+  // ── new-task screen (1b) ──
+  const repoSel=document.getElementById('pal-nt-repo');
+  const titleInput=document.getElementById('pal-nt-title-input');
+  const slugField=document.getElementById('pal-nt-slug');
+  const statusWrap=document.getElementById('pal-nt-status');
+  const planArea=document.getElementById('pal-nt-plan');
+  const preEl=document.getElementById('pal-nt-pre');
+  const pathEl=document.getElementById('pal-nt-path');
+  const createBtn=document.getElementById('pal-nt-create');
+  let ntStatus='ongoing',ntSlug='';
+
+  function taskTaken(repo,slug){return TASKS_DATA.some(t=>t.sl===slug&&t.rp===repo);}
+  function freeSlug(repo,slug){
+    if(!taskTaken(repo,slug)) return {slug:slug,taken:false};
+    let n=2;while(taskTaken(repo,slug+'-'+n))n++;
+    return {slug:slug+'-'+n,taken:true};
+  }
+  function buildManifest(title,status,plan){
+    const today=new Date().toISOString().slice(0,10);
+    const lines=['---','status: '+status,'title: '+title,'created: '+today,'---','','# '+title];
+    if(plan.length){lines.push('','## Plan');plan.forEach(p=>lines.push('- [ ] '+p));}
+    return lines.join('\n')+'\n';
+  }
+  function ntRender(){
+    const title=titleInput.value.trim();
+    const repo=repoSel.value||'(root)';
+    const base=slugifyJS(title);
+    const fs=base?freeSlug(repo,base):{slug:'',taken:false};
+    ntSlug=fs.slug;
+    const plan=planArea.value.split('\n').map(s=>s.trim()).filter(Boolean);
+    preEl.textContent=buildManifest(title||'…',ntStatus,plan);
+    const loc=(repo&&repo!=='(root)'?repo:'tasks').replace(/^tasks$/,'');
+    const prefix=(repo&&repo!=='(root)')?repo+'/':'';
+    pathEl.textContent=prefix+'tasks/'+(ntSlug||'<slug>')+'/manifest.md';
+    if(!base){slugField.innerHTML='';createBtn.disabled=true;return;}
+    createBtn.disabled=false;
+    slugField.innerHTML= fs.taken
+      ? '→ <span class="taken">'+esc(base)+' already exists</span> · using <span class="ok">'+esc(ntSlug)+'</span>'
+      : '→ <span class="ok">'+esc(ntSlug)+' · available</span>';
+  }
+  function openNewTask(prefillTitle){
+    help.classList.remove('show');
+    if(!pal.classList.contains('show')) pal.classList.add('show');
+    searchScreen.classList.add('hidden');ntScreen.classList.remove('hidden');
+    repoSel.innerHTML=repoList().map(r=>'<option value="'+esc(r)+'">'+esc(r)+'</option>').join('');
+    titleInput.value=prefillTitle||'';
+    planArea.value='';
+    ntStatus='ongoing';
+    [...statusWrap.children].forEach(b=>b.classList.toggle('active',b.dataset.status==='ongoing'));
+    ntRender();
+    setTimeout(()=>{titleInput.focus();titleInput.select();},0);
+  }
+  function backToSearch(){ntScreen.classList.add('hidden');searchScreen.classList.remove('hidden');openPalette('');}
+
+  titleInput.addEventListener('input',ntRender);
+  planArea.addEventListener('input',ntRender);
+  repoSel.addEventListener('change',ntRender);
+  statusWrap.addEventListener('click',e=>{
+    const b=e.target.closest('button');if(!b)return;
+    ntStatus=b.dataset.status;
+    [...statusWrap.children].forEach(x=>x.classList.toggle('active',x===b));
+    ntRender();
+  });
+  document.getElementById('pal-nt-back').addEventListener('click',backToSearch);
+  document.getElementById('pal-nt-cancel').addEventListener('click',closePalette);
+  titleInput.addEventListener('keydown',e=>{
+    if(e.key==='Enter'){e.preventDefault();ntCreate();}
+    else if(e.key==='Escape'){e.preventDefault();backToSearch();}
+  });
+  function ntCreate(){
+    const title=titleInput.value.trim();
+    if(!title){flash('title required');return;}
+    const repo=repoSel.value||'(root)';
+    const plan=planArea.value.split('\n').map(s=>s.trim()).filter(Boolean);
+    createBtn.disabled=true;
+    fetch('/_new-task',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({repo:repo,title:title,slug:ntSlug,status:ntStatus,plan:plan})})
+      .then(r=>r.json().then(d=>({ok:r.ok,d:d})).catch(()=>({ok:r.ok,d:{}})))
+      .then(res=>{
+        if(res.ok){flashSticky('creating task…');softReload();return;}
+        createBtn.disabled=false;
+        const d=res.d||{};
+        if(d.error==='exists'){flash('already exists — try "'+(d.suggestion||'')+'"');ntRender();}
+        else flash('new task failed: '+(d.detail||d.error||'unknown'));
+      }).catch(()=>{createBtn.disabled=false;flash('new task failed');});
+  }
+  createBtn.addEventListener('click',ntCreate);
+
+  // ── global hotkeys ──
+  document.addEventListener('keydown',e=>{
+    const k=(e.key||'').toLowerCase();
+    // ⌘K / Ctrl+K (primary) and ⌘P / Ctrl+P — preventDefault both (⌘P collides
+    // with browser print).
+    if((e.metaKey||e.ctrlKey)&&(k==='k'||k==='p')&&!e.altKey){
+      e.preventDefault();
+      pal.classList.contains('show')?closePalette():openPalette('');
+      return;
+    }
+    if(pal.classList.contains('show')) return;
+    if(help.classList.contains('show')){if(e.key==='Escape')help.classList.remove('show');return;}
+    const tag=document.activeElement.tagName;
+    if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT') return;
+    if(e.metaKey||e.ctrlKey||e.altKey) return;
+    if(document.getElementById('trace').classList.contains('show')) return;
+    if(modal.classList.contains('show')) return;
+    // Single-key global shortcuts (n/c/? are new; 1–4/y are additive, no conflict
+    // with the existing j/k/Enter/Esc//' handler above).
+    if(k==='n'){e.preventDefault();openPalette('');openNewTask('');}
+    else if(k==='c'){e.preventDefault();flash('New note lands in a later layer');}
+    else if(e.key==='?'){e.preventDefault();help.classList.add('show');}
+    else if(k==='y'){e.preventDefault();document.getElementById('tl-tab').click();}
+    else if('1234'.includes(e.key)&&window._setView){
+      e.preventDefault();window._setView(['work','list','board','calendar'][+e.key-1]);}
+  });
+})();
