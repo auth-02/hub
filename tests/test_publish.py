@@ -174,6 +174,73 @@ class TestPublishCLI(unittest.TestCase):
 
 # ── config.is_private ─────────────────────────────────────────────────────────
 
+# ── S26 — deterministic dak worker slugs (live-mode, suffix-free, idempotent) ──
+class TestWorkerSlug(unittest.TestCase):
+    def test_task_slug_real_repo(self):
+        # real repo → slug(<repo>-<slug>)
+        self.assertEqual(publish.task_worker_slug("acme-api", "hello"),
+                         "acme-api-hello")
+
+    def test_task_slug_root_pseudo_repo(self):
+        # the (root) pseudo-repo → bare slug(<slug>)
+        self.assertEqual(publish.task_worker_slug("(root)", "hello"), "hello")
+        self.assertEqual(publish.task_worker_slug(None, "hello"), "hello")
+        self.assertEqual(publish.task_worker_slug("", "hello"), "hello")
+
+    def test_task_slug_is_dns_safe_and_deterministic(self):
+        s1 = publish.task_worker_slug("Acme_API!!", "Hello World")
+        s2 = publish.task_worker_slug("Acme_API!!", "Hello World")
+        self.assertEqual(s1, s2)                 # idempotent — same string twice
+        self.assertEqual(s1, "acme-api-hello-world")
+        self.assertTrue(all(c.isalnum() or c == "-" for c in s1))
+
+    def test_task_slug_capped_at_63(self):
+        s = publish.task_worker_slug("r" * 40, "s" * 40)
+        self.assertLessEqual(len(s), 63)
+
+    def test_file_slug_under_task(self):
+        # under a task → slug(<repo>-<taskslug>-<fileStem>)
+        self.assertEqual(
+            publish.file_worker_slug("acme-api", "tasks/hello/artifacts/report",
+                                     task_slug="hello", file_stem="report"),
+            "acme-api-hello-report")
+
+    def test_file_slug_under_task_root(self):
+        self.assertEqual(
+            publish.file_worker_slug("(root)", "report",
+                                     task_slug="hello", file_stem="report"),
+            "hello-report")
+
+    def test_file_slug_loose_doc(self):
+        # not under a task → slug(<repo>-<relpathNoExt>)
+        self.assertEqual(
+            publish.file_worker_slug("acme-api", "docs/guide"),
+            "acme-api-docs-guide")
+
+    def test_file_slug_loose_doc_root(self):
+        self.assertEqual(publish.file_worker_slug("(root)", "report"), "report")
+
+    def test_worker_from_url(self):
+        self.assertEqual(
+            publish.worker_from_url("https://acme-api-hello.sub.workers.dev"),
+            "acme-api-hello")
+        self.assertEqual(
+            publish.worker_from_url("https://report-abc123.atharva-dak.workers.dev"),
+            "report-abc123")
+        self.assertIsNone(publish.worker_from_url(""))
+        self.assertIsNone(publish.worker_from_url("https://example.com/x"))
+
+    def test_record_stores_worker_field(self):
+        import tempfile as _tf
+        sidecar = Path(_tf.mkdtemp()) / "published.json"
+        publish.record_published("acme", "hello", "https://x", mode="live",
+                                 path=sidecar, worker="acme-hello")
+        data = publish.load_published(sidecar)
+        self.assertEqual(data[publish.published_key("acme", "hello")]["worker"],
+                         "acme-hello")
+        self.assertEqual(data[publish.published_key("acme", "hello")]["mode"], "live")
+
+
 class TestIsPrivate(unittest.TestCase):
     def test_bool_true(self):
         self.assertTrue(config.is_private({"private": True}))

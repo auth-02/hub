@@ -160,6 +160,28 @@ class TestPublishEndpoints(unittest.TestCase):
         self.assertIn(_publish.published_asset_key(self.asset), pub)
         self.assertEqual(pub[_publish.published_asset_key(self.asset)]["url"], _FAKE_URL)
 
+    def test_publish_live_mode_deterministic_worker(self):
+        # S26 — asset publish uses dak LIVE mode with a DETERMINISTIC worker slug
+        # derived from the file (no random suffix), records that worker, and is
+        # idempotent (SAME file → SAME worker on republish).
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish",
+                              {"path": "report.md", "review": True})
+        self.assertEqual(status, 200)
+        self.assertTrue(d["ok"])
+        self.assertEqual(d["mode"], "live")
+        self.assertEqual(d["worker"], "report")   # loose doc at root → bare stem
+        dak = next(c for c in fake.calls if any("dak.py" in str(x) for x in c))
+        self.assertIn("--mode", dak)
+        self.assertEqual(dak[dak.index("--mode") + 1], "live")
+        self.assertEqual(dak[dak.index("--slug") + 1], "report")
+        # recorded published-state carries the stable worker (revoke uses it).
+        pub = _publish.load_published(Path(self._state) / "published.json")
+        entry = pub[_publish.published_asset_key(self.asset)]
+        self.assertEqual(entry["worker"], "report")
+        self.assertEqual(entry["mode"], "live")
+
     def test_publish_gate_refuses_unreviewed_findings(self):
         # No redact_indices key and no review flag → the findings gate refuses,
         # and dak is never spawned.

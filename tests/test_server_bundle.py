@@ -207,16 +207,102 @@ class TestBundleEndpoints(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertEqual(d.get("error"), "private")
 
-    def test_revoke_removes_sidecar_entry(self):
-        _publish.record_published("cortex", "auth-refactor", "https://x",
+    def test_bundle_live_mode_deterministic_worker(self):
+        # S26 — the bundle publishes in dak LIVE mode with a DETERMINISTIC worker
+        # slug (repo-slug, no random suffix), records that worker, and is
+        # IDEMPOTENT: publishing the SAME task twice yields the SAME worker.
+        _publish.revoke_published("cortex", "auth-refactor",
                                   path=Path(self._state) / "published.json")
-        status, d = _post(self._port, "/_publish-revoke",
-                          {"slug": "auth-refactor", "repo": "cortex"})
+        expect = _publish.task_worker_slug("cortex", "auth-refactor")
+        self.assertEqual(expect, "cortex-auth-refactor")
+
+        def _worker_of(fake):
+            dak = next(c for c in fake.calls if any("dak.py" in str(x) for x in c))
+            self.assertIn("--mode", dak)
+            self.assertEqual(dak[dak.index("--mode") + 1], "live")
+            self.assertIn("--slug", dak)
+            return dak[dak.index("--slug") + 1]
+
+        fake1 = _fake_dak()
+        with patch.object(server.subprocess, "run", fake1):
+            _post(self._port, "/_publish-bundle",
+                  {"slug": "auth-refactor", "repo": "cortex"})
+        w1 = _worker_of(fake1)
+        self.assertEqual(w1, expect)
+        pub = _publish.load_published(Path(self._state) / "published.json")
+        self.assertEqual(pub[_publish.published_key("cortex", "auth-refactor")]["worker"],
+                         expect)
+        self.assertEqual(pub[_publish.published_key("cortex", "auth-refactor")]["mode"],
+                         "live")
+
+        # republish the SAME task — SAME worker slug (idempotent, same URL).
+        fake2 = _fake_dak()
+        with patch.object(server.subprocess, "run", fake2):
+            _post(self._port, "/_publish-bundle",
+                  {"slug": "auth-refactor", "repo": "cortex"})
+        self.assertEqual(_worker_of(fake2), w1)
+        _publish.revoke_published("cortex", "auth-refactor",
+                                  path=Path(self._state) / "published.json")
+
+    def test_revoke_removes_sidecar_entry(self):
+        # S26 — revoke UNPUBLISHES: it hands the stored worker to `dak unpublish`
+        # (mocked) AND forgets the local entry. Returns unpublished:true on ok.
+        _publish.record_published("cortex", "auth-refactor", "https://x",
+                                  path=Path(self._state) / "published.json",
+                                  worker="cortex-auth-refactor")
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish-revoke",
+                              {"slug": "auth-refactor", "repo": "cortex"})
         self.assertEqual(status, 200)
         self.assertTrue(d["ok"])
         self.assertTrue(d["removed"])
+        self.assertTrue(d["unpublished"])
+        # dak unpublish was spawned with the stored worker name
+        unp = next(c for c in fake.calls
+                   if any("dak.py" in str(x) for x in c) and "unpublish" in c)
+        self.assertIn("cortex-auth-refactor", unp)
         data = _publish.load_published(Path(self._state) / "published.json")
         self.assertEqual(data, {})
+
+    def test_revoke_forgets_locally_when_dak_fails(self):
+        # S26 — a dak take-down failure NEVER hard-crashes: the local entry is
+        # still forgotten and the response carries unpublished:false + a detail.
+        _publish.record_published("cortex", "auth-refactor", "https://x",
+                                  path=Path(self._state) / "published.json",
+                                  worker="cortex-auth-refactor")
+
+        def _run(cmd, *a, **kw):
+            if any("dak.py" in str(c) for c in cmd) and "unpublish" in cmd:
+                return subprocess.CompletedProcess(cmd, 1, stdout="",
+                                                   stderr="worker not found\n")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with patch.object(server.subprocess, "run", _run):
+            status, d = _post(self._port, "/_publish-revoke",
+                              {"slug": "auth-refactor", "repo": "cortex"})
+        self.assertEqual(status, 200)
+        self.assertTrue(d["ok"])
+        self.assertTrue(d["removed"])
+        self.assertFalse(d["unpublished"])
+        self.assertIn("worker not found", d.get("detail", ""))
+        self.assertEqual(_publish.load_published(Path(self._state) / "published.json"), {})
+
+    def test_revoke_derives_worker_from_url_when_field_absent(self):
+        # A pre-S26 entry has no `worker` field; revoke recovers it by parsing
+        # the stored workers.dev URL and unpublishes that worker.
+        _publish.record_published(
+            "cortex", "auth-refactor",
+            "https://cortex-auth-refactor.sub.workers.dev",
+            path=Path(self._state) / "published.json")
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish-revoke",
+                              {"slug": "auth-refactor", "repo": "cortex"})
+        self.assertTrue(d["unpublished"])
+        unp = next(c for c in fake.calls
+                   if any("dak.py" in str(x) for x in c) and "unpublish" in c)
+        self.assertIn("cortex-auth-refactor", unp)
 
     def test_revoke_by_path_removes_asset_entry(self):
         # S20 — /_publish-revoke with a {path} body forgets a single-file asset
@@ -227,7 +313,9 @@ class TestBundleEndpoints(unittest.TestCase):
         _publish.record_published_asset(asset, "https://asset")
         self.assertIn(_publish.published_asset_key(asset),
                       _publish.load_published(sidecar))
-        status, d = _post(self._port, "/_publish-revoke", {"path": str(asset)})
+        fake = _fake_dak()
+        with patch.object(server.subprocess, "run", fake):
+            status, d = _post(self._port, "/_publish-revoke", {"path": str(asset)})
         self.assertEqual(status, 200)
         self.assertTrue(d["ok"])
         self.assertTrue(d["removed"])

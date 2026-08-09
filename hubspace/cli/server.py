@@ -915,6 +915,79 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                                "detail": "dak produced no URL"}
         return url, dry, None
 
+    def _run_dak_unpublish(self, worker: str):
+        """Spawn ``dak unpublish <worker>`` to take a Cloudflare worker DOWN (S26).
+
+        The revoke twin of :meth:`_run_dak` — same network-boundary discipline:
+        Hub opens no socket; dak (the subprocess) reaches Cloudflare and deletes
+        the worker. Returns ``(True, None)`` when the worker is gone (dak exits
+        zero — including the "already deleted" path, which dak also reports as
+        success), or ``(False, {"error", "detail"})`` on failure —
+        ``dak_unavailable`` when the script is missing, ``unpublish_failed``
+        when dak exits non-zero / times out. Non-crashing: the caller still
+        forgets the local entry and reports the detail.
+        """
+        dak = (_PKG_ROOT / "plugin" / "hub-agent" / "skills"
+               / "dak" / "scripts" / "dak.py")
+        if not dak.exists():
+            return False, {"error": "dak_unavailable",
+                           "detail": f"dak script not found at {dak} — "
+                                     f"run its one-time setup"}
+        cmd = [sys.executable, str(dak), "unpublish", str(worker)]
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True,
+                                  timeout=120)
+        except subprocess.TimeoutExpired:
+            return False, {"error": "unpublish_failed",
+                           "detail": "dak timed out"}
+        except OSError as e:
+            return False, {"error": "unpublish_failed", "detail": str(e)}
+        if proc.returncode != 0:
+            tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-8:]
+            return False, {"error": "unpublish_failed",
+                           "detail": "\n".join(tail) or "dak exited non-zero"}
+        return True, None
+
+    @staticmethod
+    def _file_worker_slug(resolved: Path, root: Path) -> str:
+        """Deterministic dak worker name for a single file (S26).
+
+        Derives ``repo``/``task_slug`` from the files index (best-effort — an
+        unindexed file degrades to a repo-less, scan-root-relative slug) and
+        hands off to :func:`core.publish.file_worker_slug`, which encodes the
+        rules: under a task → ``repo-taskslug-filestem``; else →
+        ``repo-relpathNoExt``; the ``(root)`` pseudo-repo drops the repo prefix.
+        Same string every time for the same file → an idempotent, suffix-free URL.
+        """
+        from ..core import publish as _publish
+        from ..core import query
+        try:
+            rel = resolved.relative_to(root).as_posix()
+        except ValueError:
+            rel = resolved.name
+        repo = task_slug = None
+        conn = query.connect()
+        if conn is not None:
+            try:
+                row = conn.execute(
+                    "SELECT repo, task_slug FROM files WHERE rel=? OR abs=? LIMIT 1",
+                    (rel, str(resolved))).fetchone()
+                if row:
+                    repo, task_slug = row[0], row[1]
+            except Exception:
+                pass
+            finally:
+                conn.close()
+        # repo-relative path (strip the leading "<repo>/" that rel carries).
+        repo_rel = rel
+        if repo and repo != "(root)" and rel.startswith(repo + "/"):
+            repo_rel = rel[len(repo) + 1:]
+        suffix = resolved.suffix
+        rel_no_ext = (repo_rel[:-len(suffix)]
+                      if suffix and repo_rel.endswith(suffix) else repo_rel)
+        return _publish.file_worker_slug(repo, rel_no_ext, task_slug=task_slug,
+                                         file_stem=resolved.stem)
+
     def _publish_scan(self, body: dict) -> None:
         """Run the shared redaction scanner for one path — the UI's publish gate.
 
@@ -1027,11 +1100,14 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 publish_path = copy
 
         title = (body.get("title") or resolved.stem).strip() or resolved.stem
-        mode = body.get("mode") if body.get("mode") in ("snapshot", "live") else None
-        slug = (body.get("slug") or "").strip() or None
+        # S26 — publish in dak LIVE mode with a DETERMINISTIC worker slug so the
+        # URL carries NO random suffix and republishing the SAME file overwrites
+        # the SAME URL (idempotent). The worker is derived from the file's place
+        # in the tree (repo + task or repo-relative path), looked up in the index.
+        worker = self._file_worker_slug(resolved, root)
 
         # Hand off to the dak subprocess (the network edge). Hub opens no socket.
-        url, dry, err = self._run_dak(publish_path, title, mode=mode, slug=slug,
+        url, dry, err = self._run_dak(publish_path, title, mode="live", slug=worker,
                                       dry_run=bool(body.get("dryRun")))
         if err is not None:
             _fail(200 if err["error"] == "dak_unavailable" else 502,
@@ -1040,10 +1116,12 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         # S14 / #3 — a dry-run stages a URL WITHOUT uploading, so it is not live.
         # Never record it as published-state (that drives the row's live marker).
         if not dry:
-            _publish.record_published_asset(resolved, url, mode or "snapshot")
+            _publish.record_published_asset(resolved, url, mode="live", worker=worker)
         self._send(200, "application/json", json.dumps({
             "ok": True,
             "url": url,
+            "mode": "live",
+            "worker": worker,
             "dryRun": dry,
             "copy": str(publish_path) if publish_path != resolved else None,
         }).encode())
@@ -1120,8 +1198,13 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
                 return
 
+        # S26 — publish in dak LIVE mode with a DETERMINISTIC worker slug so the
+        # URL has NO random suffix and republishing the SAME task overwrites the
+        # SAME URL (idempotent). repo/slug → "<repo>-<slug>" (bare slug at root).
+        worker = _publish.task_worker_slug(repo, slug)
+
         # Hand off to the dak subprocess (network edge); Hub opens no socket.
-        url, dry, err = self._run_dak(publish_path, slug, slug=slug,
+        url, dry, err = self._run_dak(publish_path, slug, mode="live", slug=worker,
                                       dry_run=bool(body.get("dryRun")))
         if err is not None:
             _fail(200 if err["error"] == "dak_unavailable" else 502,
@@ -1130,7 +1213,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         # S14 / #3 — a dry-run is not live; don't record published-state or
         # re-bake the row's PUBLISHED marker for a URL that never uploaded.
         if not dry:
-            _publish.record_published(repo, slug, url, mode="snapshot")
+            _publish.record_published(repo, slug, url, mode="live", worker=worker)
             # Re-bake the published map into the page so the row marker updates.
             result = self._rebuild(_active_root)
             if result.returncode != 0:
@@ -1138,26 +1221,37 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         self._send(200, "application/json", json.dumps({
             "ok": True,
             "url": url,
+            "mode": "live",
+            "worker": worker,
             "dryRun": dry,
             "bundle": str(out_path),
             "findings": findings,
         }).encode())
 
     def _publish_revoke(self, body: dict) -> None:
-        """Forget a published entry (task OR single file), then rebuild so the
-        marker clears.
+        """UNPUBLISH a published entry (task OR single file): take the Cloudflare
+        worker DOWN via dak, forget the local entry, then rebuild so the marker
+        clears.
 
         Body is JSON either ``{slug, repo?}`` (a task bundle, the S5b flow) or
-        ``{path}`` (a single published file/artifact — S20). Local-only: Hub
-        removes the matching sidecar entry (the UI twin of `hub publish --revoke`)
-        and makes no network call. The rebuild re-bakes the (now smaller)
-        published map into the page so every surface's PUBLISHED marker updates.
+        ``{path}`` (a single published file/artifact — S20). S26: revoke now
+        means a REAL unpublish. Hub derives the deterministic dak **worker** name
+        from the stored entry (its ``worker`` field, else parsed from the stored
+        ``url``, else recomputed deterministically), hands off to the dak
+        SUBPROCESS (``dak unpublish <worker>`` — the network edge; Hub opens no
+        socket) to delete the worker, THEN forgets the local sidecar entry. It
+        never hard-crashes: if dak / the worker is unavailable, it STILL forgets
+        locally and reports the detail. Returns ``{ok, removed, unpublished,
+        detail?}`` so the UI can say "unpublished" vs "forgotten locally (worker
+        take-down failed: …)". The rebuild re-bakes the (now smaller) published
+        map so every surface's PUBLISHED marker updates.
         """
         from ..core import publish as _publish
 
         def _fail(code: int, payload: dict) -> None:
             self._send(code, "application/json", json.dumps(payload).encode())
 
+        data = _publish.load_published()
         raw = (body.get("path") or "").strip()
         if raw:
             # Single-file revoke: resolve the path the SAME way /_publish records
@@ -1167,20 +1261,47 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             p = Path(raw)
             if not p.is_absolute():
                 p = root / raw.lstrip("/")
-            removed = _publish.revoke_published_asset(p.resolve())
+            resolved = p.resolve()
+            key = _publish.find_asset_key(data, resolved)
+            entry = data.get(key) if key else None
+            worker = ((entry or {}).get("worker")
+                      or _publish.worker_from_url((entry or {}).get("url"))
+                      or self._file_worker_slug(resolved, root))
+            unpublished, u_err = self._unpublish_worker(worker)
+            removed = _publish.revoke_published_asset(resolved)
         else:
             slug = (body.get("slug") or "").strip()
             repo = (body.get("repo") or "").strip() or None
             if not slug:
                 _fail(400, {"ok": False, "error": "slug or path required"})
                 return
+            entry = data.get(_publish.published_key(repo, slug))
+            worker = ((entry or {}).get("worker")
+                      or _publish.worker_from_url((entry or {}).get("url"))
+                      or _publish.task_worker_slug(repo, slug))
+            unpublished, u_err = self._unpublish_worker(worker)
             removed = _publish.revoke_published(repo, slug)
         result = self._rebuild(_active_root)
         if result.returncode != 0:
             import sys as _sys2
             print(result.stderr or result.stdout, file=_sys2.stderr)
-        self._send(200, "application/json",
-                   json.dumps({"ok": True, "removed": removed}).encode())
+        payload = {"ok": True, "removed": removed, "unpublished": unpublished}
+        if u_err:
+            payload["detail"] = u_err.get("detail")
+            payload["error"] = u_err.get("error")
+        self._send(200, "application/json", json.dumps(payload).encode())
+
+    def _unpublish_worker(self, worker: str | None):
+        """Best-effort ``dak unpublish <worker>`` — returns ``(ok, err_or_None)``.
+
+        A falsy worker (nothing to take down) is a no-op reported as
+        ``(False, None)`` so revoke still forgets the local entry. Wraps
+        :meth:`_run_dak_unpublish` so both revoke branches share one code path.
+        """
+        if not worker:
+            return False, None
+        ok, err = self._run_dak_unpublish(worker)
+        return ok, err
 
     def _save_draw(self, rel, scene, dir_=None, name=None) -> None:
         """Persist an Excalidraw scene into the vault.

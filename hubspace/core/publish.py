@@ -148,6 +148,69 @@ def published_key(repo: str | None, slug: str) -> str:
     return f"{repo or '(root)'}\t{slug}"
 
 
+# ── Deterministic worker slugs (S26) ───────────────────────────────────────────
+# Hub publishes in dak's **live** mode with a deterministic worker name so the
+# resulting URL has NO random suffix and republishing the SAME task/file
+# overwrites the SAME URL (idempotent). These replicate dak's slugify rules
+# (lowercase, non-alnum runs → '-', trimmed, ≤63 chars, DNS-safe) so the worker
+# name Hub computes equals the one dak would deploy — letting revoke later find
+# and take down the exact Cloudflare worker.
+
+
+def _worker_slugify(text: str) -> str:
+    """dak-compatible slug: lowercase, non-alnum → '-', collapsed, trimmed, ≤63."""
+    s = re.sub(r"[^a-z0-9]+", "-", (text or "").strip().lower()).strip("-")
+    s = re.sub(r"-{2,}", "-", s)
+    return s[:63].strip("-") or "artifact"
+
+
+def _is_real_repo(repo: str | None) -> bool:
+    """True when `repo` names a real repo (not the ``(root)`` pseudo-repo)."""
+    r = (repo or "").strip()
+    return bool(r) and r != "(root)"
+
+
+def task_worker_slug(repo: str | None, slug: str) -> str:
+    """Deterministic dak worker name for a TASK bundle (live mode).
+
+    Real repo → ``slug(<repo>-<taskslug>)`` (e.g. ``acme-api/hello`` →
+    ``acme-api-hello``); the ``(root)`` pseudo-repo → bare ``slug(<taskslug>)``
+    (e.g. ``(root)/hello`` → ``hello``). No timestamps/hashes — stable per task.
+    """
+    base = f"{repo.strip()}-{slug}" if _is_real_repo(repo) else slug
+    return _worker_slugify(base)
+
+
+def file_worker_slug(repo: str | None, rel_no_ext: str,
+                     task_slug: str | None = None,
+                     file_stem: str | None = None) -> str:
+    """Deterministic dak worker name for a SINGLE file (live mode).
+
+    Under a task → ``slug(<repo>-<taskslug>-<fileStem>)``; otherwise
+    ``slug(<repo>-<relpathNoExt>)`` where ``rel_no_ext`` is the file's path
+    (repo-relative, extension stripped). The ``(root)`` pseudo-repo drops the
+    repo prefix. No timestamps/hashes — stable per file.
+    """
+    real = _is_real_repo(repo)
+    r = (repo or "").strip()
+    if task_slug and file_stem:
+        base = f"{r}-{task_slug}-{file_stem}" if real else f"{task_slug}-{file_stem}"
+    else:
+        base = f"{r}-{rel_no_ext}" if real else rel_no_ext
+    return _worker_slugify(base)
+
+
+def worker_from_url(url: str | None) -> str | None:
+    """Extract the dak worker name from a ``https://<worker>.<sub>.workers.dev`` URL.
+
+    Returns the first host label (the worker) or ``None`` when `url` is empty or
+    not a recognizable workers.dev URL. Used by revoke to recover the worker to
+    take down when a stored entry predates the ``worker`` field.
+    """
+    m = re.match(r"https?://([^./]+)\.[^/]*workers\.dev\b", url or "")
+    return m.group(1) if m else None
+
+
 def published_path():
     """Location of the published-state sidecar (``state_dir()/published.json``)."""
     from . import config
@@ -167,20 +230,26 @@ def load_published(path=None) -> dict:
 
 
 def record_published(repo: str | None, slug: str, url: str,
-                     mode: str = "snapshot", path=None) -> dict:
+                     mode: str = "snapshot", path=None,
+                     worker: str | None = None) -> dict:
     """Record a successful publish and return the updated map.
 
     Idempotent per key: republishing overwrites the entry with a fresh
-    ``{url, at, mode}``. The ``at`` timestamp is a local ISO-ish string.
+    ``{url, at, mode[, worker]}``. The ``at`` timestamp is a local ISO-ish
+    string. ``worker`` (S26) is the deterministic dak worker name so a later
+    revoke can take the Cloudflare worker down without recomputing it.
     """
     from datetime import datetime
     p = _Path(path) if path else published_path()
     data = load_published(p)
-    data[published_key(repo, slug)] = {
+    entry = {
         "url": url,
         "at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "mode": mode,
     }
+    if worker:
+        entry["worker"] = worker
+    data[published_key(repo, slug)] = entry
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(_json.dumps(data, indent=2), encoding="utf-8")
     return data
@@ -257,16 +326,23 @@ def realign_asset_keys(data: dict, file_abs_iter) -> dict:
 
 
 def record_published_asset(path, url: str, mode: str = "snapshot",
-                           sidecar=None) -> dict:
-    """Record a successful one-click asset publish and return the updated map."""
+                           sidecar=None, worker: str | None = None) -> dict:
+    """Record a successful one-click asset publish and return the updated map.
+
+    ``worker`` (S26) is the deterministic dak worker name so a later revoke can
+    take the Cloudflare worker down without recomputing it.
+    """
     from datetime import datetime
     p = _Path(sidecar) if sidecar else published_path()
     data = load_published(p)
-    data[published_asset_key(path)] = {
+    entry = {
         "url": url,
         "at": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "mode": mode,
     }
+    if worker:
+        entry["worker"] = worker
+    data[published_asset_key(path)] = entry
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(_json.dumps(data, indent=2), encoding="utf-8")
     return data

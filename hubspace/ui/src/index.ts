@@ -30,7 +30,7 @@ function filePubChip(abs){
   return `<span class="task-pub file-pub" title="published ${esc(pub.at||'')}">`+
     `<button class="file-pub-open" type="button" data-pub-file-open="${esc(abs)}"${url?'':' disabled'} title="Open the live published URL">PUBLISHED</button>`+
     `<button class="task-pub-act" type="button" data-pub-file-republish="${esc(abs)}" title="Republish (scan + hand off to dak)">↻</button>`+
-    `<button class="task-pub-act" type="button" data-pub-file-revoke="${esc(abs)}" title="Revoke (forget this published link)">✕</button></span>`;
+    `<button class="task-pub-act" type="button" data-pub-file-revoke="${esc(abs)}" title="Unpublish (take the live URL down + forget it)">✕</button></span>`;
 }
 // (Re)decorate a file row anchor with (or without) its PUBLISHED chip. Idempotent
 // — strips any existing chip first, so it can run after a publish/revoke.
@@ -45,6 +45,43 @@ function decorateFileRow(r){
 function decorateFileRowByAbs(abs){
   if(typeof rows==='undefined') return;
   rows.forEach(r=>{if(r.dataset.abs===abs) decorateFileRow(r);});
+}
+
+// 1g / S26 — the PUBLISHED chip for a TASK row (PUBLISHED link + republish ↻ /
+// unpublish ✕). Factored so renderWorkView bakes it AND the in-place update
+// after publish/revoke can re-render it without a full reload.
+function taskPubBadge(t){
+  const pub=publishedFor(t);
+  if(!pub) return '';
+  return `<span class="task-pub" title="published ${esc(pub.at||'')}">${
+    pub.url?`<a href="${esc(pub.url)}" target="_blank" rel="noopener">PUBLISHED</a>`:'PUBLISHED'
+  }<button class="task-pub-act" data-pub-republish title="Republish (re-render + hand off to dak)">↻</button>`+
+    `<button class="task-pub-act" data-pub-revoke title="Unpublish (take the live URL down + forget it)">✕</button></span>`;
+}
+// (Re)decorate any visible task row(s) for <sl,rp> with the current marker —
+// idempotent (strips an existing chip first). Lets publish/revoke update the
+// marker IN PLACE so the user stays on their current view (no home nav).
+function decorateTaskRow(sl,rp){
+  document.querySelectorAll('.task-row').forEach(r=>{
+    if(r.dataset.sl!==sl||r.dataset.rp!==rp) return;
+    const nameEl=r.querySelector('.task-name'); if(!nameEl) return;
+    const old=nameEl.querySelector('.task-pub'); if(old) old.remove();
+    const badge=taskPubBadge({sl:sl,rp:rp});
+    if(badge) nameEl.insertAdjacentHTML('beforeend',badge);
+  });
+}
+// S26 — reflect a just-(un)published task's marker WITHOUT a full reload: mutate
+// the baked PUBLISHED_DATA (a later reload re-bakes it from published.json) then
+// re-decorate its row(s). Mirrors the single-file _markFilePublished path.
+function _markTaskPublished(t,url,mode){
+  if(typeof PUBLISHED_DATA==='object'&&PUBLISHED_DATA)
+    PUBLISHED_DATA[(t.rp||'(root)')+'\t'+t.sl]={url:url,at:'',mode:mode||'live'};
+  decorateTaskRow(t.sl,t.rp);
+}
+function _unmarkTaskPublished(sl,rp){
+  if(typeof PUBLISHED_DATA==='object'&&PUBLISHED_DATA)
+    delete PUBLISHED_DATA[(rp||'(root)')+'\t'+sl];
+  decorateTaskRow(sl,rp);
 }
 
 // ── DOM refs ──────────────────────────────────────────────────────────────
@@ -881,12 +918,18 @@ document.addEventListener('click',e=>{
   }
   if(e.target.closest('[data-pub-revoke]')){
     e.preventDefault();e.stopPropagation();
+    const sl=row.dataset.sl,rp=row.dataset.rp;
     fetch('/_publish-revoke',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({slug:row.dataset.sl,repo:row.dataset.rp})})
+      body:JSON.stringify({slug:sl,repo:rp})})
       .then(r=>r.json()).then(d=>{
-        if(d&&d.ok){flash('revoked '+row.dataset.sl);location.reload();}
-        else flash('revoke failed');
-      }).catch(()=>flash('revoke failed'));
+        if(d&&d.ok){
+          // S26 — clear the marker IN PLACE (no home nav). "unpublished" when the
+          // worker was taken down; else "forgotten locally" + the take-down detail.
+          _unmarkTaskPublished(sl,rp);
+          flash(d.unpublished?('unpublished '+sl)
+                :('forgotten locally'+(d.detail?(' — '+String(d.detail).split('\n').slice(-1)[0]):'')));
+        } else flash('unpublish failed');
+      }).catch(()=>flash('unpublish failed'));
   }
 });
 
@@ -897,9 +940,16 @@ function revokeFile(abs){
   fetch('/_publish-revoke',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({path:abs})})
     .then(r=>r.json()).then(d=>{
-      if(d&&d.ok){flash('revoked');location.reload();}
-      else flash('revoke failed');
-    }).catch(()=>flash('revoke failed'));
+      if(d&&d.ok){
+        // S26 — clear the marker IN PLACE (no home nav); mirror the asset publish
+        // path. "unpublished" when dak took the worker down, else "forgotten
+        // locally" with the take-down detail.
+        if(typeof PUBLISHED_DATA==='object'&&PUBLISHED_DATA) delete PUBLISHED_DATA['asset\t'+abs];
+        decorateFileRowByAbs(abs);
+        flash(d.unpublished?'unpublished'
+              :('forgotten locally'+(d.detail?(' — '+String(d.detail).split('\n').slice(-1)[0]):'')));
+      } else flash('unpublish failed');
+    }).catch(()=>flash('unpublish failed'));
 }
 function republishFile(abs){
   if(window._openPublish)window._openPublish({abs:abs});
@@ -976,11 +1026,7 @@ function renderWorkView(){
       linParts.push(`plan ${done}/${t.plan.length}`);
     }
     const orphanBadge=t.orphan?`<span style="font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--mute);border:1px solid var(--line);padding:1px 5px;margin-left:6px;vertical-align:middle">no manifest</span>`:'';
-    const pub=publishedFor(t);
-    const pubBadge=pub?`<span class="task-pub" title="published ${esc(pub.at||'')}">${
-      pub.url?`<a href="${esc(pub.url)}" target="_blank" rel="noopener">PUBLISHED</a>`:'PUBLISHED'
-    }<button class="task-pub-act" data-pub-republish title="Republish (re-render + hand off to dak)">↻</button>`+
-      `<button class="task-pub-act" data-pub-revoke title="Revoke (forget this published link)">✕</button></span>`:'';
+    const pubBadge=taskPubBadge(t);
     return `<div class="task-row" data-abs="${esc(t.abs||'')}" data-sl="${esc(t.sl)}" data-rp="${esc(t.rp)}">
       <span class="task-tick ${dotCls}"></span>
       <div class="task-body">
@@ -2395,11 +2441,12 @@ document.getElementById('rebuild').addEventListener('click',e=>{
           if(d.dryRun){flash('dry-run — not uploaded (URL not live): '+d.url+red);return;}
           copy(d.url,null);
           // S20 — a clear inform-on-publish with a clickable Open (parity with
-          // the single-file sheet's "open ↗"). Server recorded published-state +
-          // rebuilt; reload so the row's PUBLISHED marker (republish/revoke)
-          // shows (matches revoke flow) — the persistent, clickable affordance.
+          // the single-file sheet's "open ↗"). S26 — the server recorded
+          // published-state; reflect the row's PUBLISHED marker (republish /
+          // unpublish) IN PLACE instead of a home-nav reload, so the user stays
+          // on their current view (trace/board/doc). Mirrors _markFilePublished.
+          _markTaskPublished(t,d.url,d.mode);
           flashOpen('published · '+t.sl+red,d.url);
-          setTimeout(()=>location.reload(),1600);
           return;
         }
         const detail=d.detail?(': '+String(d.detail).split('\n').slice(-1)[0]):'';
