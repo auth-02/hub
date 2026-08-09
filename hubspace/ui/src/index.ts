@@ -58,6 +58,8 @@ const pvTitle=document.getElementById('pv-title');
 const pvOpen=document.getElementById('pv-open');
 const pvBody=document.getElementById('pv-body');
 const pvLineage=document.getElementById('pv-lineage');
+const pvAsk=document.getElementById('pv-ask');
+if(pvAsk) pvAsk.addEventListener('click',()=>{const cmd=askAgainCmd(_openPreviewAbs);if(cmd) copy(cmd,'copied: '+cmd);});
 let kind=sessionStorage.getItem('docs_hub_kind')||'all';
 if(sessionStorage.getItem('docs_hub_root')!==_currentRoot){
   sessionStorage.setItem('docs_hub_root',_currentRoot);
@@ -207,41 +209,21 @@ function askAgainCmd(abs){
   return end?`/changelog ${slug} --since ${end}`:`/changelog ${slug}`;
 }
 function openPreview(row){
-  const title=row.querySelector('.path').textContent;
-  pvTitle.textContent=title;
+  // Reverted (S24) to the pre-S21 preview: full // trace lineage (incl. the data
+  // group) + the separate ask-again/⧉ buttons; no inline ⋯ menu.
+  pvTitle.textContent=row.querySelector('.path').textContent;
   pvOpen.href=row.href;
   const abs=row.dataset.abs||'';
-  pvOpen.dataset.abs=abs;   // S21 — Open navigates the tab to the doc page (href set below)
+  pvOpen.dataset.abs=abs;   // Open → the delegated router opens the doc page (new tab)
   _openPreviewAbs=abs;
-  const href=row.href;
-  // S21 #4 — the "// trace" header and a ⋯ actions menu share ONE line; the
-  // `data` lineage group is dropped from the preview (it clutters the peek).
-  const links=(LINEAGE_DATA[abs]||[]).filter(l=>l.r!=='task_has_data');
-  const ask=askAgainCmd(abs);
-  let h='<div class="pv-trace-head"><span class="ln-label">// trace</span>'+
-    '<details class="pv-menu"><summary class="pv-menu-btn" title="Actions">⋯</summary>'+
-    '<div class="pv-menu-list">'+
-      '<button type="button" class="pv-menu-item" data-act="newtab">↗ new tab</button>'+
-      '<button type="button" class="pv-menu-item" data-act="float">⧉ float</button>'+
-      '<button type="button" class="pv-menu-item" data-act="comment">💬 comment</button>'+
-      '<button type="button" class="pv-menu-item" data-act="publish">↗ publish</button>'+
-      (ask?'<button type="button" class="pv-menu-item" data-act="ask">↩ ask again</button>':'')+
-    '</div></details></div>';
-  if(links.length) h+='<div class="pv-trace-chips">'+buildLineage(links,false)+'</div>';
-  pvLineage.innerHTML=h;pvLineage.classList.add('show');
-  const nl=pvLineage.querySelector('.ln-notes-link');
-  if(nl)nl.onclick=()=>{const tk=taskForNoteAbs(nl.dataset.noteAbs);if(tk){closePreview();openTaskNotes(tk);}};
-  pvLineage.querySelectorAll('.pv-menu-item').forEach(it=>{
-    it.addEventListener('click',()=>{
-      const menu=pvLineage.querySelector('.pv-menu');if(menu)menu.removeAttribute('open');
-      const act=(it as HTMLElement).dataset.act;
-      if(act==='newtab'){if(href)window.open(href,'_blank','noopener');}
-      else if(act==='float'){openFloat(abs,title,href);closePreview();}
-      else if(act==='comment'){const ctx=(abs&&_ctxForAbs(abs))||composerContext();if(window._openComposer)window._openComposer(ctx);}
-      else if(act==='publish'){if(!abs){flash('nothing to publish');return;}if(window._openPublish)window._openPublish({abs:abs});}
-      else if(act==='ask'){if(ask)copy(ask,'copied: '+ask);}
-    });
-  });
+  const links=LINEAGE_DATA[abs]||[];
+  if(links.length){
+    pvLineage.innerHTML=buildLineage(links);pvLineage.classList.add('show');
+    const nl=pvLineage.querySelector('.ln-notes-link');
+    if(nl)nl.onclick=()=>{const tk=taskForNoteAbs(nl.dataset.noteAbs);if(tk){closePreview();openTaskNotes(tk);}};
+  }
+  else pvLineage.classList.remove('show');
+  if(pvAsk) pvAsk.style.display=askAgainCmd(abs)?'':'none';
   pvBody.classList.add('iframe-mode');
   pvBody.innerHTML=`<iframe class="pv-iframe" src="${row.href}"></iframe>`;
   preview.classList.add('open');
@@ -330,8 +312,12 @@ function openFloat(abs,title,href){
   head.addEventListener('pointerup',endDrag);
   head.addEventListener('pointercancel',endDrag);
 }
-// S21 — the ⋯ "float" menu item (built in openPreview) replaces the old pv-float
-// button; double-clicking a row still pops a floating window directly.
+document.getElementById('pv-float').addEventListener('click',()=>{
+  if(selIdx<0||!selRows[selIdx]) return;
+  const r=selRows[selIdx];
+  openFloat(r.dataset.abs,r.querySelector('.path').textContent,r.href);
+  closePreview();
+});
 rows.forEach(r=>r.addEventListener('dblclick',e=>{
   e.preventDefault();
   openFloat(r.dataset.abs,r.querySelector('.path').textContent,r.href);
