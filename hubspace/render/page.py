@@ -268,12 +268,19 @@ function scheduleHide(){keepBtn();hideT=setTimeout(function(){addBtn.style.displ
 function showAt(blk){
   var ln=parseInt(blk.getAttribute('data-src-line'),10);if(isNaN(ln))return;
   curLine=ln;var r=blk.getBoundingClientRect();
-  addBtn.style.top=Math.max(2,r.top)+'px';addBtn.style.display='flex';
+  addBtn.style.top=Math.max(2,r.top)+'px';
+  // sit just LEFT of the text block (not the viewport edge)
+  addBtn.style.left=Math.max(2,r.left-30)+'px';
+  addBtn.style.display='flex';
 }
 addBtn.addEventListener('click',function(ev){
   ev.preventDefault();ev.stopPropagation();if(curLine!=null)openComposer(curLine);});
 lane.addEventListener('mouseenter',keepBtn);
 lane.addEventListener('mouseleave',scheduleHide);
+// the button is now positioned next to the text (not in the edge lane), so it
+// needs its own hover-persistence to stay clickable while the pointer is on it.
+addBtn.addEventListener('mouseenter',keepBtn);
+addBtn.addEventListener('mouseleave',scheduleHide);
 document.addEventListener('mousemove',function(e){
   if(!canComment)return;
   var blk=e.target&&e.target.closest&&e.target.closest('.page [data-src-line]');

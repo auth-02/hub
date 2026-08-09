@@ -446,7 +446,7 @@ window._openComposer=openComposer;
 // tab. window._openReader stays as an alias so older callsites keep working.
 function openDoc(abs,href){
   const u=href||(abs?fileHref(abs):'');
-  if(u)location.assign(u);
+  if(u)window.open(u,'_blank','noopener');   // always a new tab — SPA stays put
 }
 window._openReader=(abs,opts)=>openDoc(abs,opts&&opts.href);
 
