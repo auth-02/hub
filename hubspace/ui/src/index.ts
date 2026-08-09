@@ -2030,8 +2030,10 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     return {slug:slug+'-'+n,taken:true};
   }
   function buildManifest(title,status,plan){
-    const today=new Date().toISOString().slice(0,10);
-    const lines=['---','status: '+status,'title: '+title,'created: '+today,'---','','# '+title];
+    // Mirrors core.tasks.render_manifest (S22): NO YAML frontmatter — just the
+    // H1 (+ Plan). Status is persisted to the DB/sidecar, not the file, so the
+    // preview shows exactly what gets written. (status param kept for the caller.)
+    const lines=['# '+title];
     if(plan.length){lines.push('','## Plan');plan.forEach(p=>lines.push('- [ ] '+p));}
     return lines.join('\n')+'\n';
   }
