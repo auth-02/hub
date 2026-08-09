@@ -168,6 +168,24 @@ class TestManifestEditEndpoint(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(json.loads(body)["error"], "invalid_status")
 
+    def test_frontmatter_less_status_edit_persists_via_sidecar(self):
+        # S22: the new default manifest has NO frontmatter. A status edit must
+        # leave the file byte-for-byte unchanged (no injected frontmatter) yet
+        # persist the status to the DB/sidecar.
+        p = self._seed(slug="nofm", text="# No FM\n\nJust prose.\n")
+        before = p.read_text(encoding="utf-8")
+        status, body = self._edit(slug="nofm", status="completed")
+        self.assertEqual(status, 200, body)
+        after = p.read_text(encoding="utf-8")
+        self.assertEqual(after, before)  # file untouched — no frontmatter injected
+        self.assertNotIn("---", after)
+        self.assertNotIn("status:", after)
+        conn = _db.open_db(Path(self._state) / "hub.db")
+        statuses = json.loads(_db.get_statuses_json(conn))
+        conn.close()
+        # repo="(root)" is what _edit defaults to; that's the key set_status used.
+        self.assertEqual(statuses.get("(root):nofm"), "completed")
+
     def test_no_base_mtime_still_writes(self):
         # base_mtime is optional; without it we do not conflict-check.
         p = self._seed(slug="nobase")

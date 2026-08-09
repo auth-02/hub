@@ -64,16 +64,16 @@ def render_manifest(
     created: str | None = None,
     plan: list[str] | None = None,
 ) -> str:
-    """Return the manifest.md text: frontmatter + `# Title` [+ `## Plan`].
+    """Return the manifest.md text: `# Title` [+ `## Plan`].
 
-    `created` is emitted only when given; `plan` (one string per checklist item)
-    only when non-empty. With neither, the output matches `hub new task`'s
-    historical minimal manifest exactly.
+    Hub no longer writes YAML frontmatter (S22): a new manifest is just the
+    `# Title` H1 (title resolution falls back to it — HUB-LAYOUT §4.3) plus a
+    `## Plan` checklist when `plan` items are given. Status is tracked in the
+    DB/sidecar (default `ongoing`), never seeded from a produced file, so the
+    `status`/`created` params are accepted for signature compatibility but not
+    emitted. Frontmatter authored by a human/agent is still read if present.
     """
-    lines = ["---", f"status: {status}", f"title: {title}"]
-    if created:
-        lines.append(f"created: {created}")
-    lines += ["---", "", f"# {title}"]
+    lines = [f"# {title}"]
     if plan:
         lines += ["", "## Plan"]
         lines += [f"- [ ] {item}" for item in plan]
@@ -338,11 +338,17 @@ def _fmt_plan(plan: list[dict]) -> str:
 
 
 def _rewrite_status(text: str, status: str) -> str:
-    """Replace the frontmatter `status:` line (or insert one), preserving all else."""
+    """Replace the frontmatter `status:` line in place, if a block exists.
+
+    S22: Hub no longer injects frontmatter. When the manifest already has a
+    frontmatter block we update its `status:` line (or add one inside the block)
+    so a human-authored manifest stays consistent; when there is NO frontmatter
+    (the new default shape) this is a no-op — status is persisted to the
+    DB/sidecar by the caller (`set_status`), not written into the file.
+    """
     m = _FM_BLOCK.match(text)
     if not m:
-        # No frontmatter — prepend a minimal one rather than blind-appending.
-        return f"---\nstatus: {status}\n---\n\n" + text
+        return text  # no frontmatter — status lives in the sidecar/DB, not the file
     open_, fm_body, close = m.group(1), m.group(2), m.group(3)
     new_body, n = _FM_STATUS_LINE.subn(f"status: {status}", fm_body, count=1)
     if n == 0:  # frontmatter present but no status line — add one at the top

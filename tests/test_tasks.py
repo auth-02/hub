@@ -22,28 +22,26 @@ class TestSlug(unittest.TestCase):
 
 
 class TestRenderManifest(unittest.TestCase):
-    def test_minimal_matches_cli_historical_shape(self):
-        # No created, no plan → the exact string `hub new task` always wrote.
+    def test_minimal_is_frontmatter_free_h1_only(self):
+        # S22: no frontmatter block — just the `# Title` H1.
         out = tasks.render_manifest("My Task")
-        self.assertEqual(out, "---\nstatus: ongoing\ntitle: My Task\n---\n\n# My Task\n")
+        self.assertEqual(out, "# My Task\n")
+        self.assertNotIn("---", out)
+        self.assertNotIn("status:", out)
 
-    def test_with_created_and_plan(self):
+    def test_with_plan_appends_checklist_no_frontmatter(self):
+        # created/status are accepted for signature compatibility but never emitted.
         out = tasks.render_manifest("T", status="paused", created="2026-08-04",
                                     plan=["draft", "wire"])
-        self.assertEqual(
-            out,
-            "---\nstatus: paused\ntitle: T\ncreated: 2026-08-04\n---\n\n"
-            "# T\n\n## Plan\n- [ ] draft\n- [ ] wire\n",
-        )
+        self.assertEqual(out, "# T\n\n## Plan\n- [ ] draft\n- [ ] wire\n")
+        self.assertNotIn("---", out)
+        self.assertNotIn("status:", out)
+        self.assertNotIn("created:", out)
 
-    def test_mcp_example_body(self):
-        # The exact manifest for the roadmap's example title (no plan).
+    def test_mcp_example_body_no_plan(self):
+        # The exact manifest for the roadmap's example title (no plan) — H1 only.
         out = tasks.render_manifest("MCP retrieval adapter", created="2026-08-04")
-        self.assertEqual(
-            out,
-            "---\nstatus: ongoing\ntitle: MCP retrieval adapter\n"
-            "created: 2026-08-04\n---\n\n# MCP retrieval adapter\n",
-        )
+        self.assertEqual(out, "# MCP retrieval adapter\n")
 
 
 class TestWriteManifest(unittest.TestCase):
@@ -316,6 +314,25 @@ class TestRewriteManifest(unittest.TestCase):
         out = tasks.rewrite_manifest(src, status="paused")
         self.assertIn("status: paused\n", out)
         self.assertIn("title: T\n", out)
+
+    def test_status_edit_on_frontmatter_less_manifest_is_noop(self):
+        # S22: the new default manifest has NO frontmatter. A status edit must
+        # NOT inject a frontmatter block — status is persisted to the DB/sidecar
+        # by the caller instead. The file is returned byte-for-byte unchanged.
+        src = "# T\n\nSome prose.\n"
+        out = tasks.rewrite_manifest(src, status="paused")
+        self.assertEqual(out, src)
+        self.assertNotIn("---", out)
+        self.assertNotIn("status:", out)
+
+    def test_plan_edit_still_works_on_frontmatter_less_manifest(self):
+        # Plan edits remain functional even without frontmatter.
+        src = "# T\n"
+        out = tasks.rewrite_manifest(src, status="paused",
+                                     plan=[{"text": "a", "done": True}])
+        self.assertNotIn("---", out)
+        self.assertIn("## Plan", out)
+        self.assertIn("- [x] a", out)
 
     def test_empty_plan_clears_checklist(self):
         out = tasks.rewrite_manifest(_MANIFEST, plan=[])

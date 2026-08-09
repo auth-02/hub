@@ -436,7 +436,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             repo_root = root
 
         try:
-            path = _tasks.write_manifest(repo_root, slug, title, status, plan=plan)
+            path = _tasks.write_manifest(repo_root, slug, title, plan=plan)
         except _tasks.SlugError as e:
             _fail(400, {"ok": False, "error": "invalid_slug", "detail": str(e)})
             return
@@ -449,6 +449,19 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             return
 
         rel = path.relative_to(root).as_posix()
+        # S22: the manifest carries no frontmatter, so persist the chosen status
+        # to the DB/sidecar (the runtime source of truth). `ongoing` would fall
+        # out of the COALESCE default, but writing it explicitly is harmless and
+        # keeps the sidecar authoritative. task_repo is the dir owning tasks/
+        # (== repo_root.name), matching what the scan seed computes.
+        try:
+            from ..core import db as _db
+            conn = _db.open_db(_DB_PATH)  # ensures schema/migrations exist
+            _db.set_status(conn, slug, repo_root.name, status)
+            conn.close()
+        except Exception as e:
+            import sys as _sys3
+            print(f"[new-task] set_status failed: {e}", file=_sys3.stderr)
         # Reconcile immediately so the new task appears on reload (the watcher
         # would also catch it within 3 s, but the UI reloads right after POST).
         result = self._rebuild(_active_root)

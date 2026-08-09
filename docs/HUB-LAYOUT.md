@@ -135,9 +135,24 @@ hub or `hub new` creates one (see §2).
 
 ## 4. Frontmatter
 
-YAML frontmatter is **optional everywhere**. Hub degrades to sensible defaults.
+YAML frontmatter is **read if present but optional everywhere**. Hub degrades to
+sensible defaults. **Hub no longer *writes* frontmatter** — `hub new` and the
+`POST /_new-task` endpoint emit just a `# Title` H1 (plus an optional `## Plan`).
+A frontmatter block a human or agent authored is still parsed (its `title`/
+`status` are honoured), so both shapes are fully supported.
 
 ### 4.1 Manifest (TASK)
+
+A manifest Hub produces is simply:
+
+```markdown
+# Auth Refactor
+
+## Plan
+- [ ] first step
+```
+
+Frontmatter, if you choose to write it by hand, is still read:
 
 ```yaml
 ---
@@ -149,10 +164,17 @@ tags: [auth, security] # optional
 ---
 ```
 
-- `status` is the **only field that affects the board.** Allowed values:
-  `ongoing`, `paused`, `completed`. If absent or unrecognized, the task is
-  treated as `ongoing` so it is never dropped — but explicit status is
-  recommended.
+- **Status lives in the DB/sidecar, not the file.** It is resolved at runtime
+  from the `task_status` table (backed by the `task-status.json` sidecar, which
+  survives DB resets and branch switches), defaulting to `ongoing`. Frontmatter
+  `status:` is read only as a one-time seed when no status row exists yet (a
+  board toggle or a `hub new --status` choice always wins). Allowed values:
+  `ongoing`, `paused`, `completed`; anything absent/unrecognized → `ongoing`, so
+  a task is never dropped.
+- Editing a task's status in the board persists to the sidecar. If the manifest
+  already has a frontmatter block, its `status:` line is updated in place too;
+  a frontmatter-less manifest (the new default) is left untouched and the status
+  is written to the sidecar only — Hub never injects a frontmatter block.
 - A `plan` checklist in the body (`- [x]` / `- [ ]`) is parsed for the progress
   shown in the trace panel. It is convention, not required.
 
@@ -256,7 +278,7 @@ human) must write to light up the full experience — just the manifest:
 
 ```
 cortex/tasks/auth-refactor/
-└── manifest.md          # ---\nstatus: ongoing\ntitle: Auth Refactor\n---\n# Auth Refactor\n
+└── manifest.md          # # Auth Refactor\n   (no frontmatter; status defaults to ongoing in the DB/sidecar)
 ```
 
 `runs/`, `artifacts/`, and `data/` appear later, each created on demand by the
