@@ -132,18 +132,39 @@ class TestServerHttp(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"Hello", body)
 
-    def test_served_page_carries_reader_keydown_forwarder(self):
-        """S17 — a live-served doc page carries the tiny forwarder that relays
-        palette/composer/close keydowns to window.parent when it is shown inside
-        the SPA reading-view iframe. It is a no-op when opened as a top-level tab
-        (guarded by window.parent===window)."""
+    def test_served_page_is_self_sufficient(self):
+        """S21 — the standalone doc page is the canonical full view. It carries
+        the self-contained companion script (window.HUB_DOC config + the "+"
+        gutter machinery), NOT the old SPA-reader iframe forwarder."""
         md_path = Path(self._scan_root) / "hello.md"
         status, body = _get(self._port, str(md_path))
         self.assertEqual(status, 200)
         text = body.decode("utf-8", "replace")
-        self.assertIn("hub-doc", text)
-        self.assertIn("window.parent===window", text)
-        self.assertIn("hub-reader-scroll", text)
+        self.assertIn("window.HUB_DOC", text)          # baked comment/edit context
+        self.assertIn("hub-line-add", text)            # the "+" gutter
+        self.assertIn("hubDocEdit", text)              # edit-in-place
+        # The reader overlay is gone: no parent-frame forwarding on the doc page.
+        self.assertNotIn("window.parent===window", text)
+        self.assertNotIn("hub-reader-scroll", text)
+
+    def test_served_page_bakes_edit_item_and_inline_comment(self):
+        """S21 — an editable task doc offers ✎ Edit in its ⋯ menu and BAKES this
+        file's comments into the page (window.HUB_DOC.notes) so inline cards
+        render with no SPA parent / postMessage."""
+        task = Path(self._scan_root) / "tasks" / "s21-doc" / "comments"
+        task.mkdir(parents=True, exist_ok=True)
+        manifest = Path(self._scan_root) / "tasks" / "s21-doc" / "manifest.md"
+        manifest.write_text("# S21 doc\n\nBody line.\n", encoding="utf-8")
+        (task / "notes.jsonl").write_text(
+            '{"id":"n1","target":"manifest.md","range":"L1",'
+            '"author":"agent","body":"baked inline comment"}\n',
+            encoding="utf-8")
+        status, body = _get(self._port, str(manifest))
+        self.assertEqual(status, 200)
+        text = body.decode("utf-8", "replace")
+        self.assertIn("✎ Edit", text)             # ✎ Edit menu item
+        self.assertIn("baked inline comment", text)    # comment baked into HUB_DOC
+        self.assertIn('"target": "manifest.md"', text)
 
     def test_notes_jsonl_redirects_instead_of_downloading(self):
         """S13 — a direct GET to a task's comments/notes.jsonl must NOT stream

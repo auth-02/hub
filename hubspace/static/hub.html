@@ -45,12 +45,12 @@
     <div class="pv-header">
       <span class="pv-title" id="pv-title"></span>
       <div class="pv-actions">
-        <a class="pv-btn primary" id="pv-open" href="#" data-open-reader title="open in the reading view">Open</a>
-        <button class="pv-btn" id="pv-ask" title="copy the /changelog command to regenerate this" style="display:none">ask again</button>
-        <button class="pv-btn" id="pv-float" title="open as floating window">⧉</button>
+        <a class="pv-btn primary" id="pv-open" href="#" data-open-reader title="open the document">Open</a>
         <button class="pv-btn" id="pv-close">✕</button>
       </div>
     </div>
+    <!-- S21 — // trace header + a ⋯ menu (ask again / comment / publish / float /
+         new tab) live on ONE line; populated by openPreview(). -->
     <div class="pv-lineage" id="pv-lineage"></div>
     <div class="pv-body" id="pv-body"></div>
     <div class="pv-hint">j/k navigate · Enter open · Esc close</div>
@@ -121,24 +121,8 @@
     <div class="trace-actions" id="trace-actions"></div>
   </div>
 </div>
-<div id="reader" class="reader" aria-label="File reading view">
-  <div class="reader-head">
-    <div class="reader-crumb" id="reader-crumb"></div>
-    <div class="reader-actions">
-      <span class="reader-pubstate" id="reader-pubstate" style="display:none"></span>
-      <button class="reader-btn" id="reader-edit" type="button" title="edit this document">✎ edit</button>
-      <button class="reader-btn" id="reader-comment" type="button" title="write a comment on this file (c / ⌘↵)">💬 comment</button>
-      <button class="reader-btn" id="reader-publish" type="button" title="publish this file to a shareable URL">↗ publish</button>
-      <a class="reader-btn" id="reader-open" href="#" target="_blank" rel="noopener" title="open the raw page in a new tab">↗ new tab</a>
-      <button class="reader-btn" id="reader-save" type="button" title="save changes (⌘↵)">✓ save</button>
-      <button class="reader-btn" id="reader-cancel" type="button" title="discard changes (esc)">✕ cancel</button>
-      <button class="reader-btn" id="reader-close" type="button" title="close (esc)">✕</button>
-    </div>
-  </div>
-  <div class="reader-main">
-    <div class="reader-doc" id="reader-doc"></div>
-  </div>
-</div>
+<!-- S21 — the in-workspace reading overlay is gone; opening a file navigates the
+     tab to the canonical standalone doc page (render/page.py). -->
 <div id="toast" class="toast"></div>
 <div id="modal" class="modal" role="dialog" aria-modal="true">
   <div class="modal-card">

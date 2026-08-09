@@ -219,6 +219,19 @@ a.lf-ext:hover{color:var(--ink);}
 .pv-lineage{padding:8px 12px;border-bottom:1px solid var(--line);display:none;}
 .pv-lineage.show{display:block;}
 .ln-label{font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin-bottom:6px;}
+/* S21 #4 — "// trace" header + a ⋯ actions menu share ONE line (saves the extra
+   action-button row); the trace chips sit below it. */
+.pv-trace-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.pv-trace-head .ln-label{margin-bottom:0;}
+.pv-trace-chips{margin-top:6px;}
+.pv-menu{position:relative;}
+.pv-menu-btn{list-style:none;cursor:pointer;font-family:var(--mono);font-size:13px;line-height:1;letter-spacing:.1em;padding:2px 8px;border:1px solid var(--line);background:var(--alt);color:var(--accent);user-select:none;}
+.pv-menu-btn::-webkit-details-marker{display:none;}
+.pv-menu[open] .pv-menu-btn{border-color:var(--accent);background:var(--accent);color:#fff;}
+.pv-menu-list{position:absolute;right:0;top:calc(100% + 4px);min-width:150px;z-index:5;background:var(--bg);border:1px solid var(--line);box-shadow:0 12px 30px rgba(0,0,0,.18);display:flex;flex-direction:column;}
+.pv-menu-item{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;text-align:left;padding:8px 12px;border:none;border-bottom:1px solid var(--line);background:none;color:var(--ink);cursor:pointer;white-space:nowrap;}
+.pv-menu-item:last-child{border-bottom:none;}
+.pv-menu-item:hover{background:var(--accent);color:#fff;}
 .ln-group{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:5px;align-items:center;}
 .ln-type{font-family:var(--mono);font-size:9px;color:var(--mute);min-width:60px;}
 .ln-item{font-family:var(--mono);font-size:9px;padding:2px 6px;border:1px solid var(--line);color:var(--mute);cursor:pointer;background:var(--alt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;text-decoration:none;display:inline-block;}
@@ -367,60 +380,10 @@ a.lf-ext:hover{color:var(--ink);}
 background-image:radial-gradient(circle,#C9BFA3 .7px,transparent .7px);background-size:22px 22px;}
 #trace.show{display:block;}
 
-/* ── Reading view (S17) — files open INSIDE the workspace ─────────────────── */
-/* Full-screen SPA shell: doc body in a sandboxed same-origin iframe (keeps hub's
-   injected CSS, avoids style/script bleed), app chrome + comments margin in the
-   PARENT. z-index 94: above trace(90)/graph(92), below palette/composer(100). */
-.reader{display:none;position:fixed;inset:0;z-index:94;background:var(--bg);flex-direction:column;}
-.reader.show{display:flex;}
-.reader-head{display:flex;align-items:center;justify-content:space-between;gap:12px;
-  padding:12px 20px;border-bottom:1px solid var(--line);background:var(--bg);flex:0 0 auto;}
-.reader-crumb{font-family:var(--mono);font-size:11px;letter-spacing:.06em;color:var(--mute);
-  overflow:hidden;white-space:nowrap;text-overflow:ellipsis;min-width:0;}
-.reader-crumb b{color:var(--accent);font-weight:500;}
-.reader-actions{display:flex;align-items:center;gap:6px;flex-shrink:0;}
-/* S20 — PUBLISHED state control in the reader header. */
-.reader-pubstate{display:inline-flex;align-items:center;gap:6px;margin-right:2px;}
-.reader-pub-tag{font-family:var(--mono);font-size:9px;letter-spacing:.12em;color:#fff;background:var(--accent2);border-radius:3px;padding:3px 6px;}
-.reader-btn{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
-  padding:6px 11px;border:1px solid var(--line);background:var(--alt);color:var(--mute);
-  cursor:pointer;text-decoration:none;display:inline-block;}
-.reader-btn:hover{border-color:var(--ink);color:var(--ink);}
-#reader-comment{border-color:var(--accent);color:var(--accent);}
-#reader-comment:hover{background:var(--accent);color:#fff;}
-/* S19 — the reading view is a clean, wide, view-only surface (the // outline
-   and inline anchored comments render inside the served doc iframe). The right
-   "// comments" rail was removed; the document now takes the full width. */
-.reader-main{flex:1;min-height:0;display:flex;}
-.reader-doc{flex:1;min-width:0;position:relative;background:#fff;}
-.reader-iframe{position:absolute;inset:0;width:100%;height:100%;border:none;}
-/* S18 — inline document editor. Edit is offered only for editable text docs
-   (.reader.can-edit); save/cancel appear only while editing (.reader.editing),
-   which hides the read-mode actions so the chrome never shows both. */
-#reader-edit,#reader-save,#reader-cancel{display:none;}
-.reader.can-edit:not(.editing) #reader-edit{display:inline-block;}
-.reader.editing #reader-comment,.reader.editing #reader-publish,
-.reader.editing #reader-open,.reader.editing #reader-edit{display:none;}
-.reader.editing #reader-save,.reader.editing #reader-cancel{display:inline-block;}
-#reader-edit{border-color:var(--accent2);color:var(--accent2);}
-#reader-edit:hover{background:var(--accent2);color:#fff;}
-#reader-save{border-color:var(--accent);color:#fff;background:var(--accent);}
-#reader-save:hover{background:var(--ink);border-color:var(--ink);}
-.reader-editor{position:absolute;inset:0;display:flex;flex-direction:column;background:var(--bg);}
-/* S19 — line-number gutter mirrors the textarea. Font metrics (size, line-height,
-   top padding) MUST match the textarea so numbers line up with their rows. */
-.reader-editor .editor-body{flex:1;min-height:0;display:flex;}
-.reader-editor .editor-gutter{flex:0 0 auto;overflow:hidden;text-align:right;
-  padding:28px 10px 28px 16px;background:var(--alt);border-right:1px solid var(--line);
-  color:var(--mute);font-family:var(--mono);font-size:13px;line-height:1.7;
-  white-space:pre;user-select:none;pointer-events:none;}
-.reader-editor textarea{flex:1;min-height:0;width:100%;border:none;outline:none;resize:none;
-  padding:28px 40px;background:var(--bg);color:var(--ink);
-  font-family:var(--mono);font-size:13px;line-height:1.7;tab-size:2;}
-.reader-editor .editor-foot{flex:0 0 auto;font-family:var(--mono);font-size:10px;letter-spacing:.1em;
-  text-transform:uppercase;color:var(--mute);padding:8px 16px;border-top:1px solid var(--line);
-  display:flex;justify-content:space-between;align-items:center;gap:12px;}
-.reader-editor .editor-foot .ef-dirty{color:var(--rust);}
+/* S21 — the in-workspace reading overlay was removed; opening a file navigates
+   the tab to the canonical standalone doc page (render/page.py), which is now
+   fully self-sufficient (inline comments, "+" gutter composer, ✎ Edit, ↗
+   Publish). All the old .reader* / .reader-editor styles went with it. */
 .trace-wrap{max-width:900px;margin:0 auto;padding:40px 28px 80px;}
 .trace-topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:24px;}
 .trace-back{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);background:none;border:1px solid var(--line);padding:6px 12px;cursor:pointer;display:inline-block;}

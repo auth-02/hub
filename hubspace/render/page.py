@@ -120,83 +120,72 @@ show('<span class="dpr-tag err">publish failed</span>','err');});
 """
 
 
-# S17/S19 — companion script for LIVE-served doc bodies shown inside the SPA
-# reading-view iframe. A doc page opened as a top-level tab (window.parent===
-# window) short-circuits immediately, so deep-links / new-tab behave exactly as
-# before. When embedded it:
-#   • forwards ⌘K/⌘P/c/Esc keydowns the iframe would otherwise swallow, so the
-#     palette / composer / close shortcuts work with focus inside the file;
-#   • answers `hub-reader-scroll` by scrolling to an anchor;
-#   • (S19) shows a hover "+" gutter on any block carrying data-src-line and, on
-#     click, postMessages the parent {type:'hub-comment-line', line:<n>} so the
-#     composer opens prefilled with that line — the user never types "L4";
-#   • (S19) renders this file's comments INLINE on the document — anchored ones
-#     right under the block whose data-src-line matches (comments live ON the
-#     doc, not a side rail); general ones in a compact block at the top.
-# Same-origin, so postMessage reaches the SPA shell. Deliberately NEVER added to
-# published bundles (they render through render.bundle, not these helpers) —
-# bundles must stay self-contained.
-DOC_EMBED_SCRIPT = """
+import json as _json
+
+
+def doc_edit_item() -> str:
+    """A ⋯ menu item that edits THIS doc in place (S21 — ported off the reader).
+
+    Present only for editable text docs (.md/.txt/… — never .html). Clicking it
+    calls ``hubDocEdit()`` from :data:`DOC_PAGE_SCRIPT`, which fetches the raw
+    source (GET /_doc-raw), swaps the rendered body for a line-numbered textarea,
+    and saves via POST /_edit-doc under the same mtime-conflict guard the SPA
+    used. Never emitted into a published bundle (bundles skip these helpers)."""
+    return (
+        '<button class="doc-menu-item" onclick="hubDocEdit()" '
+        'title="Edit this document in place">✎ Edit</button>'
+    )
+
+
+def doc_config_script(cfg: dict) -> str:
+    """Bake this file's own comment/edit context for :data:`DOC_PAGE_SCRIPT`.
+
+    ``cfg`` carries {repo, slug, target, path, editable, notes:[…]} so the
+    standalone doc page owns its inline comments + composer WITHOUT any SPA
+    parent / postMessage (S21 #3). ``</`` is escaped so a comment body can never
+    close the <script> early. Emitted only on LIVE-served pages — never bundles.
+    """
+    payload = _json.dumps(cfg or {}).replace("</", "<\\/")
+    return f"<script>window.HUB_DOC={payload};</script>"
+
+
+# S21 — self-sufficient companion script for LIVE-served doc pages. The S17-era
+# reader overlay is gone; the standalone page IS the canonical full view, so this
+# script gives it everything the reader used to lend it, with NO parent frame:
+#   • renders this file's inline comments (baked into window.HUB_DOC by the
+#     server) — anchored ones under the block whose data-src-line matches, general
+#     ones in a compact block at the top;
+#   • a persistent left "+" gutter LANE (fixed clickability): the button stays
+#     alive while the pointer is over a block OR heading into the gutter lane, so
+#     it is reliably clickable — click → an on-page composer that POSTs /_note;
+#   • ⌘C / Ctrl+C opens the composer too, but ONLY when nothing is selected (a
+#     real text selection falls through to the native copy);
+#   • ✎ Edit-in-place (hubDocEdit): raw source in a line-numbered textarea, Save →
+#     POST /_edit-doc (mtime-guarded), Cancel/Esc reverts, ⌘↵ saves.
+# Deliberately NEVER added to published bundles (they render through
+# render.bundle, not these helpers) — bundles must stay self-contained.
+DOC_PAGE_SCRIPT = """
 <script>
 (function(){
-if(window.parent===window) return;
-function fwd(key){try{window.parent.postMessage({source:'hub-doc',type:'hub-key',key:key},'*');}catch(_){}}
+var CFG=window.HUB_DOC||{};
+var canComment=CFG.repo!==undefined&&CFG.slug!==undefined&&CFG.target!==undefined;
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
   .replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-document.addEventListener('keydown',function(e){
-  var k=(e.key||'').toLowerCase();
-  if((e.metaKey||e.ctrlKey)&&!e.altKey&&(k==='k'||k==='p')){e.preventDefault();fwd(k);return;}
-  var tag=(e.target&&e.target.tagName)||'';
-  if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT'||(e.target&&e.target.isContentEditable))return;
-  if(e.metaKey||e.ctrlKey||e.altKey)return;
-  if(k==='c'){fwd('c');}
-  else if(k==='escape'){fwd('escape');}
-});
-window.addEventListener('message',function(e){
-  var d=e.data;if(!d)return;
-  if(d.type==='hub-reader-scroll'){
-    var a=String(d.anchor||'');
-    var el=a&&document.getElementById(a);
-    if(el){el.scrollIntoView({block:'start',behavior:'smooth'});
-      var o=el.style.backgroundColor;el.style.transition='background .3s';
-      el.style.backgroundColor='rgba(193,95,60,.20)';
-      setTimeout(function(){el.style.backgroundColor=o;},1400);}
-    else{window.scrollTo({top:0,behavior:'smooth'});}
-    return;
-  }
-  if(d.type==='hub-doc-notes'){renderNotes(d.notes||[]);return;}
-});
+function ago(iso){
+  if(!iso)return'';var t=Date.parse(iso);if(isNaN(t))return'';
+  var d=(Date.now()-t)/1000;
+  if(d<90)return'just now';
+  if(d<3600)return Math.floor(d/60)+'m ago';
+  if(d<86400)return Math.floor(d/3600)+'h ago';
+  return Math.floor(d/86400)+'d ago';
+}
+function lineOf(range){var m=/(\\d+)/.exec(range||'');return m?parseInt(m[1],10):null;}
 
-// ── S19: hover "+" line gutter ──────────────────────────────────────────────
-// A single floating button trails the pointer to the currently-hovered block.
-var addBtn=document.createElement('button');
-addBtn.type='button';addBtn.className='hub-line-add';addBtn.textContent='+';
-addBtn.title='comment on this line';addBtn.style.display='none';
-var curLine=null;
-addBtn.addEventListener('click',function(ev){
-  ev.preventDefault();ev.stopPropagation();
-  if(curLine==null)return;
-  try{window.parent.postMessage({source:'hub-doc',type:'hub-comment-line',line:curLine},'*');}catch(_){}
-});
-document.addEventListener('DOMContentLoaded',function(){document.body.appendChild(addBtn);});
-if(document.body)document.body.appendChild(addBtn);
-document.addEventListener('mousemove',function(e){
-  var blk=e.target&&e.target.closest&&e.target.closest('[data-src-line]');
-  if(!blk||blk.classList.contains('hub-inline-note')){addBtn.style.display='none';curLine=null;return;}
-  var ln=parseInt(blk.getAttribute('data-src-line'),10);
-  if(isNaN(ln)){addBtn.style.display='none';curLine=null;return;}
-  curLine=ln;
-  var r=blk.getBoundingClientRect();
-  addBtn.style.top=(window.scrollY+r.top)+'px';
-  addBtn.style.left=(window.scrollX+r.left-30)+'px';
-  addBtn.style.display='flex';
-});
-
-// ── S19: inline comment cards ───────────────────────────────────────────────
+// ── inline comment cards (baked, self-sufficient) ───────────────────────────
 function card(n){
-  var agent=!!n.agent;
+  var agent=/(agent|bot)/i.test(n.author||'');
   var meta='<span class="note-author'+(agent?' agent':'')+'">'+(agent?'\\u25b8 ':'')+
-    esc(n.author||'anon')+'</span><span class="note-time">'+esc(n.timeAgo||'')+'</span>'+
+    esc(n.author||'anon')+'</span><span class="note-time">'+esc(ago(n.created))+'</span>'+
     (n.line?'<span class="note-on">L'+esc(n.line)+'</span>':'');
   var el=document.createElement('div');
   el.className='note-card hub-inline-note'+(agent?' agent':'')+(n.line?' anchored':'');
@@ -214,33 +203,149 @@ function blockForLine(line){
   }
   return exact||best;
 }
-function renderNotes(notes){
+function renderNotes(){
   var page=document.querySelector('.page');if(!page)return;
-  // Clear any previously-inserted cards (re-render after a new comment saves).
   var old=page.querySelectorAll('.hub-inline-note,.hub-inline-notes');
   for(var i=0;i<old.length;i++)old[i].parentNode.removeChild(old[i]);
+  var notes=(CFG.notes||[]).map(function(n){
+    return {author:n.author,body:n.body,created:n.created,line:lineOf(n.range)};});
   var general=[];
   notes.forEach(function(n){
-    if(n.line){
-      var blk=blockForLine(n.line);
-      var c=card(n);
-      if(blk&&blk.parentNode){blk.parentNode.insertBefore(c,blk.nextSibling);}
-      else{general.push(n);}
-    }else{general.push(n);}
+    if(n.line){var blk=blockForLine(n.line);var c=card(n);
+      if(blk&&blk.parentNode){blk.parentNode.insertBefore(c,blk.nextSibling);}else{general.push(n);}}
+    else{general.push(n);}
   });
   if(general.length){
-    var wrap=document.createElement('div');
-    wrap.className='hub-inline-notes';
+    var wrap=document.createElement('div');wrap.className='hub-inline-notes';
     wrap.innerHTML='<div class="hub-inline-notes-label">// comments \\u00b7 '+general.length+'</div>';
     general.forEach(function(n){wrap.appendChild(card(n));});
     var firstBlk=page.querySelector('[data-src-line]');
-    if(firstBlk){firstBlk.parentNode.insertBefore(wrap,firstBlk);}
-    else{page.appendChild(wrap);}
+    if(firstBlk){firstBlk.parentNode.insertBefore(wrap,firstBlk);}else{page.appendChild(wrap);}
   }
 }
-// Tell the parent we're ready for this file's comments (covers the case where
-// the parent posted before this script's listener was attached).
-try{window.parent.postMessage({source:'hub-doc',type:'hub-doc-ready'},'*');}catch(_){}
+
+// ── on-page comment composer (POST /_note → reload) ─────────────────────────
+var composerEl=null;
+function closeComposer(){if(composerEl){composerEl.parentNode.removeChild(composerEl);composerEl=null;}}
+function openComposer(line){
+  if(!canComment)return;
+  closeComposer();
+  composerEl=document.createElement('div');
+  composerEl.className='hub-composer';
+  composerEl.innerHTML='<div class="hub-composer-head">'+(line?('comment on L'+line):'comment')+'</div>'+
+    '<textarea class="hub-composer-ta" placeholder="write a comment\\u2026"></textarea>'+
+    '<div class="hub-composer-foot"><span class="hub-composer-hint">\\u2318\\u21b5 save \\u00b7 esc cancel</span>'+
+    '<span><button type="button" class="hub-composer-cancel">cancel</button>'+
+    '<button type="button" class="hub-composer-save">save</button></span></div>';
+  document.body.appendChild(composerEl);
+  var ta=composerEl.querySelector('.hub-composer-ta');ta.focus();
+  function save(){
+    var body=ta.value.trim();if(!body)return;
+    var payload={repo:CFG.repo,slug:CFG.slug,target:CFG.target,body:body};
+    if(line)payload.range='L'+line;
+    fetch('/_note',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)})
+      .then(function(r){return r.json().catch(function(){return{};});})
+      .then(function(d){if(d&&d.ok){location.reload();}
+        else{alert((d&&d.detail)||(d&&d.error)||'comment failed');}})
+      .catch(function(){alert('comment failed');});
+  }
+  composerEl.querySelector('.hub-composer-save').addEventListener('click',save);
+  composerEl.querySelector('.hub-composer-cancel').addEventListener('click',closeComposer);
+  ta.addEventListener('keydown',function(e){
+    if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeComposer();}
+    else if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){e.preventDefault();e.stopPropagation();save();}
+  });
+}
+
+// ── persistent "+" gutter lane (reliably clickable) ─────────────────────────
+var lane=document.createElement('div');lane.className='hub-gutter-lane';
+var addBtn=document.createElement('button');addBtn.type='button';addBtn.className='hub-line-add';
+addBtn.textContent='+';addBtn.title='comment on this line';addBtn.style.display='none';
+lane.appendChild(addBtn);
+var curLine=null,hideT=null;
+function keepBtn(){if(hideT){clearTimeout(hideT);hideT=null;}}
+function scheduleHide(){keepBtn();hideT=setTimeout(function(){addBtn.style.display='none';curLine=null;},450);}
+function showAt(blk){
+  var ln=parseInt(blk.getAttribute('data-src-line'),10);if(isNaN(ln))return;
+  curLine=ln;var r=blk.getBoundingClientRect();
+  addBtn.style.top=Math.max(2,r.top)+'px';addBtn.style.display='flex';
+}
+addBtn.addEventListener('click',function(ev){
+  ev.preventDefault();ev.stopPropagation();if(curLine!=null)openComposer(curLine);});
+lane.addEventListener('mouseenter',keepBtn);
+lane.addEventListener('mouseleave',scheduleHide);
+document.addEventListener('mousemove',function(e){
+  if(!canComment)return;
+  var blk=e.target&&e.target.closest&&e.target.closest('.page [data-src-line]');
+  if(blk&&!blk.classList.contains('hub-inline-note')){keepBtn();showAt(blk);}
+});
+
+// ── ⌘C / Ctrl+C → composer (guarded: only when nothing is selected) ─────────
+document.addEventListener('keydown',function(e){
+  var k=(e.key||'').toLowerCase();
+  if(!((e.metaKey||e.ctrlKey)&&!e.altKey&&!e.shiftKey&&k==='c'))return;
+  var sel=window.getSelection&&window.getSelection();
+  if(sel&&String(sel).length>0)return;                 // real selection → native copy
+  var tag=(e.target&&e.target.tagName)||'';
+  if(tag==='INPUT'||tag==='TEXTAREA'||(e.target&&e.target.isContentEditable))return;
+  if(!canComment)return;
+  e.preventDefault();openComposer(curLine);
+});
+
+// ── ✎ Edit in place (S18 editor, ported off the reader) ─────────────────────
+var editing=false,rawOrig='',baseMtime=null,pageSaved=null;
+window.hubDocEdit=function(){
+  if(editing||!CFG.editable)return;
+  var page=document.querySelector('.page');if(!page)return;
+  fetch('/_doc-raw?path='+encodeURIComponent(CFG.path)).then(function(r){
+    if(!r.ok)throw 0;baseMtime=r.headers.get('X-Doc-Mtime');return r.text();
+  }).then(function(text){
+    rawOrig=text;editing=true;addBtn.style.display='none';curLine=null;pageSaved=page.innerHTML;
+    page.innerHTML='<div class="hub-editor"><div class="editor-body">'+
+      '<div class="editor-gutter" id="hub-ed-gutter" aria-hidden="true"></div>'+
+      '<textarea id="hub-ed-ta" spellcheck="false" wrap="off"></textarea></div>'+
+      '<div class="editor-foot"><span>editing raw source \\u2014 \\u2318\\u21b5 save \\u00b7 esc cancel</span>'+
+      '<span class="ef-dirty" id="hub-ed-dirty"></span>'+
+      '<span class="ef-btns"><button type="button" id="hub-ed-cancel">cancel</button>'+
+      '<button type="button" id="hub-ed-save">save</button></span></div></div>';
+    var ta=document.getElementById('hub-ed-ta');ta.value=text;
+    var gutter=document.getElementById('hub-ed-gutter');
+    function sync(){var n=(ta.value.match(/\\n/g)||[]).length+1;var s='';
+      for(var k=1;k<=n;k++)s+=k+'\\n';gutter.textContent=s;gutter.scrollTop=ta.scrollTop;}
+    function dirty(){document.getElementById('hub-ed-dirty').textContent=
+      (ta.value!==rawOrig)?'\\u25cf unsaved':'';}
+    ta.addEventListener('input',function(){dirty();sync();});
+    ta.addEventListener('scroll',function(){gutter.scrollTop=ta.scrollTop;});
+    ta.addEventListener('keydown',function(ev){
+      if(ev.key==='Escape'){ev.preventDefault();ev.stopPropagation();cancelEdit();}
+      else if((ev.metaKey||ev.ctrlKey)&&ev.key==='Enter'){ev.preventDefault();ev.stopPropagation();saveEdit();}
+    });
+    document.getElementById('hub-ed-cancel').addEventListener('click',cancelEdit);
+    document.getElementById('hub-ed-save').addEventListener('click',saveEdit);
+    sync();ta.focus();
+  }).catch(function(){alert('could not open for editing');});
+};
+function cancelEdit(){
+  if(!editing)return;
+  var ta=document.getElementById('hub-ed-ta');
+  if(ta&&ta.value!==rawOrig&&!window.confirm('Discard your unsaved changes?'))return;
+  editing=false;var page=document.querySelector('.page');
+  if(page&&pageSaved!=null){page.innerHTML=pageSaved;renderNotes();}
+}
+function saveEdit(){
+  var ta=document.getElementById('hub-ed-ta');if(!ta)return;
+  fetch('/_edit-doc',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({path:CFG.path,content:ta.value,base_mtime:baseMtime})})
+    .then(function(r){return r.json().then(function(d){return{status:r.status,ok:r.ok,d:d};});})
+    .then(function(res){
+      if(res.status===409){alert('file changed on disk \\u2014 reloading');location.reload();return;}
+      if(!res.ok||!res.d.ok){alert((res.d&&res.d.detail)||(res.d&&res.d.error)||'save failed');return;}
+      location.reload();
+    }).catch(function(){alert('save failed');});
+}
+
+function init(){document.body.appendChild(lane);renderNotes();}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
 })();
 </script>
 """
@@ -300,8 +405,13 @@ def render_provenance(prov: dict | None) -> str:
 
 def _inject_into_html(src: str, lineage_html: str, favicon: str = "",
                       provenance_html: str = "", pub_path: str = "",
-                      pub_url: str = "") -> str:
-    """Inject backlinks CSS + HTML into an existing HTML document."""
+                      pub_url: str = "", doc_cfg: dict | None = None) -> str:
+    """Inject backlinks CSS + HTML into an existing HTML document.
+
+    ``doc_cfg`` (S21) carries this file's comment context so the self-sufficient
+    :data:`DOC_PAGE_SCRIPT` can render baked inline comments + the "+" gutter
+    composer on a top-level tab. HTML docs are never editable, so no ✎ Edit item
+    is offered here."""
     src, outline_html = _add_outline(src)
     head_inject = f"<style>{_BACKLINKS_CSS}{_DOC_CHROME_CSS}</style>"
     if favicon:
@@ -325,12 +435,14 @@ def _inject_into_html(src: str, lineage_html: str, favicon: str = "",
             src += DOC_PUBLISH_SCRIPT
     if outline_html:
         src = re.sub(r"<body[^>]*>", lambda mo: mo.group(0) + outline_html, src, count=1, flags=re.IGNORECASE)
-    # S17 — forward palette/composer/close keydowns from inside the SPA reader.
+    # S21 — self-sufficient inline comments + "+" gutter composer on the doc page
+    # itself (no SPA parent). Config first (window.HUB_DOC), then the script.
+    page_scripts = doc_config_script(doc_cfg or {}) + DOC_PAGE_SCRIPT
     if re.search(r"</body>", src, re.IGNORECASE):
-        src = re.sub(r"</body>", lambda _mo: DOC_EMBED_SCRIPT + "</body>",
+        src = re.sub(r"</body>", lambda _mo: page_scripts + "</body>",
                      src, count=1, flags=re.IGNORECASE)
     else:
-        src += DOC_EMBED_SCRIPT
+        src += page_scripts
     inject_html = lineage_html + provenance_html
     m = re.search(r"</h1>", src, re.IGNORECASE)
     if m:

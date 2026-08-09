@@ -1,13 +1,16 @@
-"""S19 — reader v2: line-anchored source, DOC_EMBED_SCRIPT gutter/inline comments.
+"""S19/S21 — line-anchored source + the self-sufficient doc-page companion script.
 
 Three concerns, no network:
   - render/markdown.py: every top-level block carries a data-src-line pointing at
     its ORIGINAL source line (frontmatter- and fence-aware), and _add_outline
-    preserves that attribute while still injecting heading ids.
-  - render/page.py DOC_EMBED_SCRIPT: the LIVE-served companion script carries the
-    hover "+" gutter, the hub-comment-line hand-off, and inline-comment rendering.
-Bundle self-containment (none of this script leaks into a published bundle) is
-guarded in test_bundle.py::test_no_spa_reader_keydown_forwarder.
+    preserves that attribute while still injecting heading ids. Leading YAML
+    frontmatter is stripped from the rendered body (a mid-doc --- hr survives).
+  - render/page.py DOC_PAGE_SCRIPT (S21): the LIVE-served companion script is now
+    self-sufficient — no SPA parent. It renders window.HUB_DOC's baked comments,
+    hosts the "+" gutter composer (POST /_note), and edits in place (✎ Edit →
+    /_doc-raw + /_edit-doc). It carries NO parent-frame postMessage.
+Bundle self-containment (none of this leaks into a published bundle) is guarded
+in test_bundle.py::test_no_spa_reader_keydown_forwarder.
 """
 import os
 import re
@@ -59,20 +62,45 @@ class TestSrcLineAnnotation(unittest.TestCase):
         self.assertRegex(body, r'<h1 data-src-line="1" id="one">')
         self.assertRegex(body, r'<h2 data-src-line="5" id="two">')
 
+    def test_leading_frontmatter_stripped_but_mid_doc_hr_kept(self):
+        # A manifest opening with a YAML frontmatter fence: its keys must NOT
+        # appear as visible body text (Hub already parses them for status/title).
+        src = ("---\nstatus: ongoing\ntitle: X\n---\n"
+               "# Heading\n\nbefore\n\n---\n\nafter\n")
+        html = render._render_md(src)
+        self.assertNotIn("status:", html)   # frontmatter not rendered as body
+        self.assertNotIn("title: X", html)
+        self.assertIn("<hr", html)           # the mid-document --- survives
+        self.assertEqual(self._line_of(html, "h1"), 5)  # data-src-line still true
 
-class TestDocEmbedScript(unittest.TestCase):
-    def test_has_gutter_and_inline_comment_machinery(self):
-        s = _page.DOC_EMBED_SCRIPT
-        # hover "+" gutter → parent hand-off with the clicked line
+
+class TestDocPageScript(unittest.TestCase):
+    def test_self_sufficient_comment_and_edit_machinery(self):
+        s = _page.DOC_PAGE_SCRIPT
+        # persistent "+" gutter lane → on-page composer (POST /_note)
         self.assertIn("hub-line-add", s)
-        self.assertIn("hub-comment-line", s)
-        # inline anchored/general comment rendering fed from the parent
-        self.assertIn("hub-doc-notes", s)
+        self.assertIn("hub-gutter-lane", s)
+        self.assertIn("/_note", s)
+        # inline comments render from the baked window.HUB_DOC — no parent frame
+        self.assertIn("window.HUB_DOC", s)
         self.assertIn("data-src-line", s)
-        # S17 keydown forwarding must stay intact
-        self.assertIn("hub-key", s)
-        # only meaningful when embedded (never on a top-level tab)
-        self.assertIn("window.parent===window", s)
+        self.assertNotIn("window.parent", s)
+        # ✎ edit-in-place uses the same /_doc-raw + /_edit-doc endpoints (S18)
+        self.assertIn("hubDocEdit", s)
+        self.assertIn("/_doc-raw", s)
+        self.assertIn("/_edit-doc", s)
+        # ⌘C composer is guarded against a real text selection
+        self.assertIn("getSelection", s)
+
+    def test_edit_menu_item_and_config_baking(self):
+        self.assertIn("hubDocEdit", _page.doc_edit_item())
+        self.assertIn("✎", _page.doc_edit_item())
+        cfg = _page.doc_config_script(
+            {"repo": "r", "slug": "s", "target": "manifest.md",
+             "notes": [{"body": "hi</script>x"}]})
+        self.assertIn("window.HUB_DOC=", cfg)
+        # a comment body can never close the <script> early
+        self.assertNotIn("</script>x", cfg)
 
 
 if __name__ == "__main__":

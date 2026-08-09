@@ -139,12 +139,14 @@ class TestInjectIntoHtml(unittest.TestCase):
         result = render._inject_into_html(src, "", favicon="http://localhost:8787/favicon.svg")
         self.assertIn('rel="icon"', result)
 
-    def test_reader_keydown_forwarder_injected_into_html(self):
-        # S17 — injected HTML docs served live also carry the reader forwarder.
+    def test_self_sufficient_doc_script_injected_into_html(self):
+        # S21 — injected HTML docs served live carry the self-sufficient companion
+        # script (window.HUB_DOC + "+" gutter), NOT the old parent-frame forwarder.
         src = "<html><head></head><body><h1>T</h1></body></html>"
-        result = render._inject_into_html(src, "")
-        self.assertIn("hub-doc", result)
-        self.assertIn("window.parent===window", result)
+        result = render._inject_into_html(src, "", doc_cfg={"path": "x.html"})
+        self.assertIn("window.HUB_DOC", result)
+        self.assertIn("hub-line-add", result)
+        self.assertNotIn("window.parent===window", result)
 
     def test_print_button_injected(self):
         src = "<html><head></head><body></body></html>"

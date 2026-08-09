@@ -147,21 +147,13 @@ activeRepos=new Set((sessionStorage.getItem('docs_hub_repos')||'').split(',').fi
 // without this, the open preview/trace/graph closes and you land back on the
 // index — "back to home". Capture what's open + scrollY, restore it on load.
 let _openPreviewAbs=null, _openTraceT=null;
-// S17 — the in-workspace reading view (files open INSIDE the SPA, not a new tab).
-let _openReaderAbs=null, _openReaderTask=null, _openReaderRange=null;
 window._graphCurrent=null;
 function _captureViewState(){
   try{
     const pvEl=document.getElementById('preview');
     const trEl=document.getElementById('trace');
     const gcEl=document.getElementById('gcanvas');
-    const rdEl=document.getElementById('reader');
     let ov=null;
-    // Reader is the topmost browsing surface (it overlays trace/graph), so an
-    // open reading view must win the restore over everything below it.
-    if(rdEl&&rdEl.classList.contains('show')&&_openReaderAbs){
-      ov={k:'reader',abs:_openReaderAbs,range:_openReaderRange||null};
-    }else
     // Graph is checked first: it overlays the Trace (both can be `show` at once),
     // so an open graph must win the restore.
     if(gcEl&&gcEl.classList.contains('show')&&window._graphCurrent){
@@ -214,25 +206,42 @@ function askAgainCmd(abs){
   const end=rng.includes('..')?rng.split('..').pop():rng;
   return end?`/changelog ${slug} --since ${end}`:`/changelog ${slug}`;
 }
-const pvAsk=document.getElementById('pv-ask');
-if(pvAsk) pvAsk.addEventListener('click',()=>{
-  const cmd=askAgainCmd(_openPreviewAbs);
-  if(cmd) copy(cmd,'copied: '+cmd);
-});
 function openPreview(row){
-  pvTitle.textContent=row.querySelector('.path').textContent;
+  const title=row.querySelector('.path').textContent;
+  pvTitle.textContent=title;
   pvOpen.href=row.href;
   const abs=row.dataset.abs||'';
-  pvOpen.dataset.abs=abs;   // S17 — the delegated router opens this in the reader
+  pvOpen.dataset.abs=abs;   // S21 — Open navigates the tab to the doc page (href set below)
   _openPreviewAbs=abs;
-  const links=LINEAGE_DATA[abs]||[];
-  if(links.length){
-    pvLineage.innerHTML=buildLineage(links);pvLineage.classList.add('show');
-    const nl=pvLineage.querySelector('.ln-notes-link');
-    if(nl)nl.onclick=()=>{const tk=taskForNoteAbs(nl.dataset.noteAbs);if(tk){closePreview();openTaskNotes(tk);}};
-  }
-  else pvLineage.classList.remove('show');
-  if(pvAsk) pvAsk.style.display=askAgainCmd(abs)?'':'none';
+  const href=row.href;
+  // S21 #4 — the "// trace" header and a ⋯ actions menu share ONE line; the
+  // `data` lineage group is dropped from the preview (it clutters the peek).
+  const links=(LINEAGE_DATA[abs]||[]).filter(l=>l.r!=='task_has_data');
+  const ask=askAgainCmd(abs);
+  let h='<div class="pv-trace-head"><span class="ln-label">// trace</span>'+
+    '<details class="pv-menu"><summary class="pv-menu-btn" title="Actions">⋯</summary>'+
+    '<div class="pv-menu-list">'+
+      '<button type="button" class="pv-menu-item" data-act="newtab">↗ new tab</button>'+
+      '<button type="button" class="pv-menu-item" data-act="float">⧉ float</button>'+
+      '<button type="button" class="pv-menu-item" data-act="comment">💬 comment</button>'+
+      '<button type="button" class="pv-menu-item" data-act="publish">↗ publish</button>'+
+      (ask?'<button type="button" class="pv-menu-item" data-act="ask">↩ ask again</button>':'')+
+    '</div></details></div>';
+  if(links.length) h+='<div class="pv-trace-chips">'+buildLineage(links,false)+'</div>';
+  pvLineage.innerHTML=h;pvLineage.classList.add('show');
+  const nl=pvLineage.querySelector('.ln-notes-link');
+  if(nl)nl.onclick=()=>{const tk=taskForNoteAbs(nl.dataset.noteAbs);if(tk){closePreview();openTaskNotes(tk);}};
+  pvLineage.querySelectorAll('.pv-menu-item').forEach(it=>{
+    it.addEventListener('click',()=>{
+      const menu=pvLineage.querySelector('.pv-menu');if(menu)menu.removeAttribute('open');
+      const act=(it as HTMLElement).dataset.act;
+      if(act==='newtab'){if(href)window.open(href,'_blank','noopener');}
+      else if(act==='float'){openFloat(abs,title,href);closePreview();}
+      else if(act==='comment'){const ctx=(abs&&_ctxForAbs(abs))||composerContext();if(window._openComposer)window._openComposer(ctx);}
+      else if(act==='publish'){if(!abs){flash('nothing to publish');return;}if(window._openPublish)window._openPublish({abs:abs});}
+      else if(act==='ask'){if(ask)copy(ask,'copied: '+ask);}
+    });
+  });
   pvBody.classList.add('iframe-mode');
   pvBody.innerHTML=`<iframe class="pv-iframe" src="${row.href}"></iframe>`;
   preview.classList.add('open');
@@ -263,31 +272,6 @@ rows.forEach(r=>r.addEventListener('click',e=>{
 }));
 
 document.getElementById('pv-close').addEventListener('click',closePreview);
-
-// Modest preview affordances: comment on, or publish, the previewed file.
-(function(){
-  const acts=document.querySelector('#preview .pv-actions');
-  if(!acts) return;
-  const b=document.createElement('button');
-  b.className='pv-btn';b.id='pv-comment';b.type='button';
-  b.title='write a comment about this file (⌘↵)';b.textContent='💬';
-  b.addEventListener('click',()=>{
-    const ctx=(_openPreviewAbs&&_ctxForAbs(_openPreviewAbs))||composerContext();
-    if(window._openComposer)window._openComposer(ctx);
-  });
-  acts.insertBefore(b,document.getElementById('pv-close'));
-  // S14 / #6 — publish ANY previewed doc (not just task artifacts). Opens the
-  // safe scan→review→publish sheet prefilled to this file; the sheet shows the
-  // honest published / dry-run / error state.
-  const p=document.createElement('button');
-  p.className='pv-btn';p.id='pv-publish';p.type='button';
-  p.title='publish this file to a shareable URL';p.textContent='↗';
-  p.addEventListener('click',()=>{
-    if(!_openPreviewAbs){flash('nothing to publish');return;}
-    if(window._openPublish)window._openPublish({abs:_openPreviewAbs});
-  });
-  acts.insertBefore(p,document.getElementById('pv-close'));
-})();
 
 // ── Floating windows ──────────────────────────────────────────────────────
 const FLOAT_WINS=new Map();
@@ -346,12 +330,8 @@ function openFloat(abs,title,href){
   head.addEventListener('pointerup',endDrag);
   head.addEventListener('pointercancel',endDrag);
 }
-document.getElementById('pv-float').addEventListener('click',()=>{
-  if(selIdx<0||!selRows[selIdx]) return;
-  const r=selRows[selIdx];
-  openFloat(r.dataset.abs,r.querySelector('.path').textContent,r.href);
-  closePreview();
-});
+// S21 — the ⋯ "float" menu item (built in openPreview) replaces the old pv-float
+// button; double-clicking a row still pops a floating window directly.
 rows.forEach(r=>r.addEventListener('dblclick',e=>{
   e.preventDefault();
   openFloat(r.dataset.abs,r.querySelector('.path').textContent,r.href);
@@ -377,9 +357,6 @@ function _ctxForAbs(abs){
   return null;
 }
 function composerContext(){
-  // 0) the reading view is the topmost surface — comment on the open file,
-  //    task-relative target (S17 #1/#4).
-  if(_openReaderAbs){const c=_ctxForAbs(_openReaderAbs);if(c) return c;}
   // 1) an open trace / 2) an open graph → that task, general (manifest) target.
   if(_openTraceT) return {task:_openTraceT,target:'manifest.md'};
   if(window._graphCurrent&&typeof TASKS_DATA!=='undefined'){
@@ -460,278 +437,38 @@ function _composerSave(){
 }
 window._openComposer=openComposer;
 
-// ── Reading view (S17) — files open INSIDE the workspace ────────────────────
-// The SPA is the single shell. Opening a file shows a large in-workspace reading
-// view: the file body in a SANDBOXED same-origin <iframe> (keeps hub's injected
-// doc CSS, avoids style/script bleed into the SPA), and the app chrome — palette,
-// composer, and the file's comments margin — in the PARENT around it. A tiny
-// forwarder injected into LIVE-served doc bodies (render/page.py::DOC_EMBED_SCRIPT)
-// relays ⌘K/⌘P/c/Esc keydowns to window.parent, so those shortcuts fire even when
-// focus is inside the iframe. The standalone render/page.py route stays intact for
-// deep links + published bundles; only the in-app browsing click routes here.
-const readerEl=document.getElementById('reader');
-const readerDoc=document.getElementById('reader-doc');
-const readerCrumb=document.getElementById('reader-crumb');
-const readerOpen=document.getElementById('reader-open');
+// ── Opening a file (S21) — navigate the tab to the canonical doc page ───────
+// The S17 in-workspace reading overlay is gone. Opening a file now navigates the
+// current tab to the standalone served doc page (render/page.py), which is fully
+// self-sufficient: it renders its own inline comments, hosts the "+" gutter
+// composer, and carries ✎ Edit / ↗ Publish in its ⋯ menu. Browser Back returns
+// to the SPA. Modified clicks / an explicit ↗ new-tab affordance still pop a raw
+// tab. window._openReader stays as an alias so older callsites keep working.
+function openDoc(abs,href){
+  const u=href||(abs?fileHref(abs):'');
+  if(u)location.assign(u);
+}
+window._openReader=(abs,opts)=>openDoc(abs,opts&&opts.href);
 
-function _readerRel(abs,ctx){
-  if(ctx&&ctx.task){
-    const t=ctx.task;
-    return (t.rp&&t.rp!=='(root)'?t.rp+'/':'')+'tasks/'+t.sl+'/'+ctx.target;
-  }
-  return abs;
-}
-// S19 — comments now render INLINE on the document (inside the iframe, at each
-// comment's source line), not in a right-side rail. Collect this file's
-// comments from the owning task's baked NOTES_DATA (filtered by task-relative
-// target), shaped for the iframe: {line, author, body, timeAgo, agent}. The
-// line is the first integer of the comment's range (e.g. "L4"/"L41-L48" → 4/41);
-// range-less comments (line:null) render as a general block at the top.
-let _readerNotes=[];
-function _readerNotesFor(abs){
-  const ctx=_ctxForAbs(abs);
-  if(!ctx) return [];
-  const all=(typeof NOTES_DATA!=='undefined'&&NOTES_DATA[ctx.task.rp+'\t'+ctx.task.sl])||[];
-  return all.filter(c=>(c.target||'manifest.md')===ctx.target).map(c=>{
-    const mm=/(\d+)/.exec(c.range||'');
-    return {line:mm?parseInt(mm[1],10):null,author:c.author||'anon',
-      body:c.body||'',timeAgo:noteAgo(c.created),agent:/(agent|bot)/i.test(c.author||'')};
-  });
-}
-function _sendReaderNotes(){
-  const ifr=document.getElementById('reader-iframe');
-  if(ifr&&ifr.contentWindow)try{
-    ifr.contentWindow.postMessage({type:'hub-doc-notes',notes:_readerNotes||[]},'*');
-  }catch(_){}
-}
-// Open a comment on the file currently in the reading view. Prefills the
-// composer target to THIS file (task-relative); ``line`` (from a gutter "+"
-// click) prefills the range so the user never types "L4" by hand (S19 #3).
-function readerComment(line){
-  const ctx=(_openReaderAbs&&_ctxForAbs(_openReaderAbs))||composerContext();
-  if(ctx&&line!=null) ctx.range='L'+line;
-  if(window._openComposer) window._openComposer(ctx);
-}
-// S20 — when the open file is published, show a PUBLISHED · open↗ / republish /
-// revoke control in the reader header (next to ↗ publish). Reuses the same
-// data-pub-file* delegation the row chip uses. Hidden when private or unpublished.
-function refreshReaderPubState(abs){
-  const ps=document.getElementById('reader-pubstate');
-  if(!ps) return;
-  const pub=(!(typeof PRIVATE!=='undefined'&&PRIVATE))&&publishedForFile(abs);
-  if(!pub){ps.style.display='none';ps.innerHTML='';return;}
-  const url=pub.url||'';
-  ps.style.display='';
-  ps.innerHTML=`<span class="reader-pub-tag" title="published ${esc(pub.at||'')}">PUBLISHED</span>`+
-    `<button class="reader-btn" type="button" data-pub-file-open="${esc(abs)}"${url?'':' disabled'} title="Open the live published URL">↗ open</button>`+
-    `<button class="reader-btn" type="button" data-pub-file-republish="${esc(abs)}" title="Republish (scan + hand off to dak)">↻ republish</button>`+
-    `<button class="reader-btn" type="button" data-pub-file-revoke="${esc(abs)}" title="Revoke (forget this published link)">✕ revoke</button>`;
-}
-function openReader(abs,opts){
-  if(!abs||!readerEl){ if(opts&&opts.href)window.open(opts.href,'_blank','noopener'); return; }
-  opts=opts||{};
-  const href=opts.href||fileHref(abs);
-  _openReaderAbs=abs;
-  const ctx=_ctxForAbs(abs);
-  _openReaderTask=opts.task||(ctx&&ctx.task)||null;
-  _openReaderRange=opts.range||null;
-  readerCrumb.innerHTML='<b>reading</b> · '+esc(_readerRel(abs,ctx));
-  readerOpen.href=href;
-  const pubBtn=document.getElementById('reader-publish');
-  if(pubBtn) pubBtn.style.display=(typeof PRIVATE!=='undefined'&&PRIVATE)?'none':'';
-  refreshReaderPubState(abs);
-  if(preview.classList.contains('open')) closePreview();
-  // S19 — comments render inline in the iframe; hand them over on load (and
-  // again when the doc script announces hub-doc-ready, covering the race).
-  _readerNotes=_readerNotesFor(abs);
-  readerDoc.innerHTML='<iframe class="reader-iframe" id="reader-iframe" src="'+esc(href)+'"></iframe>';
-  const ifr=document.getElementById('reader-iframe');
-  if(ifr){
-    ifr.addEventListener('load',()=>{
-      _sendReaderNotes();
-      if(_openReaderRange)try{
-        ifr.contentWindow.postMessage({type:'hub-reader-scroll',anchor:_openReaderRange},'*');
-      }catch(_){}
-    });
-  }
-  // S18 — offer Edit only for editable text docs (mirrors the server allowlist).
-  _readerEditing=false;
-  readerEl.classList.remove('editing');
-  readerEl.classList.toggle('can-edit',_isEditableDoc(abs));
-  readerEl.classList.add('show');
-  readerEl.scrollTop=0;
-}
-function closeReader(){
-  if(_readerEditing&&!_confirmDiscardEdit()) return;
-  _openReaderAbs=null;_openReaderTask=null;_openReaderRange=null;
-  _readerEditing=false;_readerBaseMtime=null;_readerRawOrig='';
-  if(!readerEl) return;
-  readerEl.classList.remove('show','editing','can-edit');
-  readerDoc.innerHTML='';
-  _readerNotes=[];
-}
-window._openReader=openReader;
-
-// ── S18: inline document editor ────────────────────────────────────────────
-// Extensions the reading view lets you edit — kept in lockstep with
-// tasks.EDITABLE_EXTS on the server (.html/.htm deliberately excluded).
-const _EDITABLE_EXTS=new Set(['.md','.markdown','.txt','.py','.sh','.bash','.zsh',
-  '.js','.mjs','.ts','.tsx','.sql','.rb','.go','.rs','.java','.rules','.toml',
-  '.yaml','.yml','.ini','.cfg','.example','.ipynb','.json']);
-let _readerEditing=false, _readerBaseMtime=null, _readerRawOrig='';
-function _extOf(abs){const m=/\.[^./\\]+$/.exec(String(abs||''));return m?m[0].toLowerCase():'';}
-function _isEditableDoc(abs){
-  if(!abs) return false;
-  // A task's append-only comment log is internal storage, never a document.
-  if(/(^|\/)comments\//.test(String(abs))) return false;
-  return _EDITABLE_EXTS.has(_extOf(abs));
-}
-function _editorDirty(){
-  const ta=document.getElementById('reader-textarea');
-  return !!ta && ta.value!==_readerRawOrig;
-}
-function _confirmDiscardEdit(){
-  return !_editorDirty()||window.confirm('Discard your unsaved changes?');
-}
-// Fetch raw source + current mtime, then swap the iframe for a textarea.
-async function enterReaderEdit(){
-  if(!_openReaderAbs||_readerEditing) return;
-  let text,mtime;
-  try{
-    const resp=await fetch('/_doc-raw?path='+encodeURIComponent(_openReaderAbs));
-    if(!resp.ok){flash('could not open for editing');return;}
-    text=await resp.text();
-    mtime=resp.headers.get('X-Doc-Mtime');
-  }catch(_){flash('could not open for editing');return;}
-  _readerEditing=true;_readerBaseMtime=mtime;_readerRawOrig=text;
-  readerEl.classList.add('editing');
-  // S19 — a line-number gutter (a mirrored column) scrolls in lockstep with the
-  // textarea; its line count updates on every input.
-  readerDoc.innerHTML='<div class="reader-editor">'
-    +'<div class="editor-body"><div class="editor-gutter" id="editor-gutter" aria-hidden="true"></div>'
-    +'<textarea id="reader-textarea" spellcheck="false" wrap="off"></textarea></div>'
-    +'<div class="editor-foot"><span>editing raw source — ⌘↵ save · esc cancel</span>'
-    +'<span class="ef-dirty" id="editor-dirty"></span></div></div>';
-  const ta=document.getElementById('reader-textarea');
-  ta.value=text;
-  const gutter=document.getElementById('editor-gutter');
-  const syncGutter=()=>{
-    const n=(ta.value.match(/\n/g)||[]).length+1;
-    let s='';for(let k=1;k<=n;k++)s+=k+'\n';
-    gutter.textContent=s;gutter.scrollTop=ta.scrollTop;
-  };
-  const dirtyMark=()=>{document.getElementById('editor-dirty').textContent=_editorDirty()?'● unsaved':'';};
-  ta.addEventListener('input',()=>{dirtyMark();syncGutter();});
-  ta.addEventListener('scroll',()=>{gutter.scrollTop=ta.scrollTop;});
-  ta.addEventListener('keydown',ev=>{
-    if(ev.key==='Escape'){ev.preventDefault();ev.stopPropagation();cancelReaderEdit();}
-    else if((ev.metaKey||ev.ctrlKey)&&ev.key==='Enter'){ev.preventDefault();ev.stopPropagation();saveReaderEdit();}
-  });
-  syncGutter();
-  ta.focus();
-}
-function cancelReaderEdit(){
-  if(!_readerEditing) return;
-  if(!_confirmDiscardEdit()) return;
-  _readerEditing=false;_readerBaseMtime=null;_readerRawOrig='';
-  readerEl.classList.remove('editing');
-  // Restore the rendered view (re-open re-injects the iframe + notes).
-  if(_openReaderAbs) openReader(_openReaderAbs);
-}
-async function saveReaderEdit(){
-  if(!_readerEditing||!_openReaderAbs) return;
-  const ta=document.getElementById('reader-textarea');
-  if(!ta) return;
-  const content=ta.value;
-  let resp,out;
-  try{
-    resp=await fetch('/_edit-doc',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({path:_openReaderAbs,content:content,base_mtime:_readerBaseMtime})});
-    out=await resp.json().catch(()=>({}));
-  }catch(_){flash('save failed');return;}
-  if(resp.status===409){
-    // Hub never wins a race against your editor — reload the fresh source.
-    flash('file changed on disk — reloaded');
-    try{
-      const r2=await fetch('/_doc-raw?path='+encodeURIComponent(_openReaderAbs));
-      if(r2.ok){_readerRawOrig=await r2.text();_readerBaseMtime=r2.headers.get('X-Doc-Mtime');
-        ta.value=_readerRawOrig;const dm=document.getElementById('editor-dirty');if(dm)dm.textContent='';}
-    }catch(_){}
-    return;
-  }
-  if(!resp.ok||!out.ok){flash((out&&out.detail)||(out&&out.error)||'save failed');return;}
-  flash('saved');
-  _readerEditing=false;_readerBaseMtime=out.mtime||null;_readerRawOrig=content;
-  readerEl.classList.remove('editing');
-  // The rebuild re-rendered the doc — re-open on the fresh render.
-  if(_openReaderAbs) openReader(_openReaderAbs);
-}
-if(readerEl){
-  document.getElementById('reader-close').addEventListener('click',closeReader);
-  document.getElementById('reader-comment').addEventListener('click',readerComment);
-  document.getElementById('reader-publish').addEventListener('click',()=>{
-    if(_openReaderAbs&&window._openPublish)window._openPublish({abs:_openReaderAbs});
-  });
-  document.getElementById('reader-edit').addEventListener('click',enterReaderEdit);
-  document.getElementById('reader-save').addEventListener('click',saveReaderEdit);
-  document.getElementById('reader-cancel').addEventListener('click',cancelReaderEdit);
-}
-
-// Delegated router: any in-app browsing link marked data-open-reader opens the
-// file in the reading view instead of scattering to a new tab. Modified clicks
-// (⌘/Ctrl/⇧/middle) fall through so power users can still pop a raw tab.
+// Delegated router: any in-app browsing link marked data-open-reader navigates
+// the tab to the doc page. Plain <a> anchors (href already set to the doc page)
+// navigate natively; this handles the few non-anchor / dataset-only callers and
+// keeps modified clicks (⌘/Ctrl/⇧/middle) falling through to a raw tab.
 document.addEventListener('click',e=>{
   const a=e.target.closest&&e.target.closest('[data-open-reader]');
   if(!a)return;
   if(e.metaKey||e.ctrlKey||e.shiftKey||e.button===1)return;
   const abs=a.dataset.abs;
-  if(!abs)return;
+  const href=a.getAttribute&&a.getAttribute('href');
+  if(!abs&&!href)return;
   e.preventDefault();
-  openReader(abs,{href:a.getAttribute('href')||undefined});
-});
-
-// Palette/composer/close shortcuts forwarded from inside the reader iframe
-// (the iframe would otherwise swallow the keydown). Same-origin postMessage.
-window.addEventListener('message',e=>{
-  const d=e.data;
-  if(!d||d.source!=='hub-doc')return;
-  // S19 — the doc script is ready: (re)send this file's inline comments.
-  if(d.type==='hub-doc-ready'){_sendReaderNotes();return;}
-  // S19 — a gutter "+" was clicked: open the composer prefilled with that line.
-  if(d.type==='hub-comment-line'){readerComment(d.line);return;}
-  if(d.type!=='hub-key')return;
-  const k=d.key;
-  if(k==='k'||k==='p'){
-    if(!document.getElementById('palette').classList.contains('show')&&window._openPalette)
-      window._openPalette('');
-  }else if(k==='c'){
-    readerComment();
-  }else if(k==='escape'){
-    if(readerEl&&readerEl.classList.contains('show'))closeReader();
-  }
+  openDoc(abs,href||undefined);
 });
 
 // ── Keyboard nav ──────────────────────────────────────────────────────────
 document.addEventListener('keydown',e=>{
   const tag=document.activeElement.tagName;
   if(tag==='INPUT'||tag==='TEXTAREA') return;
-  // Reading view is the topmost surface — Esc closes it; list nav stays inert.
-  // But the palette (⌘K/⌘P) and the comment composer (c) must still work when
-  // focus is on the parent chrome (not the doc iframe) — the iframe forwards
-  // these when focus is inside it, so mirror that here for parent focus.
-  if(readerEl&&readerEl.classList.contains('show')){
-    const rk=(e.key||'').toLowerCase();
-    // While editing, the parent chrome only handles Escape → exit edit mode
-    // (the textarea has its own ⌘↵/esc handlers); other shortcuts stay inert.
-    if(_readerEditing){if(e.key==='Escape'){e.preventDefault();cancelReaderEdit();}return;}
-    if(e.key==='Escape'){e.preventDefault();closeReader();}
-    else if((e.metaKey||e.ctrlKey)&&(rk==='k'||rk==='p')&&!e.altKey){
-      e.preventDefault();
-      if(window._openPalette && !document.getElementById('palette').classList.contains('show')) window._openPalette('');
-    }
-    else if(rk==='c'){e.preventDefault();if(typeof readerComment==='function')readerComment();}
-    return;
-  }
   if(document.getElementById('trace').classList.contains('show')){
     if(e.key==='Escape') closeTrace();
     else if((e.key==='g'||e.key==='G')&&_openTraceT){e.preventDefault();if(window._openGraphFor)window._openGraphFor(_openTraceT);}
@@ -742,21 +479,21 @@ document.addEventListener('keydown',e=>{
   else if(e.key==='Escape'){closePreview();}
   else if(e.key==='Enter'&&selIdx>=0&&selRows[selIdx]){
     const r=selRows[selIdx];
-    // Diagrams still open in the full canvas (new tab); everything else opens
-    // in the in-workspace reading view (S17).
+    // Diagrams still open in the full canvas (new tab); everything else navigates
+    // the tab to the canonical doc page (S21).
     if(r.dataset.kind==='draw')window.open(r.href,'_blank','noopener');
-    else openReader(r.dataset.abs,{href:r.href});
+    else openDoc(r.dataset.abs,r.href);
   }
   else if(e.key==='/'&&!modal.classList.contains('show')){e.preventDefault();q.focus();}
 });
 
 // ── Lineage builder ───────────────────────────────────────────────────────
-function buildLineage(links){
+function buildLineage(links,withLabel=true){
   const groups={};
   links.forEach(l=>{(groups[l.r]=groups[l.r]||[]).push(l);});
   const ORDER=['belongs_to_task','belongs_to_skill','task_has_run','task_has_artifact','task_has_script','task_has_draw','task_has_data','task_has_note','task_has_prompt','task_has_doc','skill_has_ref'];
   const LABELS={'belongs_to_task':'↑ task','belongs_to_skill':'↑ skill','task_has_run':'runs','task_has_artifact':'artifacts','task_has_script':'scripts','task_has_draw':'draws','task_has_data':'data','task_has_note':'notes','task_has_prompt':'prompts','task_has_doc':'docs','skill_has_ref':'references'};
-  let h='<div class="ln-label">// trace</div>';
+  let h=withLabel?'<div class="ln-label">// trace</div>':'';
   ORDER.forEach(r=>{
     if(!groups[r]) return;
     h+=`<div class="ln-group"><span class="ln-type">${LABELS[r]||r}</span>`;
@@ -1044,7 +781,7 @@ function buildCard(t){
     `<div class="kc-repo">${esc(t.rp)}</div>`+
     (chips.length?`<div class="kc-chips">${chips.map(c=>`<span class="kc-chip">${esc(c)}</span>`).join('')}</div>`:'')+
     `<div class="kc-ago">${feedAgo(t.mtime)}</div>`;
-  card.addEventListener('click',()=>{if(t.abs)openReader(t.abs);});
+  card.addEventListener('click',()=>{if(t.abs)openDoc(t.abs);});
   card.addEventListener('dragstart',e=>{
     card.classList.add('dragging');
     e.dataTransfer.effectAllowed='move';
@@ -1706,9 +1443,7 @@ setTimeout(function restoreViewState(){
   if(!s)return;
   const ov=s.ov;
   if(ov){
-    if(ov.k==='reader'){
-      openReader(ov.abs,{range:ov.range||undefined});
-    }else if(ov.k==='preview'){
+    if(ov.k==='preview'){
       const row=[...document.querySelectorAll('.row')].find(r=>r.dataset.abs===ov.abs);
       if(row)openPreview(row);
     }else if(ov.k==='trace'){
@@ -2102,7 +1837,6 @@ document.getElementById('rebuild').addEventListener('click',e=>{
   // for a task, else a task named exactly in the query. Null → ask the user.
   function paletteContextTask(){
     if(typeof TASKS_DATA==='undefined'||!TASKS_DATA.length) return null;
-    if(_openReaderTask) return _openReaderTask;
     if(_openTraceT) return _openTraceT;
     if(window._graphCurrent){const g=window._graphCurrent;const t=TASKS_DATA.find(x=>x.sl===g.sl&&x.rp===g.rp);if(t) return t;}
     if(_openPreviewAbs){const c=_ctxForAbs(_openPreviewAbs);if(c&&c.task) return c.task;}
@@ -2605,12 +2339,11 @@ document.getElementById('rebuild').addEventListener('click',e=>{
   // S20 — reflect a just-published file's marker everywhere WITHOUT a full
   // reload: add the asset entry to the in-memory PUBLISHED_DATA (mutating the
   // baked object; a later reload re-bakes it from published.json), then
-  // re-decorate its row + refresh the reader header if it's the open file.
+  // re-decorate its row so the PUBLISHED marker appears without a full reload.
   function _markFilePublished(abs,url,mode){
     if(typeof PUBLISHED_DATA==='object'&&PUBLISHED_DATA)
       PUBLISHED_DATA['asset\t'+abs]={url:url,at:'',mode:mode||'snapshot'};
     decorateFileRowByAbs(abs);
-    if(typeof _openReaderAbs!=='undefined'&&_openReaderAbs===abs)refreshReaderPubState(abs);
   }
   function pubPublish(){
     const abs=pubFileSel.value;

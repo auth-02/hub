@@ -38,7 +38,8 @@ from ..render import (
     _render_md, _render_csv, _render_xlsx, _inject_into_html,
     _render_lineage_html, _favicon_href, _CSS, _DOC_CHROME_CSS, _PAGE, _add_outline,
     draw_page_html, doc_menu, DOC_PDF_ITEM, render_provenance,
-    doc_publish_item, doc_published_open_item, DOC_PUBLISH_SCRIPT, DOC_EMBED_SCRIPT,
+    doc_publish_item, doc_published_open_item, DOC_PUBLISH_SCRIPT,
+    DOC_PAGE_SCRIPT, doc_edit_item, doc_config_script,
 )
 from ..core import metadata as _metadata
 
@@ -222,7 +223,8 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             provenance_html = render_provenance(_metadata.extract_provenance(src))
             src = _inject_into_html(src, lineage_html, _favicon_href(self.__class__.server_port),
                                     provenance_html, pub_path=self._pub_path(fs_path),
-                                    pub_url=self._published_url(fs_path))
+                                    pub_url=self._published_url(fs_path),
+                                    doc_cfg=self._doc_comment_cfg(fs_path))
             self._send(200, "text/html; charset=utf-8", src.encode("utf-8"))
         elif fs_path.suffix.lower() == ".txt":
             src = fs_path.read_text(encoding="utf-8", errors="replace")
@@ -1495,6 +1497,73 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             return ""
 
     @staticmethod
+    def _doc_comment_cfg(path: Path) -> dict:
+        """Build this doc page's self-sufficient comment/edit context (S21).
+
+        Returns a dict baked into ``window.HUB_DOC`` by :func:`doc_config_script`
+        so the standalone page renders its OWN inline comments and can compose a
+        new one (POST /_note) with no SPA parent. Always carries ``path`` +
+        ``editable``; when the file lives under a task it also carries
+        ``repo``/``slug``/``target`` (enabling the composer) and this file's baked
+        ``notes``. Best-effort — any failure yields the minimal path/editable dict
+        so the page still renders."""
+        from ..core import tasks as _tasks
+
+        try:
+            resolved = path.resolve()
+            editable = _tasks.editable_doc_reason(resolved) is None
+        except Exception:
+            editable = False
+            resolved = path
+        # path baked as scan-root-relative when possible (what /_doc-raw prefers).
+        cfg: dict = {"path": HubHandler._pub_path(path), "editable": editable}
+
+        # Find the owning task dir: the ancestor whose parent is named "tasks".
+        task_dir = None
+        try:
+            for parent in resolved.parents:
+                if parent.parent.name == "tasks":
+                    task_dir = parent
+                    break
+        except Exception:
+            task_dir = None
+        if task_dir is None:
+            return cfg  # not under a task → no commenting, still editable/raw
+
+        root = _active_root.resolve()
+        repo_dir = task_dir.parent.parent  # <root> or <root>/<repo>
+        try:
+            if repo_dir == root:
+                repo = "(root)"
+            else:
+                rel = repo_dir.relative_to(root).as_posix()
+                repo = rel or "(root)"
+        except ValueError:
+            return cfg  # task lives outside the active scan root
+        slug = task_dir.name
+        try:
+            target = resolved.relative_to(task_dir).as_posix()
+        except ValueError:
+            return cfg
+
+        notes = []
+        try:
+            for rec in _tasks.read_notes(task_dir):
+                if (rec.get("target") or "manifest.md") != target:
+                    continue
+                notes.append({
+                    "author": rec.get("author") or "anon",
+                    "body": rec.get("body") or "",
+                    "range": rec.get("range") or "",
+                    "created": rec.get("created") or "",
+                })
+        except Exception:
+            notes = []
+
+        cfg.update({"repo": repo, "slug": slug, "target": target, "notes": notes})
+        return cfg
+
+    @staticmethod
     def _pub_path(path: Path) -> str:
         """Path to bake into the doc-page Publish item: scan-root-relative when
         the file lives under the active root (what /_publish prefers), else the
@@ -1564,11 +1633,16 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 menu_items.append(doc_published_open_item(pub_url))
             menu_items.append(doc_publish_item(self._pub_path(path)))
             pub_script = DOC_PUBLISH_SCRIPT
+        # S21 — this page's self-sufficient comment/edit context (no SPA parent).
+        doc_cfg = self._doc_comment_cfg(path)
+        # ✎ Edit-in-place for any editable text doc (mirrors the /_edit-doc gate).
+        if doc_cfg.get("editable"):
+            menu_items.append(doc_edit_item())
         menu_items.append(DOC_PDF_ITEM)
-        # S17 — keydown forwarder so the palette/composer/close shortcuts work
-        # when this page is shown inside the SPA reading-view iframe. No-op for a
-        # top-level tab (deep link); never present in published bundles.
-        body = doc_menu(menu_items) + body + pub_script + DOC_EMBED_SCRIPT
+        # S21 — self-contained inline comments + "+" gutter composer + editor,
+        # baked with this file's own context. Never present in published bundles.
+        page_scripts = pub_script + doc_config_script(doc_cfg) + DOC_PAGE_SCRIPT
+        body = doc_menu(menu_items) + body + page_scripts
 
         html = _PAGE.format(
             title=title,
