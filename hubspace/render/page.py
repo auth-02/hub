@@ -134,9 +134,31 @@ DOC_PUBLISH_SCRIPT = """
 (function(){
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function fname(path){var p=String(path||'');return p.split('/').pop()||p;}
-function show(html,cls){var el=document.getElementById('doc-pub-result');
-if(!el){el=document.createElement('div');el.id='doc-pub-result';document.body.appendChild(el);}
-el.className='doc-pub-result '+(cls||'');el.innerHTML=html;}
+// S29 — close the ⋯ menu the moment an action starts, so no stuck menu item
+// (the old "publishing…" label) lingers under the transient toast.
+function closeMenu(btn){var d=btn&&btn.closest?btn.closest('.doc-menu'):null;if(d)d.open=false;}
+// S29 — themed publish-name popover (replaces the native window.prompt). Paper
+// bg / --line border / mono / oxblood primary, positioned near the ⋯ menu. Blank
+// = server default. Callback-based so hubPublish awaits the value: cb(name) or
+// cb(null) on cancel. Enter submits, Esc/backdrop cancels.
+function askName(defaultName,cb){
+var old=document.getElementById('doc-pub-namebox');if(old&&old.parentNode)old.parentNode.removeChild(old);
+var box=document.createElement('div');box.id='doc-pub-namebox';box.className='doc-pub-namebox';
+box.innerHTML='<div class="dpn-label">publish as (URL name)</div>'+
+'<input class="dpn-input" type="text" autocomplete="off" spellcheck="false" placeholder="'+
+esc(defaultName?('default: '+defaultName):'leave blank for the default')+'">'+
+'<div class="dpn-actions"><button type="button" class="dpn-cancel">Cancel</button>'+
+'<button type="button" class="dpn-ok">Publish</button></div>';
+document.body.appendChild(box);
+var input=box.querySelector('.dpn-input');
+function done(val){if(box.parentNode)box.parentNode.removeChild(box);cb(val);}
+box.querySelector('.dpn-cancel').addEventListener('click',function(){done(null);});
+box.querySelector('.dpn-ok').addEventListener('click',function(){done(input.value.trim());});
+input.addEventListener('keydown',function(e){
+if(e.key==='Escape'){e.preventDefault();done(null);}
+else if(e.key==='Enter'){e.preventDefault();done(input.value.trim());}});
+setTimeout(function(){input.focus();},0);
+}
 // ── tiny self-contained sticky toast (mirrors the SPA's flashSticky/flashOpen) ──
 function toastEl(){var t=document.getElementById('doc-toast');
 if(!t){t=document.createElement('div');t.id='doc-toast';t.className='doc-toast';document.body.appendChild(t);}return t;}
@@ -163,9 +185,11 @@ else{wrap.innerHTML='<button class="doc-menu-item" onclick="hubPublish(this)" da
 // ── publish / republish share one honest scan->review->publish path ────────────
 // S28 — `name` (optional) picks the URL worker slug on a FRESH publish; republish
 // passes nothing so the server reuses the recorded worker (stays idempotent).
+// S29 — ONE transient indicator: close the ⋯ menu and drive the toast only. No
+// more menu-button "publishing…" label and no separate in-flight result box.
 function doPublish(btn,verb,name){
-var wrap=wrapOf(btn);var path=pathOf(btn);
-btn.disabled=true;btn.textContent=verb+'\\u2026';toastSticky(verb+' '+fname(path)+'\\u2026');show(verb+'\\u2026','');
+var wrap=wrapOf(btn);var path=pathOf(btn);closeMenu(btn);
+btn.disabled=true;toastSticky(verb+' '+fname(path)+'\\u2026');
 fetch('/_publish-scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path})})
 .then(function(r){return r.json();}).catch(function(){return {};})
 .then(function(sc){var f=(sc&&sc.findings)||[];var idx=f.map(function(_x,i){return i;});
@@ -175,40 +199,34 @@ body:JSON.stringify({path:path,redact_indices:idx,review:true,name:(name||'')})}
 .then(function(res){btn.disabled=false;
 var d=(res&&res.d)||{};
 if(res&&res.ok&&d.url){
-if(d.dryRun){show('<span class="dpr-tag dry">dry-run \\u2014 not uploaded (URL not live)</span>'+
-'<span class="dpr-preview">preview: '+esc(d.url)+'</span>','dry');
-toastFlash('dry-run \\u2014 not uploaded');}
-else{show('<span class="dpr-tag ok">\\u2713 published</span>'+
-'<a class="dpr-url" href="'+esc(d.url)+'" target="_blank" rel="noopener">'+esc(d.url)+'</a>','ok');
-toastOpen('published \\u00b7 '+fname(path),d.url);
+if(d.dryRun){toastFlash('dry-run \\u2014 not uploaded (URL not live)');}
+else{toastOpen('published \\u00b7 '+fname(path),d.url);
 setPubActions(wrap,d.url);}      // swap to Open / Republish / Unpublish in place
 }else{var det=d.detail?String(d.detail).split('\\n').slice(-1)[0]
 :(d.error==='dak_unavailable'?'dak not configured \\u2014 run its setup':(d.error||'publish failed'));
-show('<span class="dpr-tag err">publish failed</span><span class="dpr-detail">'+esc(det)+'</span>','err');
-toastFlash('publish failed');
-if(!wrap)btn.textContent='\\u2197 Publish';}
-}).catch(function(){btn.disabled=false;if(!wrap)btn.textContent='\\u2197 Publish';
-show('<span class="dpr-tag err">publish failed</span>','err');toastFlash('publish failed');});
+toastFlash('publish failed \\u2014 '+det);}
+}).catch(function(){btn.disabled=false;toastFlash('publish failed');});
 }
-window.hubPublish=function(btn){var nm=window.prompt('publish as\\u2026 (URL name; blank = default)','');
-if(nm===null)return;doPublish(btn,'publishing',nm.trim());};
+window.hubPublish=function(btn){closeMenu(btn);
+askName(fname(pathOf(btn)).replace(/\\.[^.]+$/,''),function(nm){
+if(nm===null)return;doPublish(btn,'publishing',nm);});};
 window.hubRepublish=function(btn){doPublish(btn,'republishing');};
 // ── unpublish: real dak take-down via /_publish-revoke, then swap in place ──────
+// Same single-transient-status discipline: close the menu, drive the toast only.
 window.hubUnpublish=function(btn){
-var wrap=wrapOf(btn);var path=pathOf(btn);
-btn.disabled=true;btn.textContent='unpublishing\\u2026';toastSticky('unpublishing '+fname(path)+'\\u2026');
+var wrap=wrapOf(btn);var path=pathOf(btn);closeMenu(btn);
+btn.disabled=true;toastSticky('unpublishing '+fname(path)+'\\u2026');
 fetch('/_publish-revoke',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path})})
 .then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d};});})
 .then(function(res){var d=(res&&res.d)||{};
 if(res&&res.ok&&d.ok){
 setPubActions(wrap,'');           // swap back to a single Publish in place
-show('<span class="dpr-tag ok">'+(d.unpublished?'\\u2713 unpublished':'\\u2713 forgotten locally')+'</span>','ok');
 toastFlash(d.unpublished?'unpublished'
 :('forgotten locally'+(d.detail?(' \\u2014 '+String(d.detail).split('\\n').slice(-1)[0]):'')));
-}else{btn.disabled=false;btn.textContent='\\u2715 Unpublish';
-show('<span class="dpr-tag err">unpublish failed</span>','err');toastFlash('unpublish failed');}
-}).catch(function(){btn.disabled=false;btn.textContent='\\u2715 Unpublish';
-show('<span class="dpr-tag err">unpublish failed</span>','err');toastFlash('unpublish failed');});
+}else{btn.disabled=false;
+toastFlash('unpublish failed');}
+}).catch(function(){btn.disabled=false;
+toastFlash('unpublish failed');});
 };
 })();
 </script>

@@ -1531,6 +1531,37 @@ function openModal(){
 }
 function closeModal(){modal.classList.remove('show');}
 
+// ── Themed publish-name prompt (S29 — replaces the native window.prompt) ─────
+// Reuses the .modal/.modal-card chrome + .pal-nt-input styling so asking for a
+// publish URL name matches the rest of Hub instead of the OS "localhost says…"
+// dialog. Promise-based: resolves to the trimmed name ('' = server default) or
+// null on cancel. ⌘↵/Enter submit, Esc/backdrop cancel.
+const pubnameModal=document.getElementById('pubname-modal');
+const pubnameInput=document.getElementById('pubname-input');
+let _pubnameResolve=null;
+function askPublishName(defaultName){
+  return new Promise(resolve=>{
+    if(_pubnameResolve)_pubnameResolve(null);   // supersede any dangling prompt
+    _pubnameResolve=resolve;
+    pubnameInput.value='';
+    pubnameInput.placeholder=defaultName?('default: '+defaultName):'leave blank for the default';
+    pubnameModal.classList.add('show');
+    setTimeout(()=>pubnameInput.focus(),0);
+  });
+}
+function closePubname(val){
+  pubnameModal.classList.remove('show');
+  const r=_pubnameResolve;_pubnameResolve=null;
+  if(r)r(val);
+}
+document.getElementById('pubname-cancel').addEventListener('click',()=>closePubname(null));
+document.getElementById('pubname-ok').addEventListener('click',()=>closePubname(pubnameInput.value.trim()));
+pubnameModal.addEventListener('click',e=>{if(e.target===pubnameModal)closePubname(null);});
+pubnameInput.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){e.preventDefault();closePubname(null);}
+  else if(e.key==='Enter'){e.preventDefault();closePubname(pubnameInput.value.trim());}
+});
+
 function navigatePicker(path){
   const url='/_list-dirs'+(path?('?path='+encodeURIComponent(path)):'');
   fetch(url)
@@ -2429,13 +2460,14 @@ document.getElementById('rebuild').addEventListener('click',e=>{
     }
     return (typeof TASKS_DATA!=='undefined'&&TASKS_DATA.length)?TASKS_DATA[0]:null;
   }
-  function publishBundle(task){
+  async function publishBundle(task){
     if(typeof PRIVATE!=='undefined'&&PRIVATE){flash('this workspace is private');return;}
     const t=task||currentTask();
     if(!t){flash('no task to bundle');return;}
     // S28 — optional custom URL name. Blank/cancel keeps the S26 default (and a
     // republish stays idempotent to whatever worker was recorded server-side).
-    const nm=window.prompt('publish as… (URL name; blank = default)','');
+    // S29 — asked via a themed modal (askPublishName), not the native prompt.
+    const nm=await askPublishName(t.sl);
     if(nm===null)return;
     closePalette();
     flashSticky('publishing bundle for '+t.sl+'…');

@@ -239,6 +239,44 @@ class TestDocPubActions(unittest.TestCase):
         self.assertNotIn("↗ Open published", result)
 
 
+class TestDocPublishScriptS29(unittest.TestCase):
+    """S29 — themed publish-name input replaces the native prompt, and the
+    triple/stuck 'publishing…' status collapses to a single transient toast."""
+
+    def test_no_native_prompt_in_publish_path(self):
+        from hubspace.render import DOC_PUBLISH_SCRIPT
+        # The name is asked via the themed popover, never the OS prompt dialog.
+        self.assertNotIn("window.prompt(", DOC_PUBLISH_SCRIPT)
+
+    def test_themed_name_popover_emitted(self):
+        from hubspace.render import DOC_PUBLISH_SCRIPT
+        # A self-contained themed input container + Publish/Cancel is built.
+        self.assertIn("doc-pub-namebox", DOC_PUBLISH_SCRIPT)
+        self.assertIn("askName", DOC_PUBLISH_SCRIPT)
+        self.assertIn("dpn-input", DOC_PUBLISH_SCRIPT)
+
+    def test_no_stuck_menu_label(self):
+        from hubspace.render import DOC_PUBLISH_SCRIPT
+        # The old stuck "<verb>…" / "unpublishing…" menu-button labels are gone.
+        self.assertNotIn("btn.textContent=verb", DOC_PUBLISH_SCRIPT)
+        self.assertNotIn("unpublishing\\u2026'", DOC_PUBLISH_SCRIPT)
+        # The action closes the ⋯ menu instead of relabelling a menu item.
+        self.assertIn("closeMenu", DOC_PUBLISH_SCRIPT)
+
+    def test_single_transient_status_no_result_box(self):
+        from hubspace.render import DOC_PUBLISH_SCRIPT
+        # The redundant in-flight doc-pub-result box is dropped; only the toast
+        # remains as the single transient indicator.
+        self.assertNotIn("doc-pub-result", DOC_PUBLISH_SCRIPT)
+        self.assertIn("doc-toast", DOC_PUBLISH_SCRIPT)
+
+    def test_chrome_css_styles_the_popover(self):
+        # The popover is styled from source chrome.css (ui/public → static).
+        src = (Path(__file__).resolve().parent.parent
+               / "hubspace" / "ui" / "public" / "chrome.css")
+        self.assertIn(".doc-pub-namebox", src.read_text(encoding="utf-8"))
+
+
 class TestRenderMd(unittest.TestCase):
     def test_heading(self):
         result = render._render_md("# Hello")

@@ -20,6 +20,22 @@
 .doc-pub-result.err{border-color:#c0392b;}
 .doc-pub-result .dpr-url{color:var(--accent);}
 .doc-pub-result .dpr-preview,.doc-pub-result .dpr-detail{color:var(--mute);}
+/* S29 — themed publish-name popover for the doc page (replaces the native
+   window.prompt). Same paper/line/mono/oxblood language as the ⋯ menu, docked
+   under it top-right. */
+.doc-pub-namebox{position:fixed;top:60px;right:18px;z-index:60;width:min(300px,80vw);
+  background:var(--bg);border:1px solid var(--line);border-top:3px solid var(--accent);
+  box-shadow:0 12px 30px rgba(0,0,0,.18);padding:12px 14px;display:flex;flex-direction:column;gap:8px;}
+.doc-pub-namebox .dpn-label{font-family:var(--mono);font-size:9px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--accent);}
+.doc-pub-namebox .dpn-input{font-family:var(--mono);font-size:12px;padding:8px 10px;
+  border:1px solid var(--line);background:var(--alt);color:var(--ink);outline:none;width:100%;}
+.doc-pub-namebox .dpn-input:focus{border-color:var(--accent);}
+.doc-pub-namebox .dpn-actions{display:flex;justify-content:flex-end;gap:6px;}
+.doc-pub-namebox .dpn-actions button{font-family:var(--mono);font-size:10px;letter-spacing:.1em;
+  text-transform:uppercase;padding:6px 12px;cursor:pointer;
+  border:1px solid var(--line);background:var(--alt);color:var(--ink);}
+.doc-pub-namebox .dpn-actions .dpn-ok{background:var(--accent);color:#fff;border-color:var(--accent);}
 /* S27 — the publish-state control block inside the ⋯ menu. display:contents so
    its children (Publish, or Open/Republish/Unpublish) stay direct flex items of
    the menu list; the inline script rewrites this span in place. */
