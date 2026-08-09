@@ -5,6 +5,9 @@ from .tabular import _rows_to_table, _render_csv, _render_xlsx
 from .page import (
     _favicon_href, _inject_into_html, _render_lineage_html, _CSS, _PAGE,
     _LINEAGE_ORDER, _LINEAGE_LABELS, _BACKLINKS_CSS, _DOC_CHROME_CSS, _DOC_PRINT_BTN,
-    doc_menu, DOC_PDF_ITEM,
+    doc_menu, DOC_PDF_ITEM, render_provenance,
+    doc_publish_item, doc_published_open_item, DOC_PUBLISH_SCRIPT,
+    doc_republish_item, doc_unpublish_item, doc_pub_actions,
+    DOC_PAGE_SCRIPT, doc_edit_item, doc_config_script,
 )
 from .draw import draw_page_html

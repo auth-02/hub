@@ -136,11 +136,14 @@ Hub understands this layout and builds a lineage graph automatically:
 ## Agent plugin (optional)
 
 Hub is the **viewer**. If you drive work with Claude Code, the companion
-`hub` plugin is a **self-sufficient producer + viewer**: it bundles four
-producer skills — `/hub:manifest`, `/hub:stacked`, `/hub:kagaz`, `/hub:dak` —
-that create the `tasks/<slug>/manifest.md` structure above as you work, plus a
-`/hub:serve` command that builds and serves the dashboard. So the board, trace,
-and timeline fill themselves in.
+`hub` plugin is a **self-sufficient producer + viewer**: it bundles five
+producer skills — `/hub:manifest`, `/hub:stacked`, `/hub:kagaz`, `/hub:dak`,
+`/hub:changelog` — that create the `tasks/<slug>/manifest.md` structure above as
+you work, plus a `/hub:serve` command that builds and serves the dashboard. So
+the board, trace, and timeline fill themselves in. `/hub:changelog <slug>` reads
+a task's diff + manifest and drops a self-contained changelog artifact into
+`tasks/<slug>/artifacts/` — the agent reads the diff (Hub has no model); Hub only
+surfaces a provenance line and a copy-only "ask again" button.
 
 ```
 /plugin marketplace add auth-02/hub

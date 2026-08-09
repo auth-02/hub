@@ -97,10 +97,23 @@ class TestNewTask(unittest.TestCase):
         task_dir = Path(self._scan_root) / "tasks" / "mcp-retrieval-adapter"
         self.assertEqual([c.name for c in task_dir.iterdir()], ["manifest.md"])
         text = (task_dir / "manifest.md").read_text(encoding="utf-8")
-        self.assertIn("status: ongoing", text)
-        self.assertIn("title: MCP retrieval adapter", text)
-        self.assertIn("created: ", text)
-        self.assertIn("# MCP retrieval adapter", text)
+        # S22: no frontmatter — the manifest is just the `# Title` H1.
+        self.assertNotIn("---", text)
+        self.assertNotIn("status:", text)
+        self.assertNotIn("created:", text)
+        self.assertTrue(text.startswith("# MCP retrieval adapter"))
+
+    def test_status_round_trips_via_db_not_file(self):
+        # A non-default status is persisted to the DB/sidecar, never the file.
+        status, body = self._new(title="Paused task", status="paused")
+        self.assertEqual(status, 200, body)
+        task_repo = Path(self._scan_root).name
+        text = (Path(self._scan_root) / "tasks" / "paused-task" / "manifest.md").read_text()
+        self.assertNotIn("status:", text)  # not in the file
+        conn = _db.open_db(Path(self._state) / "hub.db")
+        statuses = json.loads(_db.get_statuses_json(conn))
+        conn.close()
+        self.assertEqual(statuses.get(f"{task_repo}:paused-task"), "paused")
 
     def test_writes_into_repo_with_plan(self):
         (Path(self._scan_root) / "cortex").mkdir(exist_ok=True)

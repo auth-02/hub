@@ -35,6 +35,7 @@
     <button class="chip" data-kind="data">DATA</button>
     <button class="chip" data-kind="skill">SKILL</button>
     <button class="chip" data-kind="draw">DRAW</button>
+    <button class="chip" data-kind="script">SCRIPT</button>
   </div>
   <div class="repo-chips" id="repo-chips">{repo_chips}</div>
 </div>
@@ -44,7 +45,8 @@
     <div class="pv-header">
       <span class="pv-title" id="pv-title"></span>
       <div class="pv-actions">
-        <a class="pv-btn primary" id="pv-open" href="#" target="_blank" rel="noopener">Open</a>
+        <a class="pv-btn primary" id="pv-open" href="#" data-open-reader title="open the document">Open</a>
+        <button class="pv-btn" id="pv-ask" title="copy the /changelog command to regenerate this" style="display:none">ask again</button>
         <button class="pv-btn" id="pv-float" title="open as floating window">⧉</button>
         <button class="pv-btn" id="pv-close">✕</button>
       </div>
@@ -55,6 +57,14 @@
   </aside>
 </div>
 <div id="work-view">
+  <section class="tl-panel" id="tl-panel">
+    <div class="tl-panel-head">
+      <span class="tl-panel-title">// timeline</span>
+      <button class="tl-collapse" id="tl-collapse" title="collapse / expand (y)">–</button>
+    </div>
+    <div id="hub-timeline"></div>
+    <div class="tl-panel-summary" id="tl-panel-summary"></div>
+  </section>
   <div class="stat-strip" id="stat-strip"></div>
   <div id="task-rows"></div>
   <div id="loose-section"></div>
@@ -86,7 +96,14 @@
 </div>
 <div id="trace">
   <div class="trace-wrap">
-    <button class="trace-back" id="trace-back">← back</button>
+    <div class="trace-topbar">
+      <button class="trace-back" id="trace-back">← back</button>
+      <div class="trace-modeseg" id="trace-modeseg" role="group" aria-label="trace view mode">
+        <button class="trace-mode active" id="trace-mode-list" data-mode="list" type="button">list</button>
+        <span class="trace-mode-sep">|</span>
+        <button class="trace-mode" id="trace-mode-graph" data-mode="graph" type="button">graph <span class="trace-mode-key">· g</span></button>
+      </div>
+    </div>
     <div class="trace-crumb" id="trace-crumb"></div>
     <div class="trace-title" id="trace-title"></div>
     <div class="trace-status" id="trace-status"></div>
@@ -94,27 +111,42 @@
     <ul class="trace-plan" id="trace-plan"></ul>
     <div class="trace-section-label" id="trace-decisions-label" style="display:none">// decisions</div>
     <ul class="trace-decisions" id="trace-decisions"></ul>
+    <div class="trace-tl-head" id="trace-tl-head" style="display:none">
+      <span class="trace-section-label" id="trace-tl-label"></span>
+    </div>
+    <div class="trace-timeline" id="trace-timeline"></div>
+    <div class="trace-notes" id="trace-notes"></div>
+    <div class="trace-linfoot" id="trace-linfoot"></div>
     <div class="trace-lineage" id="trace-lineage"></div>
     <div class="trace-actions" id="trace-actions"></div>
   </div>
 </div>
-<button class="feed-tab" id="tl-tab">// timeline</button>
-<div class="feed-drawer" id="tl-drawer">
-  <div class="feed-drawer-header">
-    <span class="feed-drawer-title">// hub timeline</span>
-    <button class="feed-drawer-close" id="tl-close">✕</button>
-  </div>
-  <div id="hub-timeline"></div>
-</div>
+<!-- S21 — the in-workspace reading overlay is gone; opening a file navigates the
+     tab to the canonical standalone doc page (render/page.py). -->
 <div id="toast" class="toast"></div>
 <div id="modal" class="modal" role="dialog" aria-modal="true">
   <div class="modal-card">
     <div class="modal-kicker">// SET HUB DIRECTORY</div>
     <h2 class="modal-title">Point the hub at a new directory.</h2>
-    <input id="modal-input" type="text" placeholder="/absolute/path" autocomplete="off" spellcheck="false">
+    <div id="picker-crumbs" class="picker-crumbs" aria-label="Current path"></div>
+    <div id="picker-list" class="picker-list" role="listbox" tabindex="0" aria-label="Subdirectories"></div>
+    <input id="modal-input" type="text" placeholder="or type a path — Enter to go" autocomplete="off" spellcheck="false">
     <div class="modal-actions">
       <button class="btn" id="modal-cancel">Cancel</button>
       <button class="btn primary" id="modal-ok">Save &amp; Rebuild</button>
+    </div>
+  </div>
+</div>
+<div id="pubname-modal" class="modal" role="dialog" aria-modal="true" aria-label="Publish name">
+  <div class="modal-card">
+    <div class="modal-kicker">// PUBLISH</div>
+    <h2 class="modal-title">Publish to a shareable URL.</h2>
+    <label class="pal-nt-label" for="pubname-input">publish as (URL name)
+      <span class="pal-nt-hint">optional — leave blank for the default</span></label>
+    <input id="pubname-input" class="pal-nt-input" type="text" autocomplete="off" spellcheck="false">
+    <div class="modal-actions">
+      <button class="btn" id="pubname-cancel">Cancel</button>
+      <button class="btn primary" id="pubname-ok">Publish</button>
     </div>
   </div>
 </div>
@@ -166,6 +198,51 @@
         <button class="btn primary" id="pal-nt-create" type="button">Create task</button>
       </div>
     </div>
+    <div class="pal-screen hidden" id="pal-adddata-screen">
+      <div class="pal-nt-head">
+        <button class="pal-back" id="pal-ad-back" type="button">← back</button>
+        <span class="pal-nt-kicker">// ADD DATA</span>
+      </div>
+      <div class="pal-ad-body">
+        <label class="pal-nt-label">Task</label>
+        <select id="pal-ad-task" class="pal-nt-select"></select>
+        <div class="pal-ad-dest" id="pal-ad-dest"></div>
+        <div class="pal-ad-drop" id="pal-ad-drop" tabindex="0">
+          <span class="pal-ad-drop-main">Drop files here</span>
+          <span class="pal-ad-drop-sub">or click to browse · 64 MB max per file</span>
+          <input id="pal-ad-file" type="file" multiple hidden>
+        </div>
+        <div class="pal-ad-list" id="pal-ad-list"></div>
+      </div>
+      <div class="pal-nt-actions">
+        <button class="btn" id="pal-ad-cancel" type="button">Cancel</button>
+        <button class="btn primary" id="pal-ad-add" type="button" disabled>Add files</button>
+      </div>
+    </div>
+    <div class="pal-screen hidden" id="pal-publish-screen">
+      <div class="pal-nt-head">
+        <button class="pal-back" id="pal-pub-back" type="button">← back</button>
+        <span class="pal-nt-kicker">// THIS LEAVES YOUR MACHINE</span>
+      </div>
+      <div class="pal-pub-body">
+        <label class="pal-nt-label">Asset</label>
+        <select id="pal-pub-file" class="pal-nt-select"></select>
+        <label class="pal-nt-label">Title <span class="pal-nt-hint">optional — names the public page</span></label>
+        <input id="pal-pub-title" class="pal-nt-input" type="text" autocomplete="off"
+               spellcheck="false" placeholder="Token rotation flow">
+        <label class="pal-nt-label">Publish as <span class="pal-nt-hint">optional — the URL name; leave blank for the default</span></label>
+        <input id="pal-pub-name" class="pal-nt-input" type="text" autocomplete="off"
+               spellcheck="false" placeholder="acme-api-readme">
+        <div class="pal-pub-scan" id="pal-pub-scan">scanning…</div>
+        <div class="pal-pub-list" id="pal-pub-list"></div>
+        <div class="pal-pub-note">Redactions apply to the published copy only — your file is never modified.</div>
+        <div class="pal-pub-result hidden" id="pal-pub-result"></div>
+      </div>
+      <div class="pal-nt-actions">
+        <button class="btn" id="pal-pub-cancel" type="button">Cancel</button>
+        <button class="btn primary" id="pal-pub-go" type="button" disabled>Publish</button>
+      </div>
+    </div>
   </div>
 </div>
 <div id="pal-help" class="pal-help" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
@@ -178,12 +255,83 @@
       <li><kbd>↵</kbd><span>preview</span></li>
       <li><kbd>t</kbd><span>trace</span></li>
       <li><kbd>1</kbd>–<kbd>4</kbd><span>views</span></li>
-      <li><kbd>y</kbd><span>timeline</span></li>
+      <li><kbd>y</kbd><span>collapse timeline</span></li>
       <li><kbd>n</kbd><span>new task</span></li>
       <li><kbd>c</kbd><span>note</span></li>
       <li><kbd>?</kbd><span>this list</span></li>
     </ul>
     <button class="btn" id="pal-help-close" type="button">Close</button>
+  </div>
+</div>
+<button id="settings-gear" class="settings-gear" type="button" title="Settings" aria-label="Open settings" aria-haspopup="dialog">⚙</button>
+<div id="settings" class="modal" role="dialog" aria-modal="true" aria-label="Settings">
+  <div class="modal-card settings-card">
+    <div class="modal-kicker">// SETTINGS</div>
+    <h2 class="modal-title">Workspace &amp; publishing.</h2>
+    <div class="settings-body">
+      <section class="settings-sec">
+        <div class="settings-sec-head">// WORKSPACE <span class="settings-sec-sub">→ hub.toml</span></div>
+        <div class="settings-field">
+          <label class="settings-label">Scan root</label>
+          <div class="settings-root" id="settings-root-row">
+            <span class="settings-root-path" id="settings-root-path"></span>
+            <button class="btn" id="settings-root-change" type="button">Change…</button>
+          </div>
+        </div>
+        <div class="settings-field">
+          <label class="settings-label" for="settings-view">Default view</label>
+          <select id="settings-view" class="settings-select">
+            <option value="">(unset)</option>
+            <option value="work">work</option>
+            <option value="list">list</option>
+            <option value="board">board</option>
+            <option value="calendar">calendar</option>
+          </select>
+        </div>
+        <div class="settings-field">
+          <label class="settings-label" for="settings-port">Port</label>
+          <input id="settings-port" class="settings-input" type="number" min="1" max="65535"
+                 inputmode="numeric" autocomplete="off" placeholder="8787">
+        </div>
+        <div class="settings-field">
+          <label class="settings-label" for="settings-exclude">Excluded dirs <span class="settings-hint">comma or space separated</span></label>
+          <input id="settings-exclude" class="settings-input" type="text" autocomplete="off"
+                 spellcheck="false" placeholder="vendor, fixtures">
+        </div>
+        <div class="settings-field">
+          <label class="settings-label" for="settings-uploads">Upload extensions <span class="settings-hint">e.g. .pdf .csv .md</span></label>
+          <input id="settings-uploads" class="settings-input" type="text" autocomplete="off"
+                 spellcheck="false" placeholder=".pdf .xlsx .csv .md">
+        </div>
+        <label class="settings-toggle">
+          <input id="settings-private" type="checkbox">
+          <span>Private workspace <span class="settings-hint">refuses to publish</span></span>
+        </label>
+      </section>
+      <section class="settings-sec">
+        <div class="settings-sec-head">// PUBLISHING · CLOUDFLARE <span class="settings-sec-sub">→ ~/.dak/config.json</span></div>
+        <div class="settings-note">Stored outside your scan root — never indexed, never embedded in a published page.</div>
+        <div class="settings-field">
+          <label class="settings-label" for="settings-dak-token">API token <span class="settings-hint">write-only</span></label>
+          <input id="settings-dak-token" class="settings-input" type="password" autocomplete="off"
+                 spellcheck="false" placeholder="Cloudflare API token">
+        </div>
+        <div class="settings-field">
+          <label class="settings-label" for="settings-dak-account">Account ID</label>
+          <input id="settings-dak-account" class="settings-input" type="text" autocomplete="off"
+                 spellcheck="false" placeholder="cloudflare account id">
+        </div>
+        <div class="settings-field">
+          <label class="settings-label" for="settings-dak-subdomain">Subdomain</label>
+          <input id="settings-dak-subdomain" class="settings-input" type="text" autocomplete="off"
+                 spellcheck="false" placeholder="atharva-dak">
+        </div>
+      </section>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="settings-cancel" type="button">Cancel</button>
+      <button class="btn primary" id="settings-save" type="button">Save</button>
+    </div>
   </div>
 </div>
 <footer>// generated by ~/agents/hub.py · page self-refreshes every 120s</footer>
@@ -194,7 +342,13 @@ const FTS_DATA={fts_json};
 const LINEAGE_DATA={lineage_json};
 const TASK_STATUS_DATA={task_status_json};
 const TIMELINE_DATA={timeline_json};
+const TASK_TIMELINE_DATA={task_timeline_json};
 const TASKS_DATA={tasks_json};
+const UPLOAD_EXTS_DATA={upload_exts_json};
+const PRIVATE={private_json};
+const PUBLISHED_DATA={published_json};
+const PROVENANCE_DATA={provenance_json};
+const NOTES_DATA={notes_json};
 const _currentRoot={scan_root_json};
 // ── Toast / clipboard ─────────────────────────────────────────────────────
 const SIDECAR={sidecar_json};

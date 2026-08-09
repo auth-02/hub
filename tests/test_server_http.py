@@ -132,6 +132,65 @@ class TestServerHttp(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"Hello", body)
 
+    def test_served_page_is_self_sufficient(self):
+        """S21 — the standalone doc page is the canonical full view. It carries
+        the self-contained companion script (window.HUB_DOC config + the "+"
+        gutter machinery), NOT the old SPA-reader iframe forwarder."""
+        md_path = Path(self._scan_root) / "hello.md"
+        status, body = _get(self._port, str(md_path))
+        self.assertEqual(status, 200)
+        text = body.decode("utf-8", "replace")
+        self.assertIn("window.HUB_DOC", text)          # baked comment/edit context
+        self.assertIn("hub-line-add", text)            # the "+" gutter
+        self.assertIn("hubDocEdit", text)              # edit-in-place
+        # The reader overlay is gone: no parent-frame forwarding on the doc page.
+        self.assertNotIn("window.parent===window", text)
+        self.assertNotIn("hub-reader-scroll", text)
+
+    def test_served_page_bakes_edit_item_and_inline_comment(self):
+        """S21 — an editable task doc offers ✎ Edit in its ⋯ menu and BAKES this
+        file's comments into the page (window.HUB_DOC.notes) so inline cards
+        render with no SPA parent / postMessage."""
+        task = Path(self._scan_root) / "tasks" / "s21-doc" / "comments"
+        task.mkdir(parents=True, exist_ok=True)
+        manifest = Path(self._scan_root) / "tasks" / "s21-doc" / "manifest.md"
+        manifest.write_text("# S21 doc\n\nBody line.\n", encoding="utf-8")
+        (task / "notes.jsonl").write_text(
+            '{"id":"n1","target":"manifest.md","range":"L1",'
+            '"author":"agent","body":"baked inline comment"}\n',
+            encoding="utf-8")
+        status, body = _get(self._port, str(manifest))
+        self.assertEqual(status, 200)
+        text = body.decode("utf-8", "replace")
+        self.assertIn("✎ Edit", text)             # ✎ Edit menu item
+        self.assertIn("baked inline comment", text)    # comment baked into HUB_DOC
+        self.assertIn('"target": "manifest.md"', text)
+
+    def test_notes_jsonl_redirects_instead_of_downloading(self):
+        """S13 — a direct GET to a task's comments/notes.jsonl must NOT stream
+        the raw log as octet-stream (which downloads); it bounces to the SPA."""
+        import http.client
+        comments = Path(self._scan_root) / "tasks" / "s13-task" / "comments"
+        comments.mkdir(parents=True, exist_ok=True)
+        raw = b'{"id":"x","target":"manifest.md","author":"you","body":"secret comment"}\n'
+        jsonl = comments / "notes.jsonl"
+        jsonl.write_bytes(raw)
+
+        # Raw request WITHOUT following redirects, so we observe the 302 itself.
+        conn = http.client.HTTPConnection("localhost", self._port, timeout=5)
+        conn.request("GET", str(jsonl))
+        resp = conn.getresponse()
+        status = resp.status
+        ctype = resp.getheader("Content-Type") or ""
+        location = resp.getheader("Location")
+        payload = resp.read()
+        conn.close()
+
+        self.assertEqual(status, 302, "notes.jsonl should redirect, not serve")
+        self.assertEqual(location, "/")
+        self.assertNotIn("octet-stream", ctype)
+        self.assertNotIn(b"secret comment", payload)
+
     def test_post_set_root_valid_path(self):
         payload = self._scan_root.encode("utf-8")
         status, body = _post(self._port, "/_set-root", payload)
@@ -152,6 +211,65 @@ class TestServerHttp(unittest.TestCase):
     def test_unknown_post_endpoint_returns_404(self):
         status, _ = _post(self._port, "/_unknown", b"")
         self.assertEqual(status, 404)
+
+    # ── /_list-dirs — directory picker backend ───────────────────────────────
+    def test_list_dirs_lists_sorted_subdirs(self):
+        import json
+        root = tempfile.mkdtemp()
+        try:
+            for name in ("Zebra", "alpha", "mid"):
+                (Path(root) / name).mkdir()
+            (Path(root) / "a_file.md").write_text("x", encoding="utf-8")
+            status, body = _get(self._port, "/_list-dirs?path=" + root)
+            self.assertEqual(status, 200)
+            data = json.loads(body)
+            names = [d["name"] for d in data["dirs"]]
+            # subdirs only (file omitted), sorted case-insensitively
+            self.assertEqual(names, ["alpha", "mid", "Zebra"])
+            # child paths are absolute and point back into the (normalized) root
+            rroot = str(Path(root).resolve())
+            for d in data["dirs"]:
+                self.assertTrue(d["path"].startswith(rroot))
+            # parent is the containing dir (root has one here)
+            self.assertEqual(data["parent"], str(Path(root).resolve().parent))
+            self.assertEqual(data["path"], rroot)
+        finally:
+            import shutil
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_list_dirs_omits_hidden_dirs(self):
+        import json
+        root = tempfile.mkdtemp()
+        try:
+            (Path(root) / "visible").mkdir()
+            (Path(root) / ".hidden").mkdir()
+            status, body = _get(self._port, "/_list-dirs?path=" + root)
+            self.assertEqual(status, 200)
+            names = [d["name"] for d in json.loads(body)["dirs"]]
+            self.assertIn("visible", names)
+            self.assertNotIn(".hidden", names)
+        finally:
+            import shutil
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_list_dirs_bad_path_returns_error_not_500(self):
+        import json
+        status, body = _get(self._port, "/_list-dirs?path=/no/such/dir/xyz123")
+        self.assertEqual(status, 400)
+        data = json.loads(body)
+        self.assertIn("error", data)
+        self.assertIn("path", data)
+
+    def test_list_dirs_default_path_is_valid(self):
+        import json
+        # No ?path → server defaults to the current scan root; must return a
+        # valid listing (never an error) with an absolute normalized path.
+        status, body = _get(self._port, "/_list-dirs")
+        self.assertEqual(status, 200)
+        data = json.loads(body)
+        self.assertNotIn("error", data)
+        self.assertTrue(data["path"].startswith("/"))
+        self.assertIn("dirs", data)
 
     def test_concurrent_requests(self):
         # Fire 5 rebuild requests concurrently — server must not crash

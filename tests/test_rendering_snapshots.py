@@ -59,7 +59,7 @@ class TestLargeTable(unittest.TestCase):
         header = "| id | value |\n| --- | --- |\n"
         rows = "".join(f"| {i} | v{i} |\n" for i in range(1000))
         html = render._render_md(header + rows)
-        self.assertEqual(html.count("<table>"), 1)
+        self.assertEqual(html.count("<table"), 1)
         # 1000 body rows (header <tr> lives inside <thead>, counted separately).
         tbody = html.split("<tbody>", 1)[1].split("</tbody>", 1)[0]
         self.assertEqual(tbody.count("<tr>"), 1000)
