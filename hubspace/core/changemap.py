@@ -147,10 +147,14 @@ body{background:var(--bg);color:var(--ink);font-family:var(--body);
 .legend .lk{display:flex;align-items:center;gap:7px;}
 .legend .sw{width:22px;height:14px;border-radius:4px;border:1px solid var(--line);}
 .head{position:relative;}
-.head .editbtn{position:absolute;top:34px;right:40px;font-family:var(--mono);font-size:12px;
-  letter-spacing:.06em;color:#fff;background:var(--accent);border:1px solid var(--accent);
-  padding:8px 16px;border-radius:8px;text-decoration:none;box-shadow:0 2px 8px rgba(122,40,40,.22);}
-.head .editbtn:hover{background:#66201f;}
+.headbtns{position:absolute;top:34px;right:40px;display:flex;gap:8px;align-items:center;}
+.headbtns .editbtn,.headbtns .refreshbtn{font-family:var(--mono);font-size:12px;letter-spacing:.06em;
+  padding:8px 16px;border-radius:8px;cursor:pointer;text-decoration:none;line-height:1.2;}
+.headbtns .editbtn{color:#fff;background:var(--accent);border:1px solid var(--accent);
+  box-shadow:0 2px 8px rgba(122,40,40,.22);}
+.headbtns .editbtn:hover{background:#66201f;}
+.headbtns .refreshbtn{color:var(--accent);background:var(--card);border:1px solid var(--line);}
+.headbtns .refreshbtn:hover{border-color:var(--accent);}
 .prov{padding:4px 40px 34px;font-family:var(--mono);font-size:10px;letter-spacing:.05em;color:var(--mute);}
 .prov .provnote{margin-left:12px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;font-size:9px;}
 /* Inspector */
@@ -357,11 +361,17 @@ def render_html(meta: dict, nodes: list[dict], edges: list[dict] | None = None,
                      '<span class="provnote">Hub did not generate this file.</span></div>')
 
     # View-first: this page is the default surface; the Edit button jumps to the
-    # editable Excalidraw canvas. (Canvas → back here via its "interactive" pill.)
+    # editable Excalidraw canvas. A Refresh button reloads the map to pull the
+    # latest render after a canvas edit. (Canvas → back here via its pill.)
     edit_link = ""
     if meta.get("edit_href"):
-        edit_link = (f'<a class="editbtn" href="{_e(meta["edit_href"])}" '
-                     f'title="Edit this change-map in the draw canvas">✎ Edit</a>')
+        edit_link = (
+            '<div class="headbtns">'
+            '<button class="refreshbtn" type="button" onclick="location.reload()" '
+            'title="Reload to show the latest render">↻ Refresh</button>'
+            f'<a class="editbtn" href="{_e(meta["edit_href"])}" '
+            'title="Edit this change-map in the draw canvas">✎ Edit</a>'
+            '</div>')
 
     return (
         prov +
