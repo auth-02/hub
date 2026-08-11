@@ -115,13 +115,24 @@ class TestDiagramTemplateIsAValidScene(unittest.TestCase):
         # skill's `python3 … graph.to_excalidraw` recipe is provably correct.
         from hubspace.core import graph
         nodes = [
-            {"id": "n1", "kind": "task", "path": "delete-comment endpoint", "at": "new"},
-            {"id": "n2", "kind": "script", "path": "notes store · delete_note", "at": "new"},
-            {"id": "n3", "kind": "artifact", "path": "trace + doc-page ✕ UI", "at": "changed"},
+            {"id": "n1", "kind": "task", "path": "delete-comment endpoint", "at": "new", "note": "POST /_note-delete"},
+            {"id": "n2", "kind": "script", "path": "notes store · delete_note", "at": "new", "note": "byte-preserving remove"},
+            {"id": "n3", "kind": "artifact", "path": "trace + doc-page ✕ UI", "at": "changed", "note": "two-click confirm"},
         ]
         edges = [{"from": "n1", "to": "n2"}, {"from": "n3", "to": "n1"}]
         regenerated = graph.to_excalidraw(nodes, edges, source="hub-change-log")
         self.assertEqual(regenerated, self._scene())
+
+    def test_node_labels_carry_the_change_note(self):
+        # The richer label: each change-unit shows its one-line note as a 4th
+        # line, and the card grows to fit (taller than a note-less card).
+        scene = self._scene()
+        labels = [el["text"] for el in scene["elements"] if el.get("type") == "text"]
+        self.assertTrue(any("POST /_note-delete" in t for t in labels))
+        self.assertTrue(all(len(t.splitlines()) == 4 for t in labels))
+        rects = [el for el in scene["elements"] if el.get("type") == "rectangle"]
+        from hubspace.core import graph
+        self.assertTrue(all(r["height"] > graph.CARD_H for r in rects))
 
 
 if __name__ == "__main__":

@@ -69,11 +69,19 @@ not the change. Then draw the **dependency arrows** between them ("A calls B",
 Each node is:
 
 ```json
-{ "id": "n1",                       // short unique id
-  "kind": "task",                   // category → colour + top label (see palette)
-  "path": "delete-comment endpoint",// the human label (short noun phrase)
-  "at": "new" }                     // the change verb: new | changed | rewritten | removed
+{ "id": "n1",                        // short unique id
+  "kind": "task",                    // category → colour + top label (see palette)
+  "path": "delete-comment endpoint", // the human label (short noun phrase)
+  "at": "new",                       // the change verb: new | changed | rewritten | removed
+  "note": "POST /_note-delete" }     // one short line: WHAT/why (from the manifest)
 ```
+
+The `note` is the point of the richer label — a single short line under the
+verb that says *what* the change is or *why* it exists (an endpoint name, "no
+native confirm", "byte-preserving"). Keep it to ~40 chars so it fits the card;
+draw it from the manifest's decisions, and leave it out (omit the key) when the
+manifest is silent rather than inventing one. Nodes with a `note` render as a
+taller card; a diagram with no notes lays out exactly like the timeline graph.
 
 Each edge is `{ "from": "<id>", "to": "<id>" }` — an arrow *from* the dependent
 *to* what it depends on.
@@ -100,9 +108,9 @@ python3 - <<'PY'
 import json
 from hubspace.core import graph
 nodes = [
-  {"id":"n1","kind":"task","path":"delete-comment endpoint","at":"new"},
-  {"id":"n2","kind":"script","path":"notes store · delete_note","at":"new"},
-  {"id":"n3","kind":"artifact","path":"trace + doc-page ✕ UI","at":"changed"},
+  {"id":"n1","kind":"task","path":"delete-comment endpoint","at":"new","note":"POST /_note-delete"},
+  {"id":"n2","kind":"script","path":"notes store · delete_note","at":"new","note":"byte-preserving remove"},
+  {"id":"n3","kind":"artifact","path":"trace + doc-page ✕ UI","at":"changed","note":"two-click confirm"},
 ]
 edges = [ {"from":"n1","to":"n2"}, {"from":"n3","to":"n1"} ]
 scene = graph.to_excalidraw(nodes, edges, source="hub-change-log")
