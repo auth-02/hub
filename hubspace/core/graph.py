@@ -47,12 +47,6 @@ X0 = 80
 Y0 = 80
 CARD_W = 200
 CARD_H = 84
-# Extra card height (and row pitch) per label line beyond the base 3
-# (KIND / name / at). Only spent when a node carries a `note` — e.g. the
-# change-log skill's change verb + one-line "why" — so note-less scenes (the
-# timeline canvas) keep their exact geometry. One text line ≈ fontSize 14 ×
-# lineHeight 1.25 plus a little breathing room.
-NOTE_LINE_H = 24
 
 
 def _col(kind: str) -> int:
@@ -64,8 +58,7 @@ def color_for(kind: str) -> str:
     return KIND_COLOR.get(kind or "", _DEFAULT_COLOR)
 
 
-def layout(nodes: list[dict], edges: list[dict] | None = None,
-           row_h: float = ROW_H) -> dict[str, dict]:
+def layout(nodes: list[dict], edges: list[dict] | None = None) -> dict[str, dict]:
     """Deterministic graph-order positions: ``{node_id: {"x", "y"}}``.
 
     Nodes are bucketed into kind columns (task left, children fanned right) and,
@@ -82,7 +75,7 @@ def layout(nodes: list[dict], edges: list[dict] | None = None,
     for col, items in cols.items():
         items = sorted(items, key=lambda n: (n.get("at") or "", n.get("path") or "", n.get("id") or ""))
         for row, n in enumerate(items):
-            pos[n["id"]] = {"x": X0 + col * COL_W, "y": Y0 + row * row_h}
+            pos[n["id"]] = {"x": X0 + col * COL_W, "y": Y0 + row * ROW_H}
     return pos
 
 
@@ -99,15 +92,14 @@ def _stable_seed(s: str) -> int:
     return h or 1
 
 
-def _rect(node: dict, x: float, y: float, arrow_ids: list[str],
-          card_h: float = CARD_H) -> dict:
+def _rect(node: dict, x: float, y: float, arrow_ids: list[str]) -> dict:
     rid = "rect-" + node["id"]
     seed = _stable_seed(rid)
     bound = [{"id": "txt-" + node["id"], "type": "text"}]
     bound += [{"id": aid, "type": "arrow"} for aid in arrow_ids]
     return {
         "id": rid, "type": "rectangle", "x": x, "y": y,
-        "width": CARD_W, "height": card_h, "angle": 0,
+        "width": CARD_W, "height": CARD_H, "angle": 0,
         "strokeColor": color_for(node.get("kind", "")),
         "backgroundColor": "transparent", "fillStyle": "solid",
         "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100,
@@ -121,20 +113,16 @@ def _label(node: dict) -> str:
     name = (node.get("path") or node.get("id") or "").split("/")[-1]
     kind = (node.get("kind") or "").upper()
     at = node.get("at") or ""
-    base = f"{kind}\n{name}\n{at}".strip()
-    # Optional 4th line: a short change note (the change-log skill's "why").
-    # Absent on timeline nodes, so their label is byte-for-byte unchanged.
-    note = (node.get("note") or "").strip()
-    return f"{base}\n{note}" if note else base
+    return f"{kind}\n{name}\n{at}".strip()
 
 
-def _text(node: dict, x: float, y: float, card_h: float = CARD_H) -> dict:
+def _text(node: dict, x: float, y: float) -> dict:
     tid = "txt-" + node["id"]
     seed = _stable_seed(tid)
     txt = _label(node)
     return {
         "id": tid, "type": "text", "x": x + 8, "y": y + 8,
-        "width": CARD_W - 16, "height": card_h - 16, "angle": 0,
+        "width": CARD_W - 16, "height": CARD_H - 16, "angle": 0,
         "strokeColor": color_for(node.get("kind", "")),
         "backgroundColor": "transparent", "fillStyle": "solid",
         "strokeWidth": 2, "strokeStyle": "solid", "roughness": 1, "opacity": 100,
@@ -148,8 +136,7 @@ def _text(node: dict, x: float, y: float, card_h: float = CARD_H) -> dict:
     }
 
 
-def _arrow(edge: dict, i: int, pos: dict[str, dict],
-           card_h: float = CARD_H) -> dict | None:
+def _arrow(edge: dict, i: int, pos: dict[str, dict]) -> dict | None:
     src, dst = edge.get("from"), edge.get("to")
     if src not in pos or dst not in pos:
         return None
@@ -157,9 +144,9 @@ def _arrow(edge: dict, i: int, pos: dict[str, dict],
     seed = _stable_seed(aid)
     # Start at the right edge of the source card, end at the left edge of the dst.
     sx = pos[src]["x"] + CARD_W
-    sy = pos[src]["y"] + card_h / 2
+    sy = pos[src]["y"] + CARD_H / 2
     ex = pos[dst]["x"]
-    ey = pos[dst]["y"] + card_h / 2
+    ey = pos[dst]["y"] + CARD_H / 2
     return {
         "id": aid, "type": "arrow", "x": sx, "y": sy,
         "width": abs(ex - sx), "height": abs(ey - sy), "angle": 0,
@@ -199,19 +186,12 @@ def to_excalidraw(nodes: list[dict], edges: list[dict] | None = None,
     ``elements`` array, and the paper-ground ``appState``.
     """
     edges = edges or []
-    # Grow the card + row pitch by one line ONLY when a node carries a `note`
-    # (the change-log skill's change verb + "why"), so that 4th label line has
-    # room. Note-less scenes — the timeline canvas — keep CARD_H/ROW_H exactly,
-    # so their emitted geometry is byte-for-byte unchanged.
-    extra = NOTE_LINE_H if any((n.get("note") or "").strip() for n in nodes) else 0
-    card_h = CARD_H + extra
-    row_h = ROW_H + extra
-    pos = positions or layout(nodes, edges, row_h=row_h)
+    pos = positions or layout(nodes, edges)
     # First pass: which arrows bind to each rect (so rects list them too).
     arrows: list[dict] = []
     rect_arrows: dict[str, list[str]] = {}
     for i, e in enumerate(edges):
-        a = _arrow(e, i, pos, card_h=card_h)
+        a = _arrow(e, i, pos)
         if a is None:
             continue
         arrows.append(a)
@@ -222,8 +202,8 @@ def to_excalidraw(nodes: list[dict], edges: list[dict] | None = None,
         p = pos.get(n["id"])
         if not p:
             continue
-        elements.append(_rect(n, p["x"], p["y"], rect_arrows.get("rect-" + n["id"], []), card_h=card_h))
-        elements.append(_text(n, p["x"], p["y"], card_h=card_h))
+        elements.append(_rect(n, p["x"], p["y"], rect_arrows.get("rect-" + n["id"], [])))
+        elements.append(_text(n, p["x"], p["y"]))
     elements.extend(arrows)
     return _scene(elements, source)
 

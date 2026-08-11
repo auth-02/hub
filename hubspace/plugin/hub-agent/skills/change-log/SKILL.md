@@ -95,9 +95,13 @@ a helper/module → `script`, a UI/asset → `artifact`, a spec/doc → `doc`).
 
 ## Step 3 — render the scene into `draws/`
 
-Hand your nodes/edges to Hub's **deterministic** layout+Excalidraw emitter
-(`hubspace.core.graph.to_excalidraw`) — it does the geometry (kind columns,
-bound labels, arrows on paper ground), no model involved. Write ONE file:
+Hand your nodes/edges to Hub's **deterministic** change-log emitter
+(`hubspace.core.changelog.to_scene`) — it lays out a left→right dependency flow
+and emits a *designed* Excalidraw scene (numbered cards, a left colour-accent
+bar per kind, a bold title + mono sub-line, a change-verb badge, labelled
+dependency arrows, a kinds legend, dot-grid paper). No model involved — just
+geometry. Give edges an optional `rel` (a short relationship word: "renders
+via", "feeds", "renames") — it is drawn on the arrow. Write ONE file:
 
 ```
 tasks/<slug>/draws/change-log-<YYYY-MM-DD>.excalidraw
@@ -106,24 +110,26 @@ tasks/<slug>/draws/change-log-<YYYY-MM-DD>.excalidraw
 ```bash
 python3 - <<'PY'
 import json
-from hubspace.core import graph
+from hubspace.core import changelog
 nodes = [
   {"id":"n1","kind":"task","path":"delete-comment endpoint","at":"new","note":"POST /_note-delete"},
   {"id":"n2","kind":"script","path":"notes store · delete_note","at":"new","note":"byte-preserving remove"},
   {"id":"n3","kind":"artifact","path":"trace + doc-page ✕ UI","at":"changed","note":"two-click confirm"},
 ]
-edges = [ {"from":"n1","to":"n2"}, {"from":"n3","to":"n1"} ]
-scene = graph.to_excalidraw(nodes, edges, source="hub-change-log")
+edges = [ {"from":"n1","to":"n2","rel":"calls"}, {"from":"n3","to":"n1","rel":"posts to"} ]
+scene = changelog.to_scene(nodes, edges,
+    title="Change-log — delete a comment",
+    subtitle="<short-since>..<short-head> · 3 change-units")
 open("tasks/<slug>/draws/change-log-<YYYY-MM-DD>.excalidraw","w").write(
     json.dumps(scene, ensure_ascii=False, indent=2))
 PY
 ```
 
-`templates/change-log.excalidraw` next to this skill is the same emitter's output
-for the worked example above — open it to see the target shape, or copy it and
-hand-edit the labels if you prefer building the scene by hand. Either way the
-result is a plain Excalidraw scene (`type:"excalidraw"`, `elements`, paper-ground
-`appState`) that opens in Hub's draw canvas and can be annotated.
+`templates/change-log.excalidraw` next to this skill is this emitter's output for
+the worked example above — open it to see the target look, or copy it and
+hand-edit if you prefer. Either way the result is a plain Excalidraw scene
+(`type:"excalidraw"`, `elements`, dot-grid paper `appState`) that opens in Hub's
+draw canvas and can be annotated.
 
 Keep it **high level**: node labels are short noun phrases, not file paths or
 symbols; arrows are dependencies, not call stacks. If a reviewer needs the code,

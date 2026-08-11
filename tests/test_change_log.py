@@ -82,9 +82,21 @@ class TestSkillShips(unittest.TestCase):
     def test_skill_documents_the_command_and_diagram_first(self):
         text = (_PLUGIN / "SKILL.md").read_text()
         self.assertIn("/change-log", text)
-        self.assertIn("--doc", text)        # the HTML is now the opt-in companion
-        self.assertIn("draws/", text)       # the diagram is the default deliverable
-        self.assertNotIn("--canvas", text)  # the old flag is gone
+        self.assertIn("--doc", text)          # the HTML is now the opt-in companion
+        self.assertIn("draws/", text)         # the diagram is the default deliverable
+        self.assertNotIn("--canvas", text)    # the old flag is gone
+        self.assertIn("changelog.to_scene", text)  # points at the polished emitter
+
+
+# The worked example the starter template + SKILL.md recipe are built from.
+_EX_NODES = [
+    {"id": "n1", "kind": "task", "path": "delete-comment endpoint", "at": "new", "note": "POST /_note-delete"},
+    {"id": "n2", "kind": "script", "path": "notes store · delete_note", "at": "new", "note": "byte-preserving remove"},
+    {"id": "n3", "kind": "artifact", "path": "trace + doc-page ✕ UI", "at": "changed", "note": "two-click confirm"},
+]
+_EX_EDGES = [{"from": "n1", "to": "n2", "rel": "calls"}, {"from": "n3", "to": "n1", "rel": "posts to"}]
+_EX_KW = dict(title="Change-log — delete a comment",
+              subtitle="<short-since>..<short-head> · 3 change-units")
 
 
 class TestDiagramTemplateIsAValidScene(unittest.TestCase):
@@ -95,44 +107,75 @@ class TestDiagramTemplateIsAValidScene(unittest.TestCase):
         self.assertTrue(p.is_file(), "diagram starter template is missing")
         return json.loads(p.read_text(encoding="utf-8"))
 
-    def test_is_a_paper_ground_excalidraw_scene(self):
+    def test_is_a_dotgrid_paper_excalidraw_scene(self):
         scene = self._scene()
         self.assertEqual(scene.get("type"), "excalidraw")
         self.assertIsInstance(scene.get("elements"), list)
         self.assertTrue(scene["elements"], "scene has no elements")
-        self.assertIn("viewBackgroundColor", scene.get("appState", {}))
+        app = scene.get("appState", {})
+        self.assertIn("viewBackgroundColor", app)
+        self.assertEqual(app.get("gridSize"), 20)  # the dot-grid workflow look
 
     def test_has_change_nodes_and_dependency_arrows(self):
         scene = self._scene()
         types = [el.get("type") for el in scene["elements"]]
-        self.assertIn("rectangle", types)  # change-units
+        self.assertIn("rectangle", types)  # cards + accent bars
         self.assertIn("arrow", types)      # dependencies
         self.assertIn("text", types)       # labels
 
-    def test_matches_hub_graph_emitter(self):
+    def test_matches_the_changelog_emitter(self):
         # The template is Hub's own deterministic emitter output — regenerating
         # the documented worked example must reproduce it byte-for-byte, so the
-        # skill's `python3 … graph.to_excalidraw` recipe is provably correct.
-        from hubspace.core import graph
-        nodes = [
-            {"id": "n1", "kind": "task", "path": "delete-comment endpoint", "at": "new", "note": "POST /_note-delete"},
-            {"id": "n2", "kind": "script", "path": "notes store · delete_note", "at": "new", "note": "byte-preserving remove"},
-            {"id": "n3", "kind": "artifact", "path": "trace + doc-page ✕ UI", "at": "changed", "note": "two-click confirm"},
-        ]
-        edges = [{"from": "n1", "to": "n2"}, {"from": "n3", "to": "n1"}]
-        regenerated = graph.to_excalidraw(nodes, edges, source="hub-change-log")
+        # skill's `changelog.to_scene(...)` recipe is provably correct.
+        from hubspace.core import changelog
+        regenerated = changelog.to_scene(_EX_NODES, _EX_EDGES, **_EX_KW)
         self.assertEqual(regenerated, self._scene())
 
-    def test_node_labels_carry_the_change_note(self):
-        # The richer label: each change-unit shows its one-line note as a 4th
-        # line, and the card grows to fit (taller than a note-less card).
-        scene = self._scene()
-        labels = [el["text"] for el in scene["elements"] if el.get("type") == "text"]
-        self.assertTrue(any("POST /_note-delete" in t for t in labels))
-        self.assertTrue(all(len(t.splitlines()) == 4 for t in labels))
-        rects = [el for el in scene["elements"] if el.get("type") == "rectangle"]
-        from hubspace.core import graph
-        self.assertTrue(all(r["height"] > graph.CARD_H for r in rects))
+
+class TestChangelogEmitter(unittest.TestCase):
+    """hubspace.core.changelog.to_scene — the polished change-map renderer."""
+
+    def setUp(self):
+        from hubspace.core import changelog
+        self.changelog = changelog
+        self.scene = changelog.to_scene(_EX_NODES, _EX_EDGES, **_EX_KW)
+        self.texts = [e["text"] for e in self.scene["elements"] if e.get("type") == "text"]
+
+    def test_title_and_subtitle_rendered(self):
+        self.assertIn("Change-log — delete a comment", self.texts)
+        self.assertTrue(any("3 change-units" in t for t in self.texts))
+
+    def test_numbered_cards(self):
+        self.assertIn("01", self.texts)
+        self.assertIn("02", self.texts)
+        self.assertIn("03", self.texts)
+
+    def test_each_node_has_an_accent_bar_in_its_kind_colour(self):
+        # A bar rectangle whose stroke == the kind accent (color_for) exists.
+        bars = [e for e in self.scene["elements"]
+                if e.get("type") == "rectangle" and e["id"].startswith("bar-")]
+        self.assertEqual(len(bars), len(_EX_NODES))
+        self.assertIn(self.changelog.color_for("task"),
+                      [b["strokeColor"] for b in bars])
+
+    def test_edge_labels_drawn(self):
+        self.assertIn("calls", self.texts)
+        self.assertIn("posts to", self.texts)
+
+    def test_legend_lists_only_present_kinds(self):
+        self.assertIn("KINDS", self.texts)
+        for k in ("task", "script", "artifact"):
+            self.assertIn(k, self.texts)
+        self.assertNotIn("run", self.texts)   # not used by the example
+
+    def test_left_to_right_dependency_flow(self):
+        # n1 depends on n2 (n1→n2), so n2 (a dependency) sits to n1's right.
+        pos = self.changelog._positions(_EX_NODES, _EX_EDGES)
+        self.assertLess(pos["n1"]["x"], pos["n2"]["x"])
+
+    def test_deterministic(self):
+        again = self.changelog.to_scene(_EX_NODES, _EX_EDGES, **_EX_KW)
+        self.assertEqual(again, self.scene)
 
 
 if __name__ == "__main__":
