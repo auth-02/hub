@@ -147,8 +147,28 @@ class TestChangelogEmitter(unittest.TestCase):
         self.texts = [e["text"] for e in self.scene["elements"] if e.get("type") == "text"]
 
     def test_title_and_subtitle_rendered(self):
-        self.assertIn("Change-log — delete a comment", self.texts)
+        # Header reads "change-log: <name>" (the "Change-log — " prefix stripped).
+        self.assertIn("change-log: delete a comment", self.texts)
         self.assertTrue(any("3 change-units" in t for t in self.texts))
+
+    def test_single_interactive_link(self):
+        # The pill shows exactly ONE link (rect only; the label text is unlinked).
+        scene = self.changelog.to_scene(_EX_NODES, _EX_EDGES,
+                                        interactive_href="/x/change-log/m.html")
+        linked = [e for e in scene["elements"] if e.get("link")]
+        self.assertEqual(len(linked), 1)
+        self.assertEqual(linked[0]["type"], "rectangle")
+
+    def test_verb_badge_is_top_right(self):
+        # Badge y sits on the number/top row, not below the summary.
+        card = next(e for e in self.scene["elements"]
+                    if e.get("id", "").startswith("card-"))
+        badge = next(e for e in self.scene["elements"]
+                     if e.get("id", "").startswith("vrb-"))
+        num = next(e for e in self.scene["elements"]
+                   if e.get("id", "").startswith("num-"))
+        self.assertAlmostEqual(badge["y"], num["y"], delta=2)     # same top row
+        self.assertGreater(badge["x"], card["x"] + card["width"] / 2)  # right half
 
     def test_numbered_cards(self):
         self.assertIn("01", self.texts)

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import html as _html
 import json as _json
+from urllib.parse import quote as _quote
 
 from .graph import color_for  # kind → accent, reused from the hub.css palette
 
@@ -44,6 +45,21 @@ PAD = 48
 
 def _tint(kind: str) -> str:
     return KIND_TINT.get(kind or "", _TINT_DEFAULT)
+
+
+# Inline SVG favicon (data URI, no external request) — two oxblood/deep-sea
+# change-cards joined by an arrow on paper ground, i.e. a tiny change-map.
+_FAV_SVG = (
+    "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'>"
+    "<rect width='32' height='32' rx='6' fill='#F4EFE4'/>"
+    "<rect x='4' y='7' width='11' height='8' rx='2' fill='#F1DEDA' stroke='#7A2828'/>"
+    "<rect x='4' y='7' width='2.5' height='8' fill='#7A2828'/>"
+    "<rect x='17' y='17' width='11' height='8' rx='2' fill='#D8E6EA' stroke='#1E5A6B'/>"
+    "<rect x='17' y='17' width='2.5' height='8' fill='#1E5A6B'/>"
+    "<path d='M14 13 L19 20' stroke='#9A8F7A' fill='none'/></svg>"
+)
+_FAVICON = ("<link rel='icon' type='image/svg+xml' href='data:image/svg+xml,"
+            + _quote(_FAV_SVG) + "'>")
 
 
 def _ranks(nodes, edges):
@@ -378,6 +394,7 @@ def render_html(meta: dict, nodes: list[dict], edges: list[dict] | None = None,
         "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
         '<meta name="hub:standalone" content="1">'
+        + _FAVICON +
         f"<title>{title}</title><style>{_CSS}</style></head><body>"
         f'<div class="head">{edit_link}<div class="eyebrow">change-log · {slug}</div>'
         f'<h1>{title}</h1>'

@@ -17,6 +17,8 @@ Edge:  {from, to, rel?}   # rel = a short relationship word drawn on the arrow
 """
 from __future__ import annotations
 
+import textwrap
+
 from .graph import PAPER_BG, _stable_seed, color_for
 
 # Palette — accent per kind reuses graph.color_for (hub.css badges); the light
@@ -40,12 +42,34 @@ def _tint(kind: str) -> str:
 
 # Geometry (px).
 CARD_W = 312
-CARD_H = 92
+CARD_H = 92        # legacy default (a card's height is computed per node now)
 ACCENT_W = 8
 COL_PITCH = 400
-ROW_PITCH = 148
+ROW_PITCH = 200    # generous so a 3-line title + 3-line summary never overlaps
 X0 = 72
-Y0 = 150            # cards start below the title header
+Y0 = 210           # cards start below the pill + title + subtitle header
+PAD_L = 24         # card text inset (past the accent bar)
+PAD_R = 16
+TITLE_WRAP = 34    # chars/line for the title (body font)
+SUM_WRAP = 42      # chars/line for the summary (mono)
+
+
+def _wrap(text: str, width: int, max_lines: int) -> list[str]:
+    """Wrap `text` to `width` chars, capped at `max_lines` (… on overflow)."""
+    text = " ".join((text or "").split())
+    if not text:
+        return []
+    lines = textwrap.wrap(text, width=width) or [text]
+    if len(lines) > max_lines:
+        lines = lines[:max_lines]
+        lines[-1] = lines[-1].rstrip()[: width - 1] + "…"
+    return lines
+
+
+def _card_height(title: str, summary: str) -> int:
+    tl = max(1, len(_wrap(title, TITLE_WRAP, 3)))
+    sl = len(_wrap(summary, SUM_WRAP, 3))
+    return 14 + 22 + tl * 20 + (6 + sl * 17 if sl else 0) + 14
 
 
 # ── layout: left→right dependency flow ───────────────────────────────────────
@@ -129,61 +153,67 @@ def _text(eid: str, x: float, y: float, txt: str, size: int, color: str,
     return el
 
 
-def _card_elements(node: dict, n_label: str, x: float, y: float) -> list[dict]:
-    """One numbered card: accent bar + number + bold title + verb badge + note,
-    grouped so it drags as a unit even though the texts are unbound. The card
-    body carries the FULL node (incl. deep-dive detail) in `customData.cl` so a
-    saved scene can be rebuilt into the interactive HTML."""
+def _card_elements(node: dict, n_label: str, x: float, y: float,
+                   card_h: float) -> list[dict]:
+    """One numbered card: accent bar; a top row of number (left) + verb badge
+    (top-right); then the wrapped title and wrapped summary, each contained in
+    the box. Grouped so it drags as a unit. The card body carries the FULL node
+    (incl. deep-dive detail) in `customData.cl` so a saved scene rebuilds the
+    interactive HTML."""
     kind = node.get("kind", "")
     accent = color_for(kind)
     gid = "g-" + node["id"]
-    # Rich (change-map) fields win; fall back to legacy path/at/note.
     title = (node.get("title") or node.get("path") or node.get("id") or "").strip()
     verb = (node.get("verb") or node.get("at") or "").strip()
     note = (node.get("summary") or node.get("note") or "").strip()
 
     els: list[dict] = []
-    # Card body (rounded, tinted wash, thin line border) — carries the model.
-    body = _base("card-" + node["id"], "rectangle", x, y, CARD_W, CARD_H, LINE,
+    body = _base("card-" + node["id"], "rectangle", x, y, CARD_W, card_h, LINE,
                  backgroundColor=_tint(kind), fillStyle="solid", strokeWidth=1,
                  roundness={"type": 3}, groupIds=[gid])
     body["customData"] = {"cl": {"role": "node", "node": node}}
     els.append(body)
-    # Left colour-accent bar (the signature look).
-    bar = _base("bar-" + node["id"], "rectangle", x, y, ACCENT_W, CARD_H, accent,
+    # Left colour-accent bar.
+    bar = _base("bar-" + node["id"], "rectangle", x, y, ACCENT_W, card_h, accent,
                 backgroundColor=accent, fillStyle="solid", strokeWidth=1,
                 roundness={"type": 3}, groupIds=[gid])
     els.append(bar)
-    # Row 1: number chip + bold title (title spans the full width — the verb
-    # badge sits on row 2 so a long title never collides with it).
-    els.append(_text("num-" + node["id"], x + 24, y + 18, n_label, 13, MUTE,
+    # Top row: number (left) + verb badge pinned to the top-RIGHT corner.
+    els.append(_text("num-" + node["id"], x + PAD_L, y + 15, n_label, 13, MUTE,
                      mono=True, group=gid))
-    ttl = _text("ttl-" + node["id"], x + 58, y + 16, title, 16, INK,
-                w=CARD_W - 76, group=gid)
-    # Tag the title so an edited label can be read back on save (edits win).
-    ttl["customData"] = {"cl": {"role": "title", "id": node["id"]}}
-    els.append(ttl)
-    # Row 2: mono note (left) + verb badge (right), which cannot overlap.
-    if note:
-        els.append(_text("nte-" + node["id"], x + 24, y + 54, note, 13, MUTE,
-                         mono=True, w=CARD_W - 130, group=gid))
     if verb:
-        els.append(_text("vrb-" + node["id"], x + CARD_W - 100, y + 54, verb,
-                         12, accent, mono=True, align="right", w=84, group=gid))
+        bw = len(verb) * 8 + 4
+        els.append(_text("vrb-" + node["id"], x + CARD_W - PAD_R - bw, y + 15,
+                         verb.lower(), 12, accent, mono=True, align="right",
+                         w=bw, group=gid))
+    # Title (wrapped inside the box), tagged so an edit can be read back on save.
+    t_lines = _wrap(title, TITLE_WRAP, 3)
+    ttl = _text("ttl-" + node["id"], x + PAD_L, y + 40, "\n".join(t_lines), 15,
+                INK, w=CARD_W - PAD_L - PAD_R, group=gid)
+    ttl["customData"] = {"cl": {"role": "title", "id": node["id"], "orig": title}}
+    els.append(ttl)
+    # Summary (wrapped inside the box) under the title.
+    if note:
+        sy = y + 40 + len(t_lines) * 20 + 6
+        els.append(_text("nte-" + node["id"], x + PAD_L, sy,
+                         "\n".join(_wrap(note, SUM_WRAP, 3)), 12, MUTE,
+                         mono=True, w=CARD_W - PAD_L - PAD_R, group=gid))
     return els
 
 
-def _edge_elements(edge: dict, i: int, pos: dict[str, dict]) -> list[dict]:
+def _edge_elements(edge: dict, i: int, pos: dict[str, dict],
+                   heights: dict[str, float] | None = None) -> list[dict]:
     src, dst = edge.get("from"), edge.get("to")
     if src not in pos or dst not in pos:
         return []
+    heights = heights or {}
     a, b = pos[src], pos[dst]
-    # Anchor on the facing edges of the two cards.
+    # Anchor on the facing edges of the two cards (vertical centre of each card).
     forward = b["x"] >= a["x"]
     sx = a["x"] + (CARD_W if forward else 0)
     ex = b["x"] + (0 if forward else CARD_W)
-    sy = a["y"] + CARD_H / 2
-    ey = b["y"] + CARD_H / 2
+    sy = a["y"] + heights.get(src, CARD_H) / 2
+    ey = b["y"] + heights.get(dst, CARD_H) / 2
     aid = f"edge-{src}-{dst}-{i}"
     arrow = _base(aid, "arrow", sx, sy, abs(ex - sx), abs(ey - sy), EDGE,
                   strokeWidth=1, roundness={"type": 2})
@@ -200,40 +230,57 @@ def _edge_elements(edge: dict, i: int, pos: dict[str, dict]) -> list[dict]:
     els = [arrow]
     rel = (edge.get("rel") or "").strip()
     if rel:
-        mx = min(sx, ex) + abs(ex - sx) / 2
-        my = (sy + ey) / 2 - 30
-        els.append(_text(aid + "-lbl", mx - len(rel) * 3, my, rel, 11, MUTE,
-                         mono=True))
+        # Sit the label beside the line (just above its midpoint), centred, with
+        # a width wide enough that it never wraps and never lands on a node.
+        w = len(rel) * 8 + 12
+        mx = (sx + ex) / 2
+        my = (sy + ey) / 2 - 20
+        els.append(_text(aid + "-lbl", mx - w / 2, my, rel, 11, MUTE,
+                         mono=True, align="center", w=w))
     return els
 
 
-def _title_block(title: str, subtitle: str, meta: dict | None) -> list[dict]:
+def _change_log_name(title: str, meta: dict | None) -> str:
+    """The '<name>' for the 'change-log: <name>' header — an explicit meta.name,
+    else the title with a leading 'Change-log —/:' stripped."""
+    if meta and meta.get("name"):
+        return str(meta["name"]).strip()
+    t = (title or "").strip()
+    for pre in ("Change-log — ", "Change-log: ", "change-log — ", "change-log: "):
+        if t.startswith(pre):
+            return t[len(pre):].strip()
+    return t
+
+
+def _header_block(title: str, subtitle: str, meta: dict | None,
+                  interactive_href: str | None) -> list[dict]:
+    """Header, top-down: the interactive-version pill (if any), then the
+    'change-log: <name>' title, then the subtitle."""
     els: list[dict] = []
-    if title:
-        t = _text("hdr-title", X0, 44, title, 30, INK)
-        # Stash the change-map meta (title/subtitle/provenance) so a saved scene
-        # rebuilds with the same header + provenance in the interactive HTML.
-        m = dict(meta or {})
-        m.setdefault("title", title)
-        m.setdefault("subtitle", subtitle)
-        t["customData"] = {"cl": {"role": "meta", "meta": m}}
-        els.append(t)
+    y = 40
+    if interactive_href:
+        # ONE link: the pill rectangle carries it; the label text does not (so
+        # Excalidraw shows a single link glyph, not two).
+        gid = "g-cl-link"
+        els.append(_base("cl-link", "rectangle", X0, y, 236, 34, color_for("task"),
+                         backgroundColor=_tint("task"), fillStyle="solid",
+                         strokeWidth=1, roundness={"type": 3}, groupIds=[gid],
+                         link=interactive_href))
+        els.append(_text("cl-link-tx", X0 + 16, y + 9, "▶  interactive version",
+                         13, color_for("task"), mono=True, group=gid))
+        y += 52
+    name = _change_log_name(title, meta)
+    t = _text("hdr-title", X0, y, f"change-log: {name}", 28, INK)
+    # Stash the change-map meta (title/subtitle/provenance) so a saved scene
+    # rebuilds with the same header + provenance in the interactive HTML.
+    m = dict(meta or {})
+    m.setdefault("title", title)
+    m.setdefault("subtitle", subtitle)
+    t["customData"] = {"cl": {"role": "meta", "meta": m}}
+    els.append(t)
     if subtitle:
-        els.append(_text("hdr-sub", X0, 90, subtitle, 14, MUTE, mono=True))
+        els.append(_text("hdr-sub", X0, y + 42, subtitle, 14, MUTE, mono=True))
     return els
-
-
-def _link_pill(href: str, x: float, y: float) -> list[dict]:
-    """A clickable "▶ interactive version" pill (Excalidraw `link`) that opens
-    the rendered HTML from inside the draw canvas."""
-    gid = "g-cl-link"
-    rect = _base("cl-link", "rectangle", x, y, 230, 34, color_for("task"),
-                 backgroundColor=_tint("task"), fillStyle="solid", strokeWidth=1,
-                 roundness={"type": 3}, groupIds=[gid], link=href)
-    txt = _text("cl-link-tx", x + 16, y + 9, "▶  interactive version", 13,
-                color_for("task"), mono=True, group=gid)
-    txt["link"] = href
-    return [rect, txt]
 
 
 def _legend(nodes: list[dict], y: float) -> list[dict]:
@@ -269,22 +316,24 @@ def to_scene(nodes: list[dict], edges: list[dict] | None = None,
     """
     edges = edges or []
     pos = _positions(nodes, edges)
+    heights = {n["id"]: _card_height(
+        n.get("title") or n.get("path") or n.get("id") or "",
+        n.get("summary") or n.get("note") or "") for n in nodes}
     elements: list[dict] = []
-    elements += _title_block(title, subtitle, meta)
-    if interactive_href:
-        elements += _link_pill(interactive_href, X0, 108)
+    elements += _header_block(title, subtitle, meta, interactive_href)
     # Edges first so cards paint over the arrow tails.
     for i, e in enumerate(edges):
-        elements += _edge_elements(e, i, pos)
+        elements += _edge_elements(e, i, pos, heights)
     # Number cards in reading order (column, then row).
     order = sorted(nodes, key=lambda n: (pos[n["id"]]["x"], pos[n["id"]]["y"]))
     numbers = {n["id"]: f"{i + 1:02d}" for i, n in enumerate(order)}
     for n in nodes:
         p = pos[n["id"]]
-        elements += _card_elements(n, numbers[n["id"]], p["x"], p["y"])
-    # Legend under the lowest card.
+        elements += _card_elements(n, numbers[n["id"]], p["x"], p["y"],
+                                   heights[n["id"]])
+    # Legend under the lowest card (its own height respected).
     if nodes:
-        low = max(p["y"] for p in pos.values()) + CARD_H + 56
+        low = max(pos[n["id"]]["y"] + heights[n["id"]] for n in nodes) + 56
         elements += _legend(nodes, low)
     return {
         "type": "excalidraw", "version": 2, "source": source,
@@ -310,13 +359,15 @@ def scene_to_graph(scene: dict) -> dict:
     edges: list[dict] = []
     meta: dict = {}
     positions: dict[str, dict] = {}
-    tagged: dict[str, str] = {}      # node id → our tagged title text (edit-in-place)
+    tagged: dict[str, str] = {}      # node id → title-element text (unwrapped)
+    tag_orig: dict[str, str] = {}    # node id → the title we AUTHORED (to detect edits)
     bound: dict[str, str] = {}       # node id → bound text on the card rect
     card_box: dict[str, tuple] = {}  # node id → (x, y, w, h) of the card rect
     texts: list[dict] = []           # all live text elements (for positional fallback)
 
-    def _first_line(el):
-        return (el.get("text") or "").strip().splitlines()[0].strip() if (el.get("text") or "").strip() else ""
+    def _unwrap(el):
+        # Collapse our soft-wrap newlines back to one line for comparison/title.
+        return " ".join((el.get("text") or "").split())
 
     for el in scene.get("elements", []):
         if el.get("isDeleted"):
@@ -327,7 +378,7 @@ def scene_to_graph(scene: dict) -> dict:
             # rect (containerId == "card-<id>") — that is the edited title.
             cid = el.get("containerId")
             if isinstance(cid, str) and cid.startswith("card-"):
-                t = _first_line(el)
+                t = _unwrap(el)
                 if t:
                     bound[cid[len("card-"):]] = t
         cl = (el.get("customData") or {}).get("cl")
@@ -349,9 +400,8 @@ def scene_to_graph(scene: dict) -> dict:
         elif role == "meta" and isinstance(cl.get("meta"), dict):
             meta = dict(cl["meta"])
         elif role == "title" and cl.get("id"):
-            t = _first_line(el)
-            if t:
-                tagged[cl["id"]] = t
+            tagged[cl["id"]] = _unwrap(el)
+            tag_orig[cl["id"]] = " ".join((cl.get("orig") or "").split())
 
     def _positional_title(nid):
         # Fallback: the largest-font text whose centre sits inside the card box —
@@ -362,22 +412,31 @@ def scene_to_graph(scene: dict) -> dict:
         x, y, w, h = box
         best, best_sz = None, -1.0
         for el in texts:
-            if el.get("customData", {}).get("cl", {}).get("role") in ("meta",):
+            if el.get("customData", {}).get("cl", {}).get("role") == "meta":
                 continue
             cx = el.get("x", 0) + el.get("width", 0) / 2
             cy = el.get("y", 0) + el.get("height", 0) / 2
             if x <= cx <= x + w and y <= cy <= y + h:
                 sz = el.get("fontSize", 0)
                 if sz > best_sz:
-                    best, best_sz = _first_line(el), sz
+                    best, best_sz = _unwrap(el), sz
         return best
 
-    # Recover each node's CURRENT title — a canvas edit wins over the authored
-    # one, however Excalidraw absorbed it: bound text > our tagged title >
-    # positional (largest-font text in the card).
+    # Recover each node's CURRENT title. Our own soft-wrapping is NOT an edit —
+    # the tagged title only overrides when its text differs from what we authored
+    # (`orig`). Precedence: a new bound text > an edited tagged title > positional.
     for n in nodes:
         nid = n.get("id")
-        edited = bound.get(nid) or tagged.get(nid) or _positional_title(nid)
+        authored = " ".join((n.get("title") or "").split())
+        edited = None
+        if nid in bound and bound[nid] != authored:
+            edited = bound[nid]
+        elif nid in tagged and tagged[nid] and tagged[nid] != tag_orig.get(nid, authored):
+            edited = tagged[nid]
+        elif nid not in tagged:  # tag dropped entirely → best-effort positional
+            pos_t = _positional_title(nid)
+            if pos_t and pos_t != authored:
+                edited = pos_t
         if edited:
             n["title"] = edited
     return {"meta": meta, "nodes": nodes, "edges": edges, "positions": positions}
