@@ -1,6 +1,6 @@
 ---
 name: change-log
-description: Map a task's changes as an interactive change-map — nodes are functional CHANGES (a capability that moved), arrows are dependencies, and clicking a change deep-dives into its file / function / test detail in a side inspector. Use when someone asks "what changed", "map this change", "diagram this PR/branch", "show how the changes connect", or as the closing step of a task once code has landed. Reads the diff + the task's manifest (the *why*) + Hub's MCP task context, then writes ONE self-contained HTML page into `tasks/<slug>/artifacts/`. The agent does the reading — Hub has no model. `/change-log <task-slug> [--since <ref>] [--canvas] [--doc]`.
+description: Map a task's changes as an editable draw that renders an interactive change-map on Save — nodes are functional CHANGES (a capability that moved), arrows are dependencies, and clicking a change deep-dives into its file / function / test detail in a side inspector. Use when someone asks "what changed", "map this change", "diagram this PR/branch", "show how the changes connect", or as the closing step of a task once code has landed. Reads the diff + the task's manifest (the *why*) + Hub's MCP task context, then writes ONE `.excalidraw` into `tasks/<slug>/change-log/`; the user edits it and Saving renders the sibling HTML. The agent does the reading — Hub has no model. `/change-log <task-slug> [--since <ref>] [--doc]`.
 ---
 
 # change-log — the agent reads the diff, Hub renders an explorable map
@@ -23,20 +23,18 @@ lineage, it opens in the workspace. *Hub stays a consumer even when the thing it
 consumes is intelligence.*
 
 ```
-/change-log <task-slug> [--since <ref>] [--canvas] [--doc]
+/change-log <task-slug> [--since <ref>] [--doc]
 ```
 
 - `<task-slug>` — the task whose work you are mapping (its folder under `tasks/`).
 - `--since <ref>` — git ref to diff from (branch, tag, or commit). Default: the
   merge-base with `main` (`git merge-base main HEAD`), i.e. everything on this branch.
-- `--canvas` — ALSO write an Excalidraw scene (`changelog.to_scene`) into
-  `draws/` — the same flow as a hand-annotatable canvas on Hub's draw surface
-  (no inspector; static).
 - `--doc` — ALSO write the prose HTML write-up (`templates/change-log.html`) into
   `artifacts/` when someone wants a linear narrative.
 
-The **interactive change-map is always the primary deliverable**; `--canvas` and
-`--doc` are optional companions.
+The **editable draw → interactive map on Save** is the primary deliverable; the
+draw is the single source of truth (the map is rendered from it). `--doc` is an
+optional narrative companion.
 
 ## Step 1 — read three sources (this is the work)
 
@@ -101,27 +99,32 @@ the arrow.
 Pick the kind that fits the change (endpoint/feature → `task`, helper/module →
 `script`, UI/asset/page → `artifact`, spec/docs → `doc`).
 
-## Step 3 — render the interactive change-map (the default)
+## Step 3 — write the editable draw; Save renders the interactive map
 
-Hand your nodes/edges to Hub's **deterministic** renderer
-(`hubspace.core.changemap.render_html`) — it lays out a left→right dependency
-flow and emits ONE **self-contained, offline HTML page**: numbered cards with a
-left colour-accent bar, curved labelled arrows, a kinds legend, a clean paper
-ground (no grid), and a **click-to-deep-dive inspector** (Purpose · Files ·
-Functions/symbols · Tests · Note). No model involved — just layout. Write:
+The change-log is **born as a draw the user edits, and Saving it renders the
+interactive HTML**. You write ONE `.excalidraw` into the task's **`change-log/`**
+folder; `changelog.to_scene` embeds your whole change-graph (each node's
+deep-dive detail included) inside the scene's element `customData`, and adds a
+clickable **"▶ interactive version"** pill. The user opens it in Hub's draw
+canvas, tweaks layout / relabels, and on **Save** Hub reconstructs the graph from
+the scene and (re)renders the sibling `change-log/<name>.html` — the
+click-to-deep-dive map (numbered accent cards, labelled arrows, no grid,
+Purpose · Files · Functions · Tests · Note inspector), reflecting the user's
+edits. *You author the draw; Hub renders the HTML on Save.*
 
 ```
-tasks/<slug>/artifacts/change-log-<YYYY-MM-DD>.html
+tasks/<slug>/change-log/<name>.excalidraw    ← you write this (editable source)
+tasks/<slug>/change-log/<name>.html          ← Hub renders this on Save
 ```
 
 ```bash
 python3 - <<'PY'
 import json
-from hubspace.core import changemap
+from hubspace.core import changelog
 meta = {
   "title": "Change-log — delete a comment", "slug": "<slug>",
   "subtitle": "<short-since>..<short-head> · 2 changes",
-  # provenance (an HTML comment Hub reads for the "written by …" line + "ask again"):
+  # provenance — surfaces as the map's "written by …" line + seeds "ask again":
   "generated_by": "claude ▸ skill:change-log",
   "commit_range": "<short-since>..<short-head>",
   "written_at": "<ISO-8601 timestamp>",
@@ -139,28 +142,27 @@ nodes = [
    "tests":["TestDeleteNote"]},
 ]
 edges = [ {"from":"endpoint","to":"store","rel":"calls"} ]
-open("tasks/<slug>/artifacts/change-log-<YYYY-MM-DD>.html","w").write(
-    changemap.render_html(meta, nodes, edges))
+scene = changelog.to_scene(nodes, edges, title=meta["title"], subtitle=meta["subtitle"],
+    meta=meta, interactive_href="/tasks/<slug>/change-log/<name>.html")
+open("tasks/<slug>/change-log/<name>.excalidraw","w").write(json.dumps(scene, ensure_ascii=False))
+# Optional: pre-render the HTML once so it exists before the first Save:
+from hubspace.core import changemap
+g = changelog.scene_to_graph(scene)
+open("tasks/<slug>/change-log/<name>.html","w").write(
+    changemap.render_html(g["meta"], g["nodes"], g["edges"], positions=g["positions"]))
 PY
 ```
 
-The page is fully self-contained (inline CSS+JS, no CDNs/fonts) so `hub publish`
-ships it as-is; the provenance front matter (top-of-file HTML comment) lets Hub
-show the "written by …" line + copy-only "ask again" button. Get the short
-hashes with `git rev-parse --short <since>` and `git rev-parse --short HEAD`.
+Get the short hashes with `git rev-parse --short <since>` / `--short HEAD`. Keep
+the **cards** high level (the change + summary); push files, symbols and tests
+into each node's `details` for the deep-dive.
 
-Keep the **cards** high level (the change, its summary); push files, symbols and
-tests into `details` for the deep-dive. A reviewer skims the flow, then clicks in.
-
-## `--canvas` — the Excalidraw companion (optional)
-
-With `--canvas`, ALSO render the same flow as a hand-annotatable Excalidraw scene
-via `hubspace.core.changelog.to_scene(nodes, edges, title=…, subtitle=…)` (uses
-`path`/`at`/`note` in place of `title`/`verb`/`summary`), writing to
-`tasks/<slug>/draws/change-log-<YYYY-MM-DD>.excalidraw`. Same clean paper ground,
-numbered accent cards + labelled arrows, but static (no inspector) — it opens in
-Hub's draw canvas for hand mark-up. `templates/change-log.excalidraw` is that
-emitter's output for the worked example.
+**How Save → HTML works:** Hub watches for `.excalidraw` saves under any
+`change-log/` folder; on Save it runs `changelog.scene_to_graph(scene)` →
+`changemap.render_html(...)` and writes the `.html` sibling. Label + position
+edits on the canvas flow through (the model rides in the scene's `customData`;
+edited titles win). The rendered page carries `hub:standalone`, so Hub serves it
+without injecting doc chrome, and it's self-contained/offline for `hub publish`.
 
 ## `--doc` — the prose companion (optional)
 
@@ -203,7 +205,8 @@ copy-only **"ask again"** button (`/change-log <slug> --since <end>`).
 - Map the **change**, not the code — 5–12 functional-change nodes; the file/symbol
   detail belongs in each node's `details` (the deep-dive), not as its own node.
   One-node-per-file is the failure mode.
-- Write only into `tasks/<slug>/artifacts/` (and `draws/` for `--canvas`).
+- Write the draw into `tasks/<slug>/change-log/` (Hub renders the `.html` there
+  on Save); `--doc` goes in `tasks/<slug>/artifacts/`.
 - Do not fabricate — if the manifest is silent on a "why", leave the note/summary
   spare rather than inventing one.
 

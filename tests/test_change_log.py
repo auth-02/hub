@@ -79,16 +79,17 @@ class TestSkillShips(unittest.TestCase):
         for needle in ("http://", "https://", "//cdn", "src=\"//", "@import"):
             self.assertNotIn(needle, text, f"template must not reference {needle!r}")
 
-    def test_skill_documents_interactive_map_as_default(self):
+    def test_skill_documents_draw_first_flow(self):
         text = (_PLUGIN / "SKILL.md").read_text()
         self.assertIn("/change-log", text)
-        # The interactive HTML change-map is the default deliverable…
+        # Draw-first: agent writes the editable .excalidraw into change-log/…
+        self.assertIn("change-log/", text)
+        self.assertIn("changelog.to_scene", text)
+        self.assertIn("interactive_href", text)
+        # …and Save renders the interactive HTML via the round-trip + renderer.
+        self.assertIn("scene_to_graph", text)
         self.assertIn("changemap.render_html", text)
         self.assertIn("deep-dive", text)
-        self.assertIn("artifacts/", text)
-        # …with the Excalidraw canvas + prose doc as optional companions.
-        self.assertIn("--canvas", text)
-        self.assertIn("changelog.to_scene", text)
         self.assertIn("--doc", text)
 
 

@@ -37,7 +37,16 @@
       "containerId": null,
       "originalText": "Change-log — delete a comment",
       "lineHeight": 1.25,
-      "baseline": 24
+      "baseline": 24,
+      "customData": {
+        "cl": {
+          "role": "meta",
+          "meta": {
+            "title": "Change-log — delete a comment",
+            "subtitle": "<short-since>..<short-head> · 3 change-units"
+          }
+        }
+      }
     },
     {
       "id": "hdr-sub",
@@ -129,7 +138,15 @@
         "gap": 6
       },
       "startArrowhead": null,
-      "endArrowhead": "triangle"
+      "endArrowhead": "triangle",
+      "customData": {
+        "cl": {
+          "role": "edge",
+          "from": "n1",
+          "to": "n2",
+          "rel": "calls"
+        }
+      }
     },
     {
       "id": "edge-n1-n2-0-lbl",
@@ -221,7 +238,15 @@
         "gap": 6
       },
       "startArrowhead": null,
-      "endArrowhead": "triangle"
+      "endArrowhead": "triangle",
+      "customData": {
+        "cl": {
+          "role": "edge",
+          "from": "n3",
+          "to": "n1",
+          "rel": "posts to"
+        }
+      }
     },
     {
       "id": "edge-n3-n1-1-lbl",
@@ -288,7 +313,19 @@
       "boundElements": null,
       "updated": 1,
       "link": null,
-      "locked": false
+      "locked": false,
+      "customData": {
+        "cl": {
+          "role": "node",
+          "node": {
+            "id": "n1",
+            "kind": "task",
+            "path": "delete-comment endpoint",
+            "at": "new",
+            "note": "POST /_note-delete"
+          }
+        }
+      }
     },
     {
       "id": "bar-n1",
@@ -395,7 +432,13 @@
       "containerId": null,
       "originalText": "delete-comment endpoint",
       "lineHeight": 1.25,
-      "baseline": 12
+      "baseline": 12,
+      "customData": {
+        "cl": {
+          "role": "title",
+          "id": "n1"
+        }
+      }
     },
     {
       "id": "nte-n1",
@@ -502,7 +545,19 @@
       "boundElements": null,
       "updated": 1,
       "link": null,
-      "locked": false
+      "locked": false,
+      "customData": {
+        "cl": {
+          "role": "node",
+          "node": {
+            "id": "n2",
+            "kind": "script",
+            "path": "notes store · delete_note",
+            "at": "new",
+            "note": "byte-preserving remove"
+          }
+        }
+      }
     },
     {
       "id": "bar-n2",
@@ -609,7 +664,13 @@
       "containerId": null,
       "originalText": "notes store · delete_note",
       "lineHeight": 1.25,
-      "baseline": 12
+      "baseline": 12,
+      "customData": {
+        "cl": {
+          "role": "title",
+          "id": "n2"
+        }
+      }
     },
     {
       "id": "nte-n2",
@@ -716,7 +777,19 @@
       "boundElements": null,
       "updated": 1,
       "link": null,
-      "locked": false
+      "locked": false,
+      "customData": {
+        "cl": {
+          "role": "node",
+          "node": {
+            "id": "n3",
+            "kind": "artifact",
+            "path": "trace + doc-page ✕ UI",
+            "at": "changed",
+            "note": "two-click confirm"
+          }
+        }
+      }
     },
     {
       "id": "bar-n3",
@@ -823,7 +896,13 @@
       "containerId": null,
       "originalText": "trace + doc-page ✕ UI",
       "lineHeight": 1.25,
-      "baseline": 12
+      "baseline": 12,
+      "customData": {
+        "cl": {
+          "role": "title",
+          "id": "n3"
+        }
+      }
     },
     {
       "id": "nte-n3",

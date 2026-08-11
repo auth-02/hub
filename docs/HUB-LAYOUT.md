@@ -50,6 +50,9 @@ The differentiated structure. A task is a directory under `<repo>/tasks/<slug>/`
 │   └── <name>.excalidraw ← DRAW
 ├── comments/            (optional, created on demand)
 │   └── notes.jsonl      ← NOTE (append-only; one JSON comment per line)
+├── change-log/          (optional, created on demand)
+│   ├── <name>.excalidraw ← DRAW  (editable change-map, source of truth)
+│   └── <name>.html      ← rendered interactive map (regenerated on Save)
 └── data/                (optional, created on demand)
     └── <name>.{xlsx,csv,json,…}  ← DATA
 ```
@@ -58,8 +61,8 @@ The differentiated structure. A task is a directory under `<repo>/tasks/<slug>/`
 - `manifest.md` is what makes the directory a task, and is the **only** thing a
   producer must create. Without it, the directory's files are still indexed but
   show **no trace** (see §6, orphans).
-- The `runs/`, `artifacts/`, `draws/`, `comments/`, and `data/` subdirs are
-  **optional and created lazily** — only when a file first needs to land in one.
+- The `runs/`, `artifacts/`, `draws/`, `comments/`, `change-log/`, and `data/`
+  subdirs are **optional and created lazily** — only when a file first needs one.
   A fresh task is
   just its `manifest.md`; empty scaffolding directories are noise. Producers must
   not pre-create them.
@@ -265,9 +268,11 @@ Producers must not use these for content; hub owns or ignores them:
 - The hub state directory (`$XDG_STATE_HOME/hub` or `~/.local/state/hub`) — never
   inside the scan root.
 - `manifest.md`, `runs/`, `artifacts/`, `draws/`, `prompts/`, `data/`,
-  `comments/`, `comments/notes.jsonl` — structural, as defined above.
-  (`prompts/` is reserved when present, but never created by hub; `comments/`
-  and its `notes.jsonl` log are created on demand by `hub note` / the composer.)
+  `comments/`, `comments/notes.jsonl`, `change-log/` — structural, as defined
+  above. (`prompts/` is reserved when present, but never created by hub;
+  `comments/` and its `notes.jsonl` log are created on demand by `hub note` /
+  the composer; `change-log/` holds a change-map draw + the interactive HTML Hub
+  renders from it on Save.)
 
 ---
 

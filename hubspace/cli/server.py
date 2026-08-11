@@ -219,6 +219,12 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             self._serve_md(fs_path)
         elif fs_path.suffix.lower() in (".html", ".htm"):
             src = fs_path.read_text(encoding="utf-8", errors="replace")
+            # Self-contained "app" pages (e.g. the change-log change-map) opt out
+            # of Hub's doc chrome — otherwise the injected outline/trace/menu/
+            # provenance collide with the page's own full-bleed UI. Served as-is.
+            if 'name="hub:standalone"' in src:
+                self._send(200, "text/html; charset=utf-8", src.encode("utf-8"))
+                return
             links = _get_lineage(str(fs_path.resolve()))
             lineage_html = _render_lineage_html(links, self.__class__.server_port) if links else ""
             provenance_html = render_provenance(_metadata.extract_provenance(src))
@@ -1414,7 +1420,45 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             self._send(500, "text/plain", str(e).encode())
             return
         out_rel = target.relative_to(root).as_posix()
-        self._send(200, "application/json", json.dumps({"ok": True, "rel": out_rel}).encode())
+        # Change-log pipeline: saving a draw that lives in a `change-log/` folder
+        # (re)renders its interactive HTML sibling from the scene the user just
+        # confirmed — layout + label edits and all. This is the "Save = render"
+        # step. Best-effort: a scene that carries no change-log model is skipped.
+        html_rel = self._maybe_render_change_log(target, scene, root)
+        payload = {"ok": True, "rel": out_rel}
+        if html_rel:
+            payload["change_log_html"] = html_rel
+        self._send(200, "application/json", json.dumps(payload).encode())
+
+    @staticmethod
+    def _maybe_render_change_log(target: Path, scene: dict, root: Path):
+        """If `target` is a change-log draw, render its interactive HTML sibling.
+
+        Returns the HTML's scan-root-relative path on success, else None. Never
+        raises into the save path — a malformed scene just skips rendering."""
+        if "change-log" not in target.parts:
+            return None
+        try:
+            from ..core import changelog as _cl, changemap as _cm
+            graph = _cl.scene_to_graph(scene)
+            if not graph.get("nodes"):
+                return None
+            meta = dict(graph.get("meta") or {})
+            # Link the HTML back to this draw for round-tripping.
+            try:
+                draw_rel = target.resolve().relative_to(root).as_posix()
+                meta.setdefault("edit_href", "/" + draw_rel)
+            except ValueError:
+                pass
+            html = _cm.render_html(meta, graph["nodes"], graph["edges"],
+                                   positions=graph.get("positions"))
+            html_path = target.with_suffix(".html")
+            html_path.write_text(html, encoding="utf-8")
+            return html_path.resolve().relative_to(root).as_posix()
+        except Exception as e:  # never break a save over a render hiccup
+            import sys as _sys
+            print(f"change-log render skipped: {e}", file=_sys.stderr)
+            return None
 
     def _list_dirs(self, raw: str) -> None:
         """List immediate subdirectories of a path — the set-root picker backend.

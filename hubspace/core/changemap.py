@@ -89,6 +89,18 @@ def _positions(nodes, edges):
     return pos
 
 
+def _normalize(positions: dict, ids: set) -> dict:
+    """Map scene (Excalidraw) coords → HTML canvas coords: shift to origin + pad,
+    keeping the user's relative arrangement. Only nodes present in `ids`."""
+    pts = {k: v for k, v in positions.items() if k in ids}
+    if not pts:
+        return {}
+    minx = min(p["x"] for p in pts.values())
+    miny = min(p["y"] for p in pts.values())
+    return {k: (int(p["x"] - minx) + PAD, int(p["y"] - miny) + PAD)
+            for k, p in pts.items()}
+
+
 def _e(s) -> str:
     return _html.escape("" if s is None else str(s))
 
@@ -134,6 +146,10 @@ body{background:var(--bg);color:var(--ink);font-family:var(--body);
   font-family:var(--mono);font-size:11px;color:var(--mute);padding:8px 40px 30px;}
 .legend .lk{display:flex;align-items:center;gap:7px;}
 .legend .sw{width:22px;height:14px;border-radius:4px;border:1px solid var(--line);}
+.head .editlink{display:inline-block;margin-top:12px;margin-left:18px;font-family:var(--mono);
+  font-size:11px;color:var(--accent2);text-decoration:none;border-bottom:1px dotted var(--accent2);}
+.prov{padding:4px 40px 34px;font-family:var(--mono);font-size:10px;letter-spacing:.05em;color:var(--mute);}
+.prov .provnote{margin-left:12px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;font-size:9px;}
 /* Inspector */
 #scrim{position:fixed;inset:0;background:rgba(26,22,16,.28);opacity:0;
   pointer-events:none;transition:opacity .2s;z-index:9;}
@@ -265,11 +281,20 @@ def _node_html(node, num, x, y) -> str:
         f'</div></div>')
 
 
-def render_html(meta: dict, nodes: list[dict], edges: list[dict] | None = None) -> str:
-    """Render the interactive change-map to one self-contained HTML string."""
+def render_html(meta: dict, nodes: list[dict], edges: list[dict] | None = None,
+                positions: dict | None = None) -> str:
+    """Render the interactive change-map to one self-contained HTML string.
+
+    ``positions`` (scene/Excalidraw coords per node id) — when supplied, e.g. by
+    the draw→save pipeline — is normalized and used verbatim so the HTML mirrors
+    the user's canvas arrangement; otherwise a left→right flow is computed."""
     edges = edges or []
     meta = meta or {}
-    pos = _positions(nodes, edges)
+    ids = {n["id"] for n in nodes}
+    pos = _normalize(positions, ids) if positions else {}
+    # Any node missing a supplied position falls back to the computed flow.
+    if len(pos) < len(nodes):
+        pos = {**_positions(nodes, edges), **pos}
     w = max((x for x, _ in pos.values()), default=0) + NODE_W + PAD
     h = max((y for _, y in pos.values()), default=0) + NODE_H + PAD
     # Number in reading order (column, then row).
@@ -316,18 +341,38 @@ def render_html(meta: dict, nodes: list[dict], edges: list[dict] | None = None) 
                 f'task: {meta.get("slug", "")}\n'
                 "---\n-->\n")
 
+    # Visible provenance footer (this page opts out of Hub's injected chrome via
+    # the hub:standalone marker, so it carries its own "written by …" line).
+    prov_foot = ""
+    if meta.get("generated_by"):
+        bits = [_e(meta.get("generated_by"))]
+        if meta.get("written_at"):
+            bits.append(_e(meta.get("written_at")))
+        if meta.get("commit_range"):
+            bits.append(_e(meta.get("commit_range")))
+        prov_foot = ('<div class="prov">written by ' + " · ".join(bits) +
+                     '<span class="provnote">Hub did not generate this file.</span></div>')
+
+    edit_link = ""
+    if meta.get("edit_href"):
+        edit_link = (f'<a class="editlink" href="{_e(meta["edit_href"])}">'
+                     f'← edit in canvas</a>')
+
     return (
         prov +
         "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+        '<meta name="hub:standalone" content="1">'
         f"<title>{title}</title><style>{_CSS}</style></head><body>"
         f'<div class="head"><div class="eyebrow">change-log · {slug}</div>'
         f'<h1>{title}</h1>'
         + (f'<div class="sub">{subtitle}</div>' if subtitle else "")
-        + '<div class="hint">click any change to deep-dive its files, functions & tests →</div></div>'
+        + '<div class="hint">click any change to deep-dive its files, functions & tests →</div>'
+        + edit_link + '</div>'
         f'<div id="stage"><div id="canvas" style="width:{w}px;height:{h}px">'
         f'{edges_svg}{nodes_html}</div></div>'
         f'<div class="legend"><span>KINDS</span>{legend}</div>'
+        + prov_foot +
         '<div id="scrim"></div>'
         '<aside id="insp" aria-label="change detail"><div class="ihead" id="ihead"></div>'
         '<div class="ibody" id="ibody"></div></aside>'
