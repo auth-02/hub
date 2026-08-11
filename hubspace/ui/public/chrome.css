@@ -119,6 +119,14 @@
 .hub-inline-note .note-time,.hub-inline-note .note-on{color:var(--mute);}
 .hub-inline-note .note-body{font-family:var(--body);font-size:13px;color:var(--ink);
   line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;}
+/* ✕ delete-comment affordance (S30) — faint until the card is hovered; the
+   two-click "delete?" arm state turns oxblood so a mis-click can't delete. */
+.hub-inline-note .note-del{margin-left:auto;background:none;border:none;padding:0 2px;
+  font-family:var(--mono);font-size:11px;line-height:1;color:var(--mute);cursor:pointer;
+  opacity:0;transition:opacity .12s,color .12s;}
+.hub-inline-note:hover .note-del{opacity:.6;}
+.hub-inline-note .note-del:hover,.hub-inline-note .note-del:focus-visible{opacity:1;color:var(--accent);outline:none;}
+.hub-inline-note .note-del.armed{opacity:1;color:var(--accent);font-style:italic;letter-spacing:.03em;}
 .hub-inline-notes{margin:0 0 1.75rem;}
 .hub-inline-notes-label{font-family:var(--mono);font-size:10px;letter-spacing:.14em;
   text-transform:uppercase;color:var(--accent);margin-bottom:8px;}

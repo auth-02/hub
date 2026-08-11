@@ -1155,8 +1155,10 @@ function renderTraceNotes(t){
         meta+=`<span class="note-on">on ${esc(c.target)}`+
           (c.range?` · ${esc(c.range)}`:'')+`</span>`;
       }
+      // ✕ delete affordance (S30) — only when the note carries a stable id.
+      const del=c.id?`<button class="note-del" type="button" data-id="${esc(c.id)}" title="delete comment" aria-label="delete comment">✕</button>`:'';
       return `<div class="note-card${agent?' agent':''}">`+
-        `<div class="note-meta">${meta}</div>`+
+        `<div class="note-meta">${meta}${del}</div>`+
         `<div class="note-body">${esc(c.body||'')}</div></div>`;
     }).join('')+'</div>';
   }else{
@@ -1166,6 +1168,29 @@ function renderTraceNotes(t){
   el.innerHTML=h;
   const addBtn=document.getElementById('note-add-empty');
   if(addBtn)addBtn.onclick=()=>{if(window._openComposer)window._openComposer({task:t,target:'manifest.md'});};
+  // Two-click arm on each ✕ (no native confirm — on-theme, prevents mis-clicks):
+  // first click labels it "delete?", a second within 2.5s removes the comment.
+  el.querySelectorAll('.note-del').forEach(b=>{
+    const btn=b as HTMLButtonElement;
+    btn.onclick=()=>{
+      if(btn.dataset.armed){deleteNote(t,btn.dataset.id||'');return;}
+      btn.dataset.armed='1';btn.textContent='delete?';btn.classList.add('armed');
+      setTimeout(()=>{if(btn.dataset.armed){delete btn.dataset.armed;btn.textContent='✕';btn.classList.remove('armed');}},2500);
+    };
+  });
+}
+
+// POST /_note-delete → remove one comment by id, then softReload so the rebaked
+// NOTES_DATA drops it (the inverse of the composer's POST /_note). The comment
+// is a line in the git-tracked notes.jsonl, so a delete stays recoverable.
+function deleteNote(t,id){
+  if(!id)return;
+  fetch('/_note-delete',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({repo:t.rp,slug:t.sl,id:id})})
+    .then(r=>r.json().catch(()=>({})))
+    .then(d=>{if(d&&d.ok){if(typeof flashSticky==='function')flashSticky('comment deleted…');softReload();}
+      else{alert((d&&d.detail)||(d&&d.error)||'delete failed');}})
+    .catch(()=>alert('delete failed'));
 }
 
 // Route any "note" affordance (lineage group, spine NOTE event, a comment ref)

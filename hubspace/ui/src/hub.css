@@ -193,6 +193,12 @@ a.lf-ext:hover{color:var(--ink);}
 .notes-empty{font-family:var(--mono);font-size:11px;color:var(--mute);font-style:italic;margin-bottom:8px;}
 .note-add-link{background:none;border:none;padding:0;font-family:var(--mono);font-size:11px;font-style:italic;color:var(--accent);cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px;}
 .note-add-link:hover{color:var(--ink);}
+/* ✕ delete-comment affordance (S30) — faint until the card is hovered; the
+   two-click "delete?" arm state turns oxblood so an accidental click is hard. */
+.note-del{margin-left:auto;background:none;border:none;padding:0 2px;font-family:var(--mono);font-size:11px;line-height:1;color:var(--mute);cursor:pointer;opacity:0;transition:opacity .12s,color .12s;}
+.note-card:hover .note-del{opacity:.6;}
+.note-del:hover,.note-del:focus-visible{opacity:1;color:var(--accent);outline:none;}
+.note-del.armed{opacity:1;color:var(--accent);font-style:italic;letter-spacing:.03em;}
 .tl-label{font-family:var(--mono);font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);padding:12px 14px 8px;}
 .tl-period{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);padding:8px 14px 4px;}
 .tl-task{padding:8px 14px;border-bottom:1px solid var(--line);}

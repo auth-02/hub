@@ -300,10 +300,30 @@ function card(n){
   var meta='<span class="note-author'+(agent?' agent':'')+'">'+(agent?'\\u25b8 ':'')+
     esc(n.author||'anon')+'</span><span class="note-time">'+esc(ago(n.created))+'</span>'+
     (n.line?'<span class="note-on">L'+esc(n.line)+'</span>':'');
+  // ✕ delete-comment affordance (S30) — only when we can address the task and
+  // the note carries a stable id. Two-click arm so a mis-click can't delete.
+  var del=(canComment&&n.id)?'<button class="note-del" type="button" title="delete comment" aria-label="delete comment">\\u2715</button>':'';
   var el=document.createElement('div');
   el.className='note-card hub-inline-note'+(agent?' agent':'')+(n.line?' anchored':'');
-  el.innerHTML='<div class="note-meta">'+meta+'</div><div class="note-body">'+esc(n.body||'')+'</div>';
+  el.innerHTML='<div class="note-meta">'+meta+del+'</div><div class="note-body">'+esc(n.body||'')+'</div>';
+  var db=el.querySelector('.note-del');
+  if(db){db.addEventListener('click',function(){
+    if(db.getAttribute('data-armed')){deleteNote(n.id);return;}
+    db.setAttribute('data-armed','1');db.textContent='delete?';db.classList.add('armed');
+    setTimeout(function(){if(db.getAttribute('data-armed')){db.removeAttribute('data-armed');db.textContent='\\u2715';db.classList.remove('armed');}},2500);
+  });}
   return el;
+}
+// POST /_note-delete → drop one comment by id, then reload so the rebaked
+// window.HUB_DOC no longer carries it (inverse of the on-page composer).
+function deleteNote(id){
+  if(!id||!canComment)return;
+  fetch('/_note-delete',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({repo:CFG.repo,slug:CFG.slug,id:id})})
+    .then(function(r){return r.json().catch(function(){return{};});})
+    .then(function(d){if(d&&d.ok){location.reload();}
+      else{alert((d&&d.detail)||(d&&d.error)||'delete failed');}})
+    .catch(function(){alert('delete failed');});
 }
 function blockForLine(line){
   var blocks=document.querySelectorAll('.page [data-src-line]');
