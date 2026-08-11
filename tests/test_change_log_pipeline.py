@@ -106,9 +106,9 @@ def _post(port, path, body):
 def _get(port, path):
     try:
         with urllib.request.urlopen(f"http://localhost:{port}{path}", timeout=10) as r:
-            return r.status, r.read().decode("utf-8", "replace")
+            return r.status, r.read().decode("utf-8", "replace"), dict(r.headers)
     except urllib.error.HTTPError as e:
-        return e.code, e.read().decode("utf-8", "replace")
+        return e.code, e.read().decode("utf-8", "replace"), dict(e.headers)
 
 
 class TestSaveHookRendersHtml(unittest.TestCase):
@@ -183,12 +183,14 @@ class TestSaveHookRendersHtml(unittest.TestCase):
 
     def test_served_html_is_not_wrapped_in_doc_chrome(self):
         self._save("tasks/demo/change-log/map.excalidraw", _scene())
-        status, html = _get(self._port, "/tasks/demo/change-log/map.html")
+        status, html, headers = _get(self._port, "/tasks/demo/change-log/map.html")
         self.assertEqual(status, 200)
         # Hub's doc-page injections must be absent (they'd collide with the app).
         self.assertNotIn("doc-menu", html)
         self.assertNotIn("backlinks", html)
         self.assertNotIn("DOC_PAGE", html)
+        # …and it's served no-cache so a refresh always shows the fresh render.
+        self.assertIn("no-store", headers.get("Cache-Control", ""))
 
     def test_plain_draw_outside_change_log_gets_no_html(self):
         (Path(self._root) / "tasks" / "demo" / "draws").mkdir(exist_ok=True)

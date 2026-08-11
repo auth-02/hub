@@ -223,7 +223,8 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             # of Hub's doc chrome — otherwise the injected outline/trace/menu/
             # provenance collide with the page's own full-bleed UI. Served as-is.
             if 'name="hub:standalone"' in src:
-                self._send(200, "text/html; charset=utf-8", src.encode("utf-8"))
+                self._send(200, "text/html; charset=utf-8", src.encode("utf-8"),
+                           no_cache=True)
                 return
             links = _get_lineage(str(fs_path.resolve()))
             lineage_html = _render_lineage_html(links, self.__class__.server_port) if links else ""
@@ -1894,10 +1895,14 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
         ).encode("utf-8")
         self._send(200, "text/html; charset=utf-8", html)
 
-    def _send(self, code: int, ct: str, body: bytes) -> None:
+    def _send(self, code: int, ct: str, body: bytes, no_cache: bool = False) -> None:
         self.send_response(code)
         self.send_header("Content-Type", ct)
         self.send_header("Content-Length", str(len(body)))
+        if no_cache:
+            # For pages Hub regenerates in place (the change-log map on Save), so a
+            # plain refresh always shows the fresh render, never a cached copy.
+            self.send_header("Cache-Control", "no-store, must-revalidate")
         self.end_headers()
         self.wfile.write(body)
 
