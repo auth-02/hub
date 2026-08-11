@@ -177,7 +177,9 @@ class TestSaveHookRendersHtml(unittest.TestCase):
         html = html_path.read_text(encoding="utf-8")
         self.assertIn("_note_delete()", html)          # deep-dive baked
         self.assertIn('name="hub:standalone"', html)    # opts out of doc chrome
-        self.assertIn("edit in canvas", html)           # links back to the draw
+        # View-first: the HTML carries an Edit button pointing at the draw canvas.
+        self.assertIn('class="editbtn"', html)
+        self.assertIn('href="/tasks/demo/change-log/map.excalidraw"', html)
 
     def test_served_html_is_not_wrapped_in_doc_chrome(self):
         self._save("tasks/demo/change-log/map.excalidraw", _scene())

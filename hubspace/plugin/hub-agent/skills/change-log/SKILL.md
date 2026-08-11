@@ -101,20 +101,22 @@ Pick the kind that fits the change (endpoint/feature → `task`, helper/module �
 
 ## Step 3 — write the editable draw; Save renders the interactive map
 
-The change-log is **born as a draw the user edits, and Saving it renders the
-interactive HTML**. You write ONE `.excalidraw` into the task's **`change-log/`**
-folder; `changelog.to_scene` embeds your whole change-graph (each node's
-deep-dive detail included) inside the scene's element `customData`, and adds a
-clickable **"▶ interactive version"** pill. The user opens it in Hub's draw
-canvas, tweaks layout / relabels, and on **Save** Hub reconstructs the graph from
-the scene and (re)renders the sibling `change-log/<name>.html` — the
-click-to-deep-dive map (numbered accent cards, labelled arrows, no grid,
-Purpose · Files · Functions · Tests · Note inspector), reflecting the user's
-edits. *You author the draw; Hub renders the HTML on Save.*
+**View-first, edit-on-demand.** The default surface a reader sees is the
+interactive **HTML** map (click-to-deep-dive: numbered accent cards, labelled
+arrows, no grid, Purpose · Files · Functions · Tests · Note inspector). It
+carries an **"✎ Edit" button** → the editable Excalidraw **canvas**; the canvas
+carries a **"▶ interactive version"** pill back. Editing then Saving in the
+canvas **re-renders the HTML** (Hub reconstructs the graph from the scene — label
++ position edits flow through). So the loop is *view → edit → save → view*.
+
+You author BOTH files in the task's **`change-log/`** folder: the `.excalidraw`
+(source of truth; `changelog.to_scene` embeds your whole change-graph — each
+node's deep-dive detail — in element `customData`) and a pre-rendered `.html`
+(the default view) so the reader lands on the map immediately.
 
 ```
-tasks/<slug>/change-log/<name>.excalidraw    ← you write this (editable source)
-tasks/<slug>/change-log/<name>.html          ← Hub renders this on Save
+tasks/<slug>/change-log/<name>.html          ← default view (the reader opens this)
+tasks/<slug>/change-log/<name>.excalidraw    ← editable source (reached via ✎ Edit)
 ```
 
 ```bash
@@ -142,12 +144,15 @@ nodes = [
    "tests":["TestDeleteNote"]},
 ]
 edges = [ {"from":"endpoint","to":"store","rel":"calls"} ]
+draw_href = "/tasks/<slug>/change-log/<name>.excalidraw"
+html_href = "/tasks/<slug>/change-log/<name>.html"
 scene = changelog.to_scene(nodes, edges, title=meta["title"], subtitle=meta["subtitle"],
-    meta=meta, interactive_href="/tasks/<slug>/change-log/<name>.html")
+    meta=meta, interactive_href=html_href)
 open("tasks/<slug>/change-log/<name>.excalidraw","w").write(json.dumps(scene, ensure_ascii=False))
-# Optional: pre-render the HTML once so it exists before the first Save:
+# Pre-render the default HTML view; edit_href gives it the ✎ Edit → canvas button.
 from hubspace.core import changemap
 g = changelog.scene_to_graph(scene)
+g["meta"]["edit_href"] = draw_href
 open("tasks/<slug>/change-log/<name>.html","w").write(
     changemap.render_html(g["meta"], g["nodes"], g["edges"], positions=g["positions"]))
 PY
@@ -155,14 +160,17 @@ PY
 
 Get the short hashes with `git rev-parse --short <since>` / `--short HEAD`. Keep
 the **cards** high level (the change + summary); push files, symbols and tests
-into each node's `details` for the deep-dive.
+into each node's `details` for the deep-dive. Point the reader at the `.html`.
 
 **How Save → HTML works:** Hub watches for `.excalidraw` saves under any
 `change-log/` folder; on Save it runs `changelog.scene_to_graph(scene)` →
-`changemap.render_html(...)` and writes the `.html` sibling. Label + position
-edits on the canvas flow through (the model rides in the scene's `customData`;
-edited titles win). The rendered page carries `hub:standalone`, so Hub serves it
-without injecting doc chrome, and it's self-contained/offline for `hub publish`.
+`changemap.render_html(...)` and rewrites the `.html` sibling (setting `edit_href`
+back to the draw automatically). Label + position edits on the canvas flow
+through — the model rides in the scene's `customData`, and an edited card label
+is recovered whether Excalidraw kept our tagged text, bound a new text to the
+card, or (worst case) dropped the tag (a positional fallback reads the card's
+largest-font text). The page carries `hub:standalone`, so Hub serves it without
+injecting doc chrome, self-contained/offline for `hub publish`.
 
 ## `--doc` — the prose companion (optional)
 

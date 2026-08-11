@@ -310,10 +310,26 @@ def scene_to_graph(scene: dict) -> dict:
     edges: list[dict] = []
     meta: dict = {}
     positions: dict[str, dict] = {}
-    titles: dict[str, str] = {}
+    tagged: dict[str, str] = {}      # node id → our tagged title text (edit-in-place)
+    bound: dict[str, str] = {}       # node id → bound text on the card rect
+    card_box: dict[str, tuple] = {}  # node id → (x, y, w, h) of the card rect
+    texts: list[dict] = []           # all live text elements (for positional fallback)
+
+    def _first_line(el):
+        return (el.get("text") or "").strip().splitlines()[0].strip() if (el.get("text") or "").strip() else ""
+
     for el in scene.get("elements", []):
         if el.get("isDeleted"):
             continue
+        if el.get("type") == "text":
+            texts.append(el)
+            # A user double-clicking a card makes Excalidraw bind a NEW text to the
+            # rect (containerId == "card-<id>") — that is the edited title.
+            cid = el.get("containerId")
+            if isinstance(cid, str) and cid.startswith("card-"):
+                t = _first_line(el)
+                if t:
+                    bound[cid[len("card-"):]] = t
         cl = (el.get("customData") or {}).get("cl")
         if not isinstance(cl, dict):
             continue
@@ -325,18 +341,43 @@ def scene_to_graph(scene: dict) -> dict:
                 continue
             nodes.append(n)
             positions[nid] = {"x": el.get("x", 0), "y": el.get("y", 0)}
+            card_box[nid] = (el.get("x", 0), el.get("y", 0),
+                             el.get("width", 0), el.get("height", 0))
         elif role == "edge":
             edges.append({"from": cl.get("from"), "to": cl.get("to"),
                           "rel": cl.get("rel") or ""})
         elif role == "meta" and isinstance(cl.get("meta"), dict):
             meta = dict(cl["meta"])
         elif role == "title" and cl.get("id"):
-            t = (el.get("text") or "").strip()
+            t = _first_line(el)
             if t:
-                titles[cl["id"]] = t.splitlines()[0].strip()
-    # A user's edited card label wins over the authored title.
+                tagged[cl["id"]] = t
+
+    def _positional_title(nid):
+        # Fallback: the largest-font text whose centre sits inside the card box —
+        # recovers an edited title even if Excalidraw dropped our customData tag.
+        box = card_box.get(nid)
+        if not box:
+            return None
+        x, y, w, h = box
+        best, best_sz = None, -1.0
+        for el in texts:
+            if el.get("customData", {}).get("cl", {}).get("role") in ("meta",):
+                continue
+            cx = el.get("x", 0) + el.get("width", 0) / 2
+            cy = el.get("y", 0) + el.get("height", 0) / 2
+            if x <= cx <= x + w and y <= cy <= y + h:
+                sz = el.get("fontSize", 0)
+                if sz > best_sz:
+                    best, best_sz = _first_line(el), sz
+        return best
+
+    # Recover each node's CURRENT title — a canvas edit wins over the authored
+    # one, however Excalidraw absorbed it: bound text > our tagged title >
+    # positional (largest-font text in the card).
     for n in nodes:
-        edited = titles.get(n.get("id"))
+        nid = n.get("id")
+        edited = bound.get(nid) or tagged.get(nid) or _positional_title(nid)
         if edited:
             n["title"] = edited
     return {"meta": meta, "nodes": nodes, "edges": edges, "positions": positions}

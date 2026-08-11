@@ -146,8 +146,11 @@ body{background:var(--bg);color:var(--ink);font-family:var(--body);
   font-family:var(--mono);font-size:11px;color:var(--mute);padding:8px 40px 30px;}
 .legend .lk{display:flex;align-items:center;gap:7px;}
 .legend .sw{width:22px;height:14px;border-radius:4px;border:1px solid var(--line);}
-.head .editlink{display:inline-block;margin-top:12px;margin-left:18px;font-family:var(--mono);
-  font-size:11px;color:var(--accent2);text-decoration:none;border-bottom:1px dotted var(--accent2);}
+.head{position:relative;}
+.head .editbtn{position:absolute;top:34px;right:40px;font-family:var(--mono);font-size:12px;
+  letter-spacing:.06em;color:#fff;background:var(--accent);border:1px solid var(--accent);
+  padding:8px 16px;border-radius:8px;text-decoration:none;box-shadow:0 2px 8px rgba(122,40,40,.22);}
+.head .editbtn:hover{background:#66201f;}
 .prov{padding:4px 40px 34px;font-family:var(--mono);font-size:10px;letter-spacing:.05em;color:var(--mute);}
 .prov .provnote{margin-left:12px;color:var(--accent);letter-spacing:.12em;text-transform:uppercase;font-size:9px;}
 /* Inspector */
@@ -353,10 +356,12 @@ def render_html(meta: dict, nodes: list[dict], edges: list[dict] | None = None,
         prov_foot = ('<div class="prov">written by ' + " · ".join(bits) +
                      '<span class="provnote">Hub did not generate this file.</span></div>')
 
+    # View-first: this page is the default surface; the Edit button jumps to the
+    # editable Excalidraw canvas. (Canvas → back here via its "interactive" pill.)
     edit_link = ""
     if meta.get("edit_href"):
-        edit_link = (f'<a class="editlink" href="{_e(meta["edit_href"])}">'
-                     f'← edit in canvas</a>')
+        edit_link = (f'<a class="editbtn" href="{_e(meta["edit_href"])}" '
+                     f'title="Edit this change-map in the draw canvas">✎ Edit</a>')
 
     return (
         prov +
@@ -364,11 +369,11 @@ def render_html(meta: dict, nodes: list[dict], edges: list[dict] | None = None,
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
         '<meta name="hub:standalone" content="1">'
         f"<title>{title}</title><style>{_CSS}</style></head><body>"
-        f'<div class="head"><div class="eyebrow">change-log · {slug}</div>'
+        f'<div class="head">{edit_link}<div class="eyebrow">change-log · {slug}</div>'
         f'<h1>{title}</h1>'
         + (f'<div class="sub">{subtitle}</div>' if subtitle else "")
         + '<div class="hint">click any change to deep-dive its files, functions & tests →</div>'
-        + edit_link + '</div>'
+        + '</div>'
         f'<div id="stage"><div id="canvas" style="width:{w}px;height:{h}px">'
         f'{edges_svg}{nodes_html}</div></div>'
         f'<div class="legend"><span>KINDS</span>{legend}</div>'

@@ -82,6 +82,18 @@ class TestChangeMap(unittest.TestCase):
         html = changemap.render_html({"title": "X"}, _NODES, _EDGES)
         self.assertTrue(html.lstrip().startswith("<!DOCTYPE"))
 
+    def test_edit_button_links_to_canvas_when_edit_href(self):
+        # View-first flow: an Edit button jumps to the editable draw canvas.
+        html = changemap.render_html(dict(_META, edit_href="/tasks/x/change-log/m.excalidraw"),
+                                     _NODES, _EDGES)
+        self.assertIn('class="editbtn"', html)
+        self.assertIn('href="/tasks/x/change-log/m.excalidraw"', html)
+        self.assertIn("✎ Edit", html)
+
+    def test_no_edit_button_without_edit_href(self):
+        # The .editbtn CSS rule is always present; assert no button ELEMENT renders.
+        self.assertNotIn('class="editbtn"', changemap.render_html(_META, _NODES, _EDGES))
+
     def test_left_to_right_flow(self):
         # endpoint depends on store (endpoint→store), so store sits to its right.
         pos = changemap._positions(_NODES, _EDGES)
