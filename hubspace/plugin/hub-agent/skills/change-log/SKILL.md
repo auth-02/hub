@@ -1,36 +1,42 @@
 ---
 name: change-log
-description: Draw a task's changes as a high-level connected wireframe on Hub's draw canvas — change-units as nodes, dependencies as arrows, so a reviewer *sees* what moved and how it hangs together (no code). Use when someone asks "what changed", "map this change", "diagram this PR/branch", "show how the changes connect", or as the closing step of a task once code has landed. Reads the diff + the task's manifest (the *why*) + Hub's MCP task context, then writes ONE `.excalidraw` scene into `tasks/<slug>/draws/`. The agent does the reading — Hub has no model. `/change-log <task-slug> [--since <ref>] [--doc]`.
+description: Map a task's changes as an interactive change-map — nodes are functional CHANGES (a capability that moved), arrows are dependencies, and clicking a change deep-dives into its file / function / test detail in a side inspector. Use when someone asks "what changed", "map this change", "diagram this PR/branch", "show how the changes connect", or as the closing step of a task once code has landed. Reads the diff + the task's manifest (the *why*) + Hub's MCP task context, then writes ONE self-contained HTML page into `tasks/<slug>/artifacts/`. The agent does the reading — Hub has no model. `/change-log <task-slug> [--since <ref>] [--canvas] [--doc]`.
 ---
 
-# change-log — the agent reads the diff, Hub draws the result as a map
+# change-log — the agent reads the diff, Hub renders an explorable map
 
-The point of a change-log here is **a picture, not prose**: a connected wireframe
-on the draw canvas Hub already has, where each **node is a unit of change** (an
-area/module/feature that moved) and each **arrow is a dependency** ("depends on"
-/ "feeds" / "calls"). A reviewer glances at it and *sees* the shape of the change
-— what's new, what changed, and how the pieces hang together — without reading a
-line of code. (Inspired by workflow-map tools like HQFlow: the agent authors the
-graph, the canvas renders it.)
+The point of a change-log here is **a picture you can interrogate, not prose**:
+each **node is a functional change** — a *capability that moved* ("delete a
+comment", "publish reach"), NOT a file — and each **arrow is a dependency**
+("calls" / "feeds" / "renames"). A reviewer glances at the flow to see the shape
+of the change, then **clicks any node to deep-dive** into that change's files,
+functions/symbols, and tests in a side inspector. (Modeled on workflow-map tools
+like HQFlow: the agent authors the graph, the page renders it + the inspector.)
 
-Reading a diff and deciding what the *units of change* are is the one job Hub
+Reading a diff and deciding what the *functional changes* are is the one job Hub
 cannot do. Hub has no model, no network, no API key — that is the whole point. So
 change-log is **a skill your agent runs**: you read the diff, gather the task's
-context, reason out the change-graph, and drop ONE `.excalidraw` scene into the
-task's `draws/`. From Hub's side nothing is special — a file appeared, the watcher
-indexed it, it has lineage, it opens in the draw canvas and is hand-annotatable.
-*Hub stays a consumer even when the thing it consumes is intelligence.*
+context, reason out the change-graph (each node carrying its own deep-dive
+detail), and drop ONE self-contained HTML page into the task's `artifacts/`. From
+Hub's side nothing is special — a file appeared, the watcher indexed it, it has
+lineage, it opens in the workspace. *Hub stays a consumer even when the thing it
+consumes is intelligence.*
 
 ```
-/change-log <task-slug> [--since <ref>] [--doc]
+/change-log <task-slug> [--since <ref>] [--canvas] [--doc]
 ```
 
 - `<task-slug>` — the task whose work you are mapping (its folder under `tasks/`).
 - `--since <ref>` — git ref to diff from (branch, tag, or commit). Default: the
   merge-base with `main` (`git merge-base main HEAD`), i.e. everything on this branch.
-- `--doc` — ALSO write the prose HTML changelog (`templates/change-log.html`) into
-  `artifacts/`. The diagram is always the primary deliverable; `--doc` adds the
-  companion write-up when someone wants a shareable narrative too.
+- `--canvas` — ALSO write an Excalidraw scene (`changelog.to_scene`) into
+  `draws/` — the same flow as a hand-annotatable canvas on Hub's draw surface
+  (no inspector; static).
+- `--doc` — ALSO write the prose HTML write-up (`templates/change-log.html`) into
+  `artifacts/` when someone wants a linear narrative.
+
+The **interactive change-map is always the primary deliverable**; `--canvas` and
+`--doc` are optional companions.
 
 ## Step 1 — read three sources (this is the work)
 
@@ -60,97 +66,116 @@ node's note blank rather than guessing.
 ## Step 2 — reason out the change-graph (nodes + edges)
 
 This is the judgement call, and it is yours. Collapse the raw diff into a handful
-of **high-level change-units** — NOT one node per file. A unit is a coherent thing
-that changed: "delete-comment endpoint", "notes store", "trace + doc-page UI",
-"z-index layering". Aim for **5–12 nodes**; if you have more, you are mapping code,
-not the change. Then draw the **dependency arrows** between them ("A calls B",
-"B feeds A"), the same success-path a reviewer would trace to understand the PR.
+of **functional changes** — NOT one node per file. A node is a *capability that
+moved*: "delete a comment", "publish reach", "settings panel". Aim for **5–12
+nodes**; if you have more, you are mapping code, not the change. Then draw the
+**dependency arrows** between them ("A calls B", "B feeds A") — the path a
+reviewer traces to understand the PR.
 
-Each node is:
+The file/function/test detail does **not** go in the node — it goes in the
+node's **`details`**, surfaced when the reviewer clicks to deep-dive. Node
+(change-oriented on top, file-oriented underneath):
 
 ```json
-{ "id": "n1",                        // short unique id
-  "kind": "task",                    // category → colour + top label (see palette)
-  "path": "delete-comment endpoint", // the human label (short noun phrase)
-  "at": "new",                       // the change verb: new | changed | rewritten | removed
-  "note": "POST /_note-delete" }     // one short line: WHAT/why (from the manifest)
+{ "id": "endpoint",
+  "kind": "task",                       // category → accent colour (see palette)
+  "title": "Delete a comment",          // the CHANGE, a short noun phrase
+  "verb": "new",                        // new | changed | rewritten | removed
+  "summary": "Remove one comment by id, mirroring the add path.",
+  "files":     [{"path":"hubspace/cli/server.py","change":"+handler"}],
+  "functions": [{"symbol":"_note_delete()","note":"guards + rebuild"}],
+  "tests":     ["TestNoteDeleteEndpoint"],
+  "note": "mirrors /_note" }
 ```
 
-The `note` is the point of the richer label — a single short line under the
-verb that says *what* the change is or *why* it exists (an endpoint name, "no
-native confirm", "byte-preserving"). Keep it to ~40 chars so it fits the card;
-draw it from the manifest's decisions, and leave it out (omit the key) when the
-manifest is silent rather than inventing one. Nodes with a `note` render as a
-taller card; a diagram with no notes lays out exactly like the timeline graph.
+`title` + `summary` are what shows on the card; `files` / `functions` / `tests`
+/ `note` are the **deep-dive**, shown in the inspector on click. Draw them from
+the diff (files/symbols) and the manifest (the *why*); leave a list empty rather
+than inventing. Each edge is `{ "from", "to", "rel"? }` — an arrow *from* the
+dependent *to* what it depends on; `rel` is a short relationship word drawn on
+the arrow.
 
-Each edge is `{ "from": "<id>", "to": "<id>" }` — an arrow *from* the dependent
-*to* what it depends on.
-
-**Kind → colour** (reuse Hub's palette so the map reads in the workspace; any
-other kind renders neutral grey, which is fine for a wireframe):
+**Kind → accent colour** (reuse Hub's palette; any other kind renders neutral):
 `task` oxblood · `artifact` violet · `script` slate · `doc` deep-sea ·
 `data` teal · `run` green · `draw` amber · `note` rust · `prompt` gold.
-Pick the kind that best fits each change-unit (e.g. an endpoint/feature → `task`,
-a helper/module → `script`, a UI/asset → `artifact`, a spec/doc → `doc`).
+Pick the kind that fits the change (endpoint/feature → `task`, helper/module →
+`script`, UI/asset/page → `artifact`, spec/docs → `doc`).
 
-## Step 3 — render the scene into `draws/`
+## Step 3 — render the interactive change-map (the default)
 
-Hand your nodes/edges to Hub's **deterministic** change-log emitter
-(`hubspace.core.changelog.to_scene`) — it lays out a left→right dependency flow
-and emits a *designed* Excalidraw scene (numbered cards, a left colour-accent
-bar per kind, a bold title + mono sub-line, a change-verb badge, labelled
-dependency arrows, a kinds legend, dot-grid paper). No model involved — just
-geometry. Give edges an optional `rel` (a short relationship word: "renders
-via", "feeds", "renames") — it is drawn on the arrow. Write ONE file:
+Hand your nodes/edges to Hub's **deterministic** renderer
+(`hubspace.core.changemap.render_html`) — it lays out a left→right dependency
+flow and emits ONE **self-contained, offline HTML page**: numbered cards with a
+left colour-accent bar, curved labelled arrows, a kinds legend, a clean paper
+ground (no grid), and a **click-to-deep-dive inspector** (Purpose · Files ·
+Functions/symbols · Tests · Note). No model involved — just layout. Write:
 
 ```
-tasks/<slug>/draws/change-log-<YYYY-MM-DD>.excalidraw
+tasks/<slug>/artifacts/change-log-<YYYY-MM-DD>.html
 ```
 
 ```bash
 python3 - <<'PY'
 import json
-from hubspace.core import changelog
+from hubspace.core import changemap
+meta = {
+  "title": "Change-log — delete a comment", "slug": "<slug>",
+  "subtitle": "<short-since>..<short-head> · 2 changes",
+  # provenance (an HTML comment Hub reads for the "written by …" line + "ask again"):
+  "generated_by": "claude ▸ skill:change-log",
+  "commit_range": "<short-since>..<short-head>",
+  "written_at": "<ISO-8601 timestamp>",
+}
 nodes = [
-  {"id":"n1","kind":"task","path":"delete-comment endpoint","at":"new","note":"POST /_note-delete"},
-  {"id":"n2","kind":"script","path":"notes store · delete_note","at":"new","note":"byte-preserving remove"},
-  {"id":"n3","kind":"artifact","path":"trace + doc-page ✕ UI","at":"changed","note":"two-click confirm"},
+  {"id":"endpoint","kind":"task","title":"Delete a comment","verb":"new",
+   "summary":"Remove one comment by id, mirroring the add path.",
+   "files":[{"path":"hubspace/cli/server.py","change":"+handler"}],
+   "functions":[{"symbol":"_note_delete()","note":"guards + rebuild"}],
+   "tests":["TestNoteDeleteEndpoint"],"note":"mirrors /_note"},
+  {"id":"store","kind":"script","title":"Notes store","verb":"new",
+   "summary":"Byte-preserving line removal from notes.jsonl.",
+   "files":[{"path":"hubspace/core/tasks.py","change":"+delete_note"}],
+   "functions":[{"symbol":"delete_note()","note":"idempotent"}],
+   "tests":["TestDeleteNote"]},
 ]
-edges = [ {"from":"n1","to":"n2","rel":"calls"}, {"from":"n3","to":"n1","rel":"posts to"} ]
-scene = changelog.to_scene(nodes, edges,
-    title="Change-log — delete a comment",
-    subtitle="<short-since>..<short-head> · 3 change-units")
-open("tasks/<slug>/draws/change-log-<YYYY-MM-DD>.excalidraw","w").write(
-    json.dumps(scene, ensure_ascii=False, indent=2))
+edges = [ {"from":"endpoint","to":"store","rel":"calls"} ]
+open("tasks/<slug>/artifacts/change-log-<YYYY-MM-DD>.html","w").write(
+    changemap.render_html(meta, nodes, edges))
 PY
 ```
 
-`templates/change-log.excalidraw` next to this skill is this emitter's output for
-the worked example above — open it to see the target look, or copy it and
-hand-edit if you prefer. Either way the result is a plain Excalidraw scene
-(`type:"excalidraw"`, `elements`, dot-grid paper `appState`) that opens in Hub's
-draw canvas and can be annotated.
+The page is fully self-contained (inline CSS+JS, no CDNs/fonts) so `hub publish`
+ships it as-is; the provenance front matter (top-of-file HTML comment) lets Hub
+show the "written by …" line + copy-only "ask again" button. Get the short
+hashes with `git rev-parse --short <since>` and `git rev-parse --short HEAD`.
 
-Keep it **high level**: node labels are short noun phrases, not file paths or
-symbols; arrows are dependencies, not call stacks. If a reviewer needs the code,
-they open the files — this map is for the *understanding*.
+Keep the **cards** high level (the change, its summary); push files, symbols and
+tests into `details` for the deep-dive. A reviewer skims the flow, then clicks in.
 
-## `--doc` — the optional prose companion
+## `--canvas` — the Excalidraw companion (optional)
 
-With `--doc`, ALSO copy `templates/change-log.html` and fill it, writing to
-`tasks/<slug>/artifacts/change-log-<YYYY-MM-DD>.html`. It carries the Hub design
-tokens inline (paper ground `#F4EFE4` + dot-grid, Fraunces/Inter/JetBrains Mono,
-oxblood `#7A2828` = change, deep-sea `#1E5A6B` = links) and is **fully
-self-contained/offline** (no CDNs/fonts/scripts) so `hub publish` can ship it
-as-is. Fill it in this order: **Title** (plain language) → **Summary** (one
-paragraph a non-author can read) → **Before → After** (two-column flow) →
-**Files touched** (path · change note · one-line *why* from the manifest) →
-**Provenance footer**. The diagram is still the headline; the doc is the narrative.
+With `--canvas`, ALSO render the same flow as a hand-annotatable Excalidraw scene
+via `hubspace.core.changelog.to_scene(nodes, edges, title=…, subtitle=…)` (uses
+`path`/`at`/`note` in place of `title`/`verb`/`summary`), writing to
+`tasks/<slug>/draws/change-log-<YYYY-MM-DD>.excalidraw`. Same clean paper ground,
+numbered accent cards + labelled arrows, but static (no inspector) — it opens in
+Hub's draw canvas for hand mark-up. `templates/change-log.excalidraw` is that
+emitter's output for the worked example.
 
-### Front matter — how Hub learns the provenance
+## `--doc` — the prose companion (optional)
 
-Put this at the **very top** of the `--doc` HTML, in an HTML comment so it never
-renders but Hub can read it:
+With `--doc`, ALSO copy `templates/change-log.html` and fill it (Title → Summary
+→ Before → After → Files touched → Provenance), writing to
+`tasks/<slug>/artifacts/change-log-<YYYY-MM-DD>-notes.html`. A linear narrative
+for when someone wants to read rather than explore. Same self-contained/offline
+rule so `hub publish` can ship it.
+
+### Provenance — how Hub learns who made it
+
+The interactive map (`changemap.render_html`) emits the provenance front matter
+for you from the `meta` `generated_by` / `commit_range` / `written_at` / `slug`
+fields (a top-of-file HTML comment). For the `--doc` template, put the same block
+at the **very top** by hand:
 
 ```html
 <!--
@@ -165,25 +190,25 @@ task: <slug>
 …
 ```
 
-Hub reads exactly these four fields off the file and renders a small line —
-`written by <generated_by> · <written_at> · <commit_range>` — plus the note
-**"Hub did not generate this file."** The `commit_range` end also seeds the
-copy-only **"ask again"** button (`/change-log <slug> --since <end>`). Get the
-short hashes with `git rev-parse --short <since>` and `git rev-parse --short HEAD`.
+Hub reads those four fields and renders `written by <generated_by> · <written_at>
+· <commit_range>` plus **"Hub did not generate this file."**, and seeds the
+copy-only **"ask again"** button (`/change-log <slug> --since <end>`).
 
 ## What this skill must NOT do
 
 - **No model / network / key in Hub.** You (the agent) do the reasoning — reading
-  the diff, choosing the change-units and their dependencies. Hub only lays out
-  the graph you hand it (deterministic geometry), indexes the file, and reads
-  front matter. Do not add generation code to Hub.
-- Draw the **change**, not the code — 5–12 high-level nodes, dependency arrows.
+  the diff, choosing the functional changes, their dependencies, and each change's
+  file/function/test detail. Hub only lays out the graph you hand it (deterministic)
+  , indexes the file, and reads front matter. Do not add generation code to Hub.
+- Map the **change**, not the code — 5–12 functional-change nodes; the file/symbol
+  detail belongs in each node's `details` (the deep-dive), not as its own node.
   One-node-per-file is the failure mode.
-- Write only into `tasks/<slug>/draws/` (and `tasks/<slug>/artifacts/` for `--doc`).
-- Do not fabricate a "why" — if the manifest is silent, the node's note stays blank.
+- Write only into `tasks/<slug>/artifacts/` (and `draws/` for `--canvas`).
+- Do not fabricate — if the manifest is silent on a "why", leave the note/summary
+  spare rather than inventing one.
 
 ## After writing
 
-Mention the path. The watcher indexes it within ~3 s; the `.excalidraw` appears
-under its task as a DRAW with full lineage and opens in the draw canvas. To share
-the `--doc` HTML, hand off to `hub publish` / the `dak` skill.
+Mention the path. The watcher indexes it within ~3 s; the page appears under its
+task with full lineage and opens in the workspace — click a change to deep-dive.
+To share it, hand off to `hub publish` / the `dak` skill.

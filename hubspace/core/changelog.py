@@ -252,7 +252,7 @@ def to_scene(nodes: list[dict], edges: list[dict] | None = None,
     return {
         "type": "excalidraw", "version": 2, "source": source,
         "elements": elements,
-        # gridSize renders the dot grid (the workflow-canvas look).
-        "appState": {"gridSize": 20, "viewBackgroundColor": PAPER_BG},
+        # No grid — a clean paper ground (the checks read as busy on a change map).
+        "appState": {"gridSize": None, "viewBackgroundColor": PAPER_BG},
         "files": {},
     }
