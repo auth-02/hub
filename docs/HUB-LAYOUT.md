@@ -49,7 +49,7 @@ The differentiated structure. A task is a directory under `<repo>/tasks/<slug>/`
 ├── draws/               (optional, created on demand)
 │   └── <name>.excalidraw ← DRAW
 ├── comments/            (optional, created on demand)
-│   └── notes.jsonl      ← NOTE (append-only; one JSON comment per line)
+│   └── notes.jsonl      ← NOTE (append-only + delete-by-id; one JSON comment per line)
 ├── change-log/          (optional, created on demand)
 │   ├── <name>.excalidraw ← DRAW  (editable change-map, source of truth)
 │   └── <name>.html      ← rendered interactive map (regenerated on Save)
@@ -85,11 +85,13 @@ The differentiated structure. A task is a directory under `<repo>/tasks/<slug>/`
   file the comment is about (defaults to `manifest.md` for a general comment),
   `range` is an optional line range (`L41-L48`, omitted for general comments),
   and `id` is a short, stable, deterministic id. Adding a comment **appends one
-  line** and never rewrites or reorders existing lines. The log is a real,
-  diffable, git-tracked, agent-readable file at a predictable path — untouched by
-  `rm hub.db` (the JSONL is the source of truth). Written by `hub note <path>`,
-  the floating comment composer (`c`), or the `POST /_note` endpoint; hub never
-  scaffolds it.
+  line** and never rewrites or reorders existing lines. Deleting a comment (by
+  `id`) is the one exception — it drops that single line and keeps every other
+  line byte-identical. The log is a real, diffable, git-tracked, agent-readable
+  file at a predictable path — untouched by `rm hub.db` (the JSONL is the source
+  of truth). Written by `hub note <path>` (`--delete <id>` to remove), the
+  floating comment composer (`c`), or the `POST /_note` / `POST /_note-delete`
+  endpoints; hub never scaffolds it.
 
 > **`prompts/` is not part of the task unit.** The PROMPT kind (§3) is owned by
 > any pre-existing `prompts/` folder a repo or task already keeps for its own

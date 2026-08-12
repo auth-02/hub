@@ -288,6 +288,67 @@ def write_note(
     return path, rec
 
 
+def delete_note(
+    repo_root: Path,
+    slug: str,
+    note_id: str,
+) -> tuple[Path, dict | None]:
+    """Remove exactly one comment line from `<slug>/comments/notes.jsonl` by id.
+
+    The inverse of :func:`write_note` — the ONE place the otherwise append-only
+    log is rewritten (mirrors the publish→unpublish inverse). Drops the single
+    line whose ``id`` matches `note_id` and rewrites the file with every other
+    line preserved **byte-for-byte and in order** (malformed/non-JSON lines are
+    kept untouched, never silently discarded). The file is still the source of
+    truth — `rm hub.db` loses nothing. Shares the slug/containment guards with
+    `write_note`. Returns ``(notes_path, removed_record)``; `removed_record` is
+    ``None`` when the file is absent or no line carries that id (idempotent — a
+    repeat delete is a no-op). Raises `SlugError` on an unsafe slug, `ValueError`
+    on an empty id, and lets `OSError` propagate on a read-only root.
+    """
+    import json
+
+    if not valid_slug(slug):
+        raise SlugError(f"invalid slug: {slug!r}")
+    task_dir = (repo_root / "tasks" / slug).resolve()
+    if not is_within(task_dir, (repo_root / "tasks").resolve()):
+        raise SlugError(f"slug escapes tasks/: {slug!r}")
+    note_id = (note_id or "").strip()
+    if not note_id:
+        raise ValueError("id required")
+
+    path = task_dir / "comments" / NOTES_FILE
+    # Defence in depth: the resolved write must stay inside the task dir.
+    if not is_within(path.resolve(), task_dir):
+        raise SlugError("note path escapes task")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return path, None  # no log yet → nothing to delete
+
+    removed: dict | None = None
+    kept: list[str] = []
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            rec = json.loads(line)
+        except (ValueError, TypeError):
+            kept.append(line)  # preserve a malformed line untouched
+            continue
+        if removed is None and isinstance(rec, dict) and rec.get("id") == note_id:
+            removed = rec  # drop only the FIRST match (ids are unique per file)
+            continue
+        kept.append(line)
+    if removed is None:
+        return path, None  # id not found → idempotent no-op, file untouched
+
+    # Rewrite: remaining lines keep their exact bytes; a fully-emptied log
+    # collapses to an empty file (read_notes → []), which is harmless.
+    path.write_text("".join(ln + "\n" for ln in kept), encoding="utf-8")
+    return path, removed
+
+
 def find_task_for(path: Path) -> tuple[Path, str, str] | None:
     """Walk up from `path` to the nearest `tasks/<slug>/`; return its context.
 
