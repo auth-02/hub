@@ -341,7 +341,7 @@ function renderNotes(){
   var old=page.querySelectorAll('.hub-inline-note,.hub-inline-notes');
   for(var i=0;i<old.length;i++)old[i].parentNode.removeChild(old[i]);
   var notes=(CFG.notes||[]).map(function(n){
-    return {author:n.author,body:n.body,created:n.created,line:lineOf(n.range)};});
+    return {id:n.id,author:n.author,body:n.body,created:n.created,line:lineOf(n.range)};});
   var general=[];
   notes.forEach(function(n){
     if(n.line){var blk=blockForLine(n.line);var c=card(n);
