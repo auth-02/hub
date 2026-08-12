@@ -1,6 +1,14 @@
+/* ── Layering scale (SAME contract as ui/src/hub.css › :root) ────────────────
+   The standalone doc page is Hub's second front-end; it must obey the identical
+   stacking ladder so a summoned surface (name input, composer) or a toast is
+   never occluded by the page's own chrome. Popups → --z-transient; toasts →
+   --z-toast. New doc-page popups: pick a token, never a bare number.
+   See AGENTS.md › "UI layering (z-index) contract". */
+:root{--z-sticky:5;--z-chrome:45;--z-overlay:90;--z-palette:100;--z-transient:1000;--z-toast:1100;}
+
 /* Doc-page actions: a floating ⋯ dropdown (Save as PDF, plus New draw on task
    manifests). Native <details>, so no JS is needed on the doc page. */
-.doc-menu{position:fixed;top:18px;right:18px;z-index:40;}
+.doc-menu{position:fixed;top:18px;right:18px;z-index:var(--z-chrome);}
 .doc-menu-btn{list-style:none;cursor:pointer;font-family:var(--mono);font-size:15px;line-height:1;letter-spacing:.1em;padding:5px 13px;border:1px solid var(--line);background:var(--alt);color:var(--accent);user-select:none;}
 .doc-menu-btn::-webkit-details-marker{display:none;}
 .doc-menu[open] .doc-menu-btn{border-color:var(--accent);background:var(--accent);color:#fff;}
@@ -11,7 +19,7 @@
 .doc-menu .pencil{display:inline-block;transform:rotate(125deg);}
 /* S14 / #3 — honest publish result line for the doc-page ⋯ Publish item. A dry
    run is clearly a preview (never a live "published" link). */
-.doc-pub-result{position:fixed;top:60px;right:18px;z-index:41;max-width:min(420px,80vw);font-family:var(--mono);font-size:11px;line-height:1.5;background:var(--bg);border:1px solid var(--line);box-shadow:0 12px 30px rgba(0,0,0,.18);padding:9px 12px;display:flex;flex-direction:column;gap:5px;word-break:break-all;}
+.doc-pub-result{position:fixed;top:60px;right:18px;z-index:var(--z-transient);max-width:min(420px,80vw);font-family:var(--mono);font-size:11px;line-height:1.5;background:var(--bg);border:1px solid var(--line);box-shadow:0 12px 30px rgba(0,0,0,.18);padding:9px 12px;display:flex;flex-direction:column;gap:5px;word-break:break-all;}
 .doc-pub-result .dpr-tag{font-size:9px;letter-spacing:.12em;text-transform:uppercase;}
 .doc-pub-result .dpr-tag.ok{color:var(--accent2);}
 .doc-pub-result .dpr-tag.dry{color:var(--accent);}
@@ -23,7 +31,7 @@
 /* S29 — themed publish-name popover for the doc page (replaces the native
    window.prompt). Same paper/line/mono/oxblood language as the ⋯ menu, docked
    under it top-right. */
-.doc-pub-namebox{position:fixed;top:60px;right:18px;z-index:60;width:min(300px,80vw);
+.doc-pub-namebox{position:fixed;top:60px;right:18px;z-index:var(--z-transient);width:min(300px,80vw);
   background:var(--bg);border:1px solid var(--line);border-top:3px solid var(--accent);
   box-shadow:0 12px 30px rgba(0,0,0,.18);padding:12px 14px;display:flex;flex-direction:column;gap:8px;}
 .doc-pub-namebox .dpn-label{font-family:var(--mono);font-size:9px;letter-spacing:.14em;
@@ -43,7 +51,7 @@
 /* S27 — tiny sticky toast for doc-page publish/unpublish (mirrors the SPA's
    flashSticky/flashOpen): "publishing …" while in flight, then a result with an
    Open link on success. Self-contained; the doc page is standalone, not the SPA. */
-.doc-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(8px);z-index:70;
+.doc-toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(8px);z-index:var(--z-toast);
   max-width:min(520px,90vw);font-family:var(--mono);font-size:11px;letter-spacing:.04em;
   background:var(--ink);color:var(--bg);padding:9px 15px;border-radius:4px;
   box-shadow:0 12px 30px rgba(0,0,0,.28);opacity:0;pointer-events:none;
@@ -73,7 +81,7 @@
   border:1px solid var(--line);background:var(--alt);color:var(--accent);border-radius:4px;}
 .hub-line-add:hover{background:var(--accent);color:#fff;border-color:var(--accent);}
 /* On-page comment composer (opened by the "+" gutter or ⌘C). */
-.hub-composer{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:60;
+.hub-composer{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:var(--z-transient);
   width:min(560px,92vw);background:var(--bg);border:1px solid var(--line);
   box-shadow:0 18px 44px rgba(0,0,0,.24);display:flex;flex-direction:column;}
 .hub-composer-head{font-family:var(--mono);font-size:10px;letter-spacing:.12em;

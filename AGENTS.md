@@ -137,6 +137,30 @@ Placeholders: `{favicon}`, `{scan_root}`, `{scan_root_json}`, `{sidecar_json}`,
 
 After any template change: `HUB_SERVER_PORT=8787 python3 -m hubspace.cli.hub` to catch format errors.
 
+## UI layering (z-index) contract
+
+Hub has **two front-ends**: the SPA workspace (`ui/src/hub.css`, served on `/`)
+and the standalone doc page (`ui/public/chrome.css`, served per file). Both
+define the **same** ordered z-index scale as `:root` tokens — keep them in sync:
+
+| token | value | for |
+|-------|-------|-----|
+| `--z-sticky` | 5 | in-flow sticky chrome (search bar, in-pane menus) |
+| `--z-chrome` | 45 | persistent page chrome (settings gear, doc ⋯ menu) |
+| `--z-overlay` | 90 | full-view overlays: preview, trace (graph = `+2`) |
+| `--z-palette` | 100 | command palette |
+| `--z-transient` | 1000 | **summoned surfaces**: modals, name inputs, composers, help |
+| `--z-toast` | 1100 | **notifications** — the very top, never occluded |
+
+**The rule (why a popup must never land "on the home page"):** anything a user
+*summons* — a modal, the dak publish-name input, the comment composer, a confirm
+— uses `--z-transient`; any toast/notification uses `--z-toast`. Both sit ABOVE
+every view overlay and the palette, so they always appear on the page/overlay
+they were invoked from, not hidden behind it. **When you add ANY new popup,
+toast, sheet, or input, give it a token — never a bare z-index number.** A bare
+number is how this regressed once per feature (S26/S27/S29): a new `z-index:60`
+looks fine on the bare index but renders behind the open trace/graph/palette.
+
 ## Environment variables
 
 | Var | Default | Purpose |

@@ -1,5 +1,19 @@
 :root{--bg:#F4EFE4;--alt:#ECE5D2;--deep:#E4DCC4;--ink:#1A1A1A;--mute:#8A8377;--line:#D9D1BC;--accent:#7A2828;--accent2:#1E5A6B;--rust:#C15F3C;
---disp:'Fraunces',serif;--body:'Inter',system-ui,sans-serif;--mono:'JetBrains Mono','SF Mono',Menlo,monospace;}
+--disp:'Fraunces',serif;--body:'Inter',system-ui,sans-serif;--mono:'JetBrains Mono','SF Mono',Menlo,monospace;
+/* ── Layering scale (THE stacking contract — mirrored in public/chrome.css) ──
+   One ordered ladder every fixed/absolute surface must sit on, so a popup is
+   never occluded by the view it was summoned from. RULE: anything transient a
+   user summons — a modal, a name input, a composer, a confirm — uses
+   --z-transient; any notification/toast uses --z-toast. Both are ABOVE every
+   view overlay (preview/trace/graph) AND the palette, so they always land on
+   the page you invoked them from, not "behind" it. New popups: pick a token,
+   never a bare number. See AGENTS.md › "UI layering (z-index) contract". */
+--z-sticky:5;      /* in-flow sticky chrome: search bar, in-pane menus */
+--z-chrome:45;     /* persistent page chrome: settings gear */
+--z-overlay:90;    /* full-view overlays: preview, trace (graph sits +2 above) */
+--z-palette:100;   /* command palette */
+--z-transient:1000;/* summoned surfaces: modals, name input, composer, help */
+--z-toast:1100;}   /* notifications — the very top, never occluded */
 *{box-sizing:border-box}
 @keyframes _hub_fadein{from{opacity:0.4}to{opacity:1}}
 html{animation:_hub_fadein 0.18s ease-out;}
@@ -10,7 +24,7 @@ header{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:8px
 .kicker{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);display:flex;justify-content:space-between;align-items:center;gap:14px;}
 .kicker a{color:var(--accent);text-decoration:underline dotted;text-underline-offset:3px;}
 .kicker a:hover{color:var(--ink);}
-.modal{position:fixed;inset:0;background:rgba(26,26,26,.55);display:none;align-items:center;justify-content:center;z-index:50;}
+.modal{position:fixed;inset:0;background:rgba(26,26,26,.55);display:none;align-items:center;justify-content:center;z-index:var(--z-transient);}
 .modal.show{display:flex;}
 .modal-card{background:var(--bg);border:1px solid var(--line);border-top:3px solid var(--accent);padding:24px 26px;min-width:420px;max-width:90vw;box-shadow:0 18px 40px rgba(0,0,0,.18);}
 .modal-kicker{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:6px;}
@@ -41,13 +55,13 @@ header{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:8px
 .btn:hover{border-color:var(--ink);}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
 .btn.primary:hover{background:var(--ink);border-color:var(--ink);}
-.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;font-family:var(--mono);font-size:11px;padding:10px 14px;letter-spacing:.05em;opacity:0;transition:opacity .2s;pointer-events:none;max-width:80vw;}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;font-family:var(--mono);font-size:11px;padding:10px 14px;letter-spacing:.05em;opacity:0;transition:opacity .2s;pointer-events:none;max-width:80vw;z-index:var(--z-toast);}
 /* S20 — a clickable Open link inside the inform-on-publish toast. The toast
    opts into pointer events only while it carries the link (set from JS). */
 .toast.has-open{pointer-events:auto;}
 .toast-open{color:#fff;text-decoration:underline;text-underline-offset:2px;margin-left:8px;}
 /* ── Settings (S15): gear bottom-left + panel modeled on the set-root modal ── */
-.settings-gear{position:fixed;left:18px;bottom:18px;z-index:45;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--bg);color:var(--mute);font-size:16px;line-height:1;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.14);transition:transform .15s,color .15s,border-color .15s;}
+.settings-gear{position:fixed;left:18px;bottom:18px;z-index:var(--z-chrome);width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--bg);color:var(--mute);font-size:16px;line-height:1;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.14);transition:transform .15s,color .15s,border-color .15s;}
 .settings-gear:hover{color:var(--accent);border-color:var(--accent);transform:rotate(45deg);}
 .settings-gear:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent2);}
 .settings-card{min-width:440px;width:520px;max-width:92vw;}
@@ -73,7 +87,7 @@ h1 .hub{color:#C15F3C;font-style:italic;}
 .meta b{color:var(--ink);}
 
 /* ── Command bar ───────────────────────────────────────────────────────────── */
-.search{position:sticky;top:0;background:var(--bg);padding:16px 0 12px;z-index:5;}
+.search{position:sticky;top:0;background:var(--bg);padding:16px 0 12px;z-index:var(--z-sticky);}
 .cmd-bar{display:flex;border:1px solid var(--line);background:var(--alt);}
 #q{flex:1;font-family:var(--mono);font-size:13px;padding:11px 14px;border:none;background:transparent;color:var(--ink);outline:none;min-width:0;}
 #q:focus{background:rgba(255,255,255,.3);}
@@ -279,7 +293,7 @@ a.lf-ext:hover{color:var(--ink);}
    --mono metadata. Lighter than #modal/palette; anchored bottom-right. */
 .composer{position:fixed;right:24px;bottom:24px;width:360px;max-width:calc(100vw - 48px);
   background:var(--bg);border:1px solid var(--line);border-top:3px solid var(--accent);
-  box-shadow:0 18px 40px rgba(0,0,0,.20);z-index:100;display:none;flex-direction:column;
+  box-shadow:0 18px 40px rgba(0,0,0,.20);z-index:var(--z-transient);display:none;flex-direction:column;
   padding:14px 15px 12px;}
 .composer.show{display:flex;}
 .composer-head{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
@@ -382,7 +396,7 @@ a.lf-ext:hover{color:var(--ink);}
 .loose-kd{font-size:9px;letter-spacing:.1em;border:1px solid var(--line);padding:2px 5px;color:var(--mute);flex-shrink:0;}
 
 /* ── Trace overlay ─────────────────────────────────────────────────────── */
-#trace{display:none;position:fixed;inset:0;z-index:90;background:var(--bg);overflow-y:auto;
+#trace{display:none;position:fixed;inset:0;z-index:var(--z-overlay);background:var(--bg);overflow-y:auto;
 background-image:radial-gradient(circle,#C9BFA3 .7px,transparent .7px);background-size:22px 22px;}
 #trace.show{display:block;}
 
@@ -462,7 +476,7 @@ button.ln-notes-link:hover{border-color:var(--accent);color:var(--ink);}
 .first-run-comment{color:var(--mute);font-style:italic;}
 
 /* ── Command palette (the one write surface) ───────────────────────────── */
-.palette{position:fixed;inset:0;background:rgba(26,26,26,.5);display:none;align-items:flex-start;justify-content:center;z-index:100;}
+.palette{position:fixed;inset:0;background:rgba(26,26,26,.5);display:none;align-items:flex-start;justify-content:center;z-index:var(--z-palette);}
 .palette.show{display:flex;}
 .pal-card{background:var(--bg);border:1px solid var(--line);border-top:3px solid var(--accent);margin-top:11vh;width:640px;max-width:92vw;box-shadow:0 24px 60px rgba(0,0,0,.28);
 background-image:radial-gradient(circle,#C9BFA3 .6px,transparent .6px);background-size:22px 22px;display:flex;flex-direction:column;max-height:74vh;}
@@ -592,7 +606,7 @@ background-image:radial-gradient(circle,#C9BFA3 .6px,transparent .6px);backgroun
 .pal-pub-url.dry{color:var(--mute);text-decoration:none;}
 
 /* help panel */
-.pal-help{position:fixed;inset:0;background:rgba(26,26,26,.5);display:none;align-items:center;justify-content:center;z-index:105;}
+.pal-help{position:fixed;inset:0;background:rgba(26,26,26,.5);display:none;align-items:center;justify-content:center;z-index:var(--z-transient);}
 .pal-help.show{display:flex;}
 .pal-help-card{background:var(--bg);border:1px solid var(--line);border-top:3px solid var(--accent2);padding:22px 26px;min-width:340px;max-width:90vw;box-shadow:0 18px 40px rgba(0,0,0,.2);}
 .pal-help-kicker{font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent2);margin-bottom:14px;}
@@ -605,7 +619,7 @@ background-image:radial-gradient(circle,#C9BFA3 .6px,transparent .6px);backgroun
 /* Paper ground, never a white sheet: --bg + the same dot-grid radial-gradient
    as body. Oxblood --accent for selection/authoring, deep-sea --accent2 for
    navigation, --mono/Fraunces for chrome. */
-.gcanvas{position:fixed;inset:0;z-index:92;display:none;flex-direction:column;
+.gcanvas{position:fixed;inset:0;z-index:calc(var(--z-overlay) + 2);display:none;flex-direction:column;
   background:var(--bg);
   background-image:radial-gradient(circle,#C9BFA3 .7px,transparent .7px);
   background-size:22px 22px;}
