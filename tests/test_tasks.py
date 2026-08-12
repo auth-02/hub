@@ -168,6 +168,84 @@ class TestWriteNote(unittest.TestCase):
             tasks.write_note(self.root, "demo", "manifest.md", "hi")
 
 
+class TestDeleteNote(unittest.TestCase):
+    """S30 — delete_note removes exactly one comment by id, byte-preserving the rest."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        (self.root / "tasks" / "demo").mkdir(parents=True)
+        (self.root / "tasks" / "demo" / "manifest.md").write_text("# Demo\n", encoding="utf-8")
+
+    def _jsonl(self):
+        return self.root / "tasks" / "demo" / "comments" / "notes.jsonl"
+
+    def _seed(self):
+        _, a = tasks.write_note(self.root, "demo", "manifest.md", "first comment",
+                                created="2026-08-05T10:00:00")
+        _, b = tasks.write_note(self.root, "demo", "manifest.md", "second comment",
+                                created="2026-08-05T11:00:00")
+        _, c = tasks.write_note(self.root, "demo", "manifest.md", "third comment",
+                                created="2026-08-05T12:00:00")
+        return a, b, c
+
+    def test_removes_only_the_matching_line(self):
+        a, b, c = self._seed()
+        p, removed = tasks.delete_note(self.root, "demo", b["id"])
+        self.assertEqual(os.path.realpath(p), os.path.realpath(self._jsonl()))
+        self.assertEqual(removed["id"], b["id"])
+        self.assertEqual(removed["body"], "second comment")
+        bodies = [r["body"] for r in tasks.read_notes(self.root / "tasks" / "demo")]
+        self.assertEqual(bodies, ["first comment", "third comment"])
+
+    def test_surviving_lines_are_byte_identical(self):
+        a, b, c = self._seed()
+        lines_before = self._jsonl().read_text(encoding="utf-8").splitlines()
+        tasks.delete_note(self.root, "demo", b["id"])
+        lines_after = self._jsonl().read_text(encoding="utf-8").splitlines()
+        # the two kept lines are the exact original bytes (not re-serialized)
+        self.assertEqual(lines_after, [lines_before[0], lines_before[2]])
+
+    def test_unknown_id_is_noop(self):
+        self._seed()
+        before = self._jsonl().read_bytes()
+        p, removed = tasks.delete_note(self.root, "demo", "deadbeef")
+        self.assertIsNone(removed)
+        self.assertEqual(self._jsonl().read_bytes(), before)  # untouched
+
+    def test_missing_file_is_noop(self):
+        p, removed = tasks.delete_note(self.root, "demo", "whatever")
+        self.assertIsNone(removed)
+        self.assertFalse(self._jsonl().exists())
+
+    def test_deleting_last_comment_empties_file(self):
+        _, a = tasks.write_note(self.root, "demo", "manifest.md", "only one",
+                                created="2026-08-05T10:00:00")
+        _, removed = tasks.delete_note(self.root, "demo", a["id"])
+        self.assertEqual(removed["id"], a["id"])
+        self.assertEqual(tasks.read_notes(self.root / "tasks" / "demo"), [])
+
+    def test_preserves_malformed_lines(self):
+        (self.root / "tasks" / "demo" / "comments").mkdir(parents=True)
+        self._jsonl().write_text(
+            '{"id":"keepme","target":"manifest.md","body":"one"}\n'
+            'this is not json\n'
+            '{"id":"dropme","target":"manifest.md","body":"two"}\n',
+            encoding="utf-8")
+        tasks.delete_note(self.root, "demo", "dropme")
+        text = self._jsonl().read_text(encoding="utf-8")
+        self.assertIn("this is not json", text)   # malformed line kept
+        self.assertIn('"id":"keepme"', text)
+        self.assertNotIn('"id":"dropme"', text)
+
+    def test_invalid_slug_raises(self):
+        with self.assertRaises(tasks.SlugError):
+            tasks.delete_note(self.root, "../evil", "someid")
+
+    def test_empty_id_raises(self):
+        with self.assertRaises(ValueError):
+            tasks.delete_note(self.root, "demo", "   ")
+
+
 class TestReadNotes(unittest.TestCase):
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())

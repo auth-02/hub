@@ -92,6 +92,17 @@ class TestDocPageScript(unittest.TestCase):
         # ⌘C composer is guarded against a real text selection
         self.assertIn("getSelection", s)
 
+    def test_inline_comment_delete_affordance_carries_id(self):
+        # S30 — the doc page can delete a comment (✕ → two-click → /_note-delete).
+        s = _page.DOC_PAGE_SCRIPT
+        self.assertIn("note-del", s)
+        self.assertIn("/_note-delete", s)
+        self.assertIn("deleteNote", s)
+        self.assertIn("delete?", s)  # two-click arm
+        # REGRESSION: renderNotes must pass the note id through to card(), else
+        # the ✕ gate (canComment && n.id) is always false and no button renders.
+        self.assertIn("id:n.id", s)
+
     def test_edit_menu_item_and_config_baking(self):
         self.assertIn("hubDocEdit", _page.doc_edit_item())
         self.assertIn("✎", _page.doc_edit_item())

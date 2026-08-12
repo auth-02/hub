@@ -280,6 +280,16 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                                        "detail": str(e)}).encode())
                 return
             self._note(body)
+        elif url_path == "/_note-delete":
+            length = int(self.headers.get("Content-Length", 0))
+            try:
+                body = json.loads(self.rfile.read(length).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError) as e:
+                self._send(400, "application/json",
+                           json.dumps({"ok": False, "error": "bad_json",
+                                       "detail": str(e)}).encode())
+                return
+            self._note_delete(body)
         elif url_path == "/_manifest-edit":
             length = int(self.headers.get("Content-Length", 0))
             try:
@@ -618,6 +628,66 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
             print(result.stderr or result.stdout, file=_sys2.stderr)
         self._send(200, "application/json",
                    json.dumps({"ok": True, "rel": rel, "id": rec["id"]}).encode())
+
+    def _note_delete(self, body: dict) -> None:
+        """Remove one comment from a task's `comments/notes.jsonl` by id (S30).
+
+        Body is JSON ``{repo, slug, id}``. The inverse of `/_note`: deletes the
+        single JSONL line whose stable `id` matches, leaving every other line
+        byte-identical (`tasks.delete_note`). Reuses the same repo/slug guards as
+        `/_note`; only the addressed task's own log is ever touched. Idempotent —
+        an unknown id returns 200 ``{ok, removed:false}`` (nothing to undo). A
+        read-only root → 403. On success the index rebuilds so the comment
+        disappears on reload; no DB row is written directly.
+        """
+        from ..core import tasks as _tasks
+
+        def _fail(code: int, payload: dict) -> None:
+            self._send(code, "application/json", json.dumps(payload).encode())
+
+        root = _active_root.resolve()
+        repo = (body.get("repo") or "").strip()
+        slug = (body.get("slug") or "").strip()
+        note_id = (body.get("id") or "").strip()
+
+        if not _tasks.valid_slug(slug):
+            _fail(400, {"ok": False, "error": "invalid_slug"})
+            return
+        if not note_id:
+            _fail(400, {"ok": False, "error": "id required"})
+            return
+        if repo and repo != "(root)":
+            repo_root = (root / repo).resolve()
+            if not is_within(repo_root, root) or not repo_root.is_dir():
+                _fail(400, {"ok": False, "error": "invalid repo"})
+                return
+        else:
+            repo_root = root
+        task_dir = (repo_root / "tasks" / slug).resolve()
+        if not is_within(task_dir, root) or not task_dir.is_dir():
+            _fail(400, {"ok": False, "error": "invalid task"})
+            return
+
+        try:
+            _path, removed = _tasks.delete_note(repo_root, slug, note_id)
+        except _tasks.SlugError as e:
+            _fail(400, {"ok": False, "error": "invalid_slug", "detail": str(e)})
+            return
+        except ValueError as e:
+            _fail(400, {"ok": False, "error": "invalid", "detail": str(e)})
+            return
+        except OSError as e:
+            _fail(403, {"ok": False, "error": "write_failed", "detail": str(e)})
+            return
+
+        if removed is not None:
+            result = self._rebuild(_active_root)
+            if result.returncode != 0:
+                import sys as _sys2
+                print(result.stderr or result.stdout, file=_sys2.stderr)
+        self._send(200, "application/json",
+                   json.dumps({"ok": True, "removed": removed is not None,
+                               "id": note_id}).encode())
 
     def _manifest_edit(self, body: dict) -> None:
         """Rewrite ONLY a manifest's `status:` + `## Plan` block — the 1i producer.
@@ -1746,6 +1816,7 @@ class HubHandler(http.server.BaseHTTPRequestHandler):
                 if (rec.get("target") or "manifest.md") != target:
                     continue
                 notes.append({
+                    "id": rec.get("id") or "",
                     "author": rec.get("author") or "anon",
                     "body": rec.get("body") or "",
                     "range": rec.get("range") or "",

@@ -347,13 +347,16 @@ def _cmd_new_task(slug: str, target: Path, with_dirs: list[str] | None = None) -
             print(f"  created  tasks/{slug}/{sub}/")
 
 
-def _cmd_note(path_arg: str, message: str, range_: str | None = None) -> None:
-    """hub note <path> -m "..." [--range L41-L48] — annotate a task file.
+def _cmd_note(path_arg: str, message: str, range_: str | None = None,
+              delete: str | None = None) -> None:
+    """hub note <path> -m "..." [--range L41-L48] | --delete <id> — annotate/uncomment.
 
     `<path>` is the target file the note is about. Walks up to the nearest
-    `tasks/<slug>/` to find the owning task, then writes the note into that
+    `tasks/<slug>/` to find the owning task, then either writes a note into that
     task's `comments/` via the shared `tasks.write_note` (same writer as
-    `POST /_note`). Errors clearly when `<path>` is not under any task.
+    `POST /_note`), or — with `--delete <id>` — removes the comment with that id
+    via `tasks.delete_note` (the inverse of `POST /_note-delete`, verb-parity
+    2c). Errors clearly when `<path>` is not under any task.
     """
     from ..core import tasks as _tasks
 
@@ -365,6 +368,26 @@ def _cmd_note(path_arg: str, message: str, range_: str | None = None) -> None:
         print(f"  error: {path_arg} is not under a tasks/<slug>/ directory")
         sys.exit(1)
     repo_root, slug, target_rel = ctx
+
+    if delete:
+        try:
+            note_file, removed = _tasks.delete_note(repo_root, slug, delete)
+        except (_tasks.SlugError, ValueError) as e:
+            print(f"  error: {e}")
+            sys.exit(1)
+        if removed is None:
+            print(f"  no comment with id {delete} in {slug}")
+            sys.exit(1)
+        try:
+            rel = note_file.relative_to(repo_root).as_posix()
+        except ValueError:
+            rel = str(note_file)
+        print(f"  deleted   {rel}  (comment {delete})")
+        return
+
+    if not message:
+        print("  error: pass -m <message> to add a comment, or --delete <id> to remove one")
+        sys.exit(1)
     try:
         author = subprocess.run(
             ["git", "-C", str(repo_root), "config", "user.name"],
@@ -710,12 +733,14 @@ def main() -> None:
              "Safe to re-run on an existing task to add them later.",
     )
 
-    # hub note <path> -m "..." — annotate a task file (roadmap 1e / 2c).
-    note_p = sub.add_parser("note", help="Annotate a task file (hub note <path> -m <msg>)")
+    # hub note <path> -m "..." | --delete <id> — annotate/uncomment (roadmap 1e / 2c).
+    note_p = sub.add_parser("note", help="Annotate a task file (hub note <path> -m <msg> | --delete <id>)")
     note_p.add_argument("path", help="Target file the note is about (under a tasks/<slug>/)")
-    note_p.add_argument("-m", "--message", required=True, help="The note body")
+    note_p.add_argument("-m", "--message", default=None, help="The note body (to add a comment)")
     note_p.add_argument("--range", dest="range", default=None, metavar="L..",
                         help="Optional line range the note is about, e.g. L41-L48")
+    note_p.add_argument("--delete", dest="delete", default=None, metavar="ID",
+                        help="Remove the comment with this id instead of adding one")
 
     # hub mcp serve — MCP stdio server (JSON-RPC 2.0 over newline-delimited
     # stdin/stdout). A daemon, so it has no palette/UI row (roadmap note on 1h).
@@ -798,7 +823,8 @@ def main() -> None:
         _cmd_new_task(args.slug, Path.cwd(), getattr(args, "with_dirs", None))
         return
     if args.cmd == "note":
-        _cmd_note(args.path, args.message, getattr(args, "range", None))
+        _cmd_note(args.path, args.message, getattr(args, "range", None),
+                  getattr(args, "delete", None))
         return
     if args.cmd == "agent":
         from .agent import run as agent_run
@@ -928,9 +954,9 @@ def main() -> None:
         if not comments:
             continue
         notes_map[f'{t["rp"]}\t{t["sl"]}'] = [
-            {"author": c.get("author"), "created": c.get("created"),
-             "body": c.get("body"), "target": c.get("target"),
-             "range": c.get("range")}
+            {"id": c.get("id"), "author": c.get("author"),
+             "created": c.get("created"), "body": c.get("body"),
+             "target": c.get("target"), "range": c.get("range")}
             for c in comments
         ]
     notes_json = json.dumps(notes_map, separators=(",", ":"))
