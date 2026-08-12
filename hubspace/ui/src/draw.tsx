@@ -131,6 +131,19 @@ function App() {
     void save(nameVal.trim() || undefined);
   }, [nameVal, save]);
 
+  // Autosave: persist edits to an EXISTING file ~1.2 s after the last change, so
+  // a user never has to know about ⌘S — and, for a change-log draw, the server's
+  // save hook re-renders the interactive HTML on each autosave. Brand-new,
+  // unnamed diagrams are left to ⌘S (they need a name first). Debounced because
+  // Excalidraw's onChange fires on every pointer move / selection.
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onChange = useCallback(() => {
+    if (!relRef.current || naming) return;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => { void save(); }, 1200);
+  }, [naming, save]);
+  useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
+
   return (
     <div style={{ position: "fixed", inset: 0 }}>
       <Excalidraw
@@ -138,6 +151,7 @@ function App() {
         initialData={STATE.data || undefined}
         validateEmbeddable={validateEmbeddable}
         onLinkOpen={onLinkOpen}
+        onChange={onChange}
       />
       {naming && (
         <div

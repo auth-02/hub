@@ -138,12 +138,14 @@ Hub understands this layout and builds a lineage graph automatically:
 Hub is the **viewer**. If you drive work with Claude Code, the companion
 `hub` plugin is a **self-sufficient producer + viewer**: it bundles five
 producer skills — `/hub:manifest`, `/hub:stacked`, `/hub:kagaz`, `/hub:dak`,
-`/hub:changelog` — that create the `tasks/<slug>/manifest.md` structure above as
+`/hub:change-log` — that create the `tasks/<slug>/manifest.md` structure above as
 you work, plus a `/hub:serve` command that builds and serves the dashboard. So
-the board, trace, and timeline fill themselves in. `/hub:changelog <slug>` reads
-a task's diff + manifest and drops a self-contained changelog artifact into
-`tasks/<slug>/artifacts/` — the agent reads the diff (Hub has no model); Hub only
-surfaces a provenance line and a copy-only "ask again" button.
+the board, trace, and timeline fill themselves in. `/hub:change-log <slug>` reads
+a task's diff + manifest and draws a high-level connected wireframe of the change
+(change-units as nodes, dependencies as arrows) onto Hub's draw canvas as an
+`.excalidraw` in `tasks/<slug>/draws/` (`--doc` also writes a self-contained HTML
+write-up) — the agent reads the diff (Hub has no model); Hub only lays out the
+graph, indexes it, and surfaces a provenance line + copy-only "ask again" button.
 
 ```
 /plugin marketplace add auth-02/hub

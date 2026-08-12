@@ -256,19 +256,19 @@ class TestExtractDecisions(unittest.TestCase):
 
 
 class TestExtractProvenance(unittest.TestCase):
-    """S6 (2a) — provenance front matter written by the /changelog skill."""
+    """S6 (2a) — provenance front matter written by the /change-log skill."""
 
     def test_raw_frontmatter_md(self):
         text = (
             "---\n"
-            'generated_by: "claude ▸ skill:changelog"\n'
+            'generated_by: "claude ▸ skill:change-log"\n'
             'commit_range: "abc123..def456"\n'
             "written_at: 2026-08-05T10:00:00Z\n"
             "task: my-feature\n"
             "---\n\n# Changelog\n"
         )
         prov = metadata.extract_provenance(text)
-        self.assertEqual(prov["generated_by"], "claude ▸ skill:changelog")
+        self.assertEqual(prov["generated_by"], "claude ▸ skill:change-log")
         self.assertEqual(prov["commit_range"], "abc123..def456")
         self.assertEqual(prov["written_at"], "2026-08-05T10:00:00Z")
         self.assertEqual(prov["task"], "my-feature")
@@ -277,12 +277,12 @@ class TestExtractProvenance(unittest.TestCase):
         # .html artifacts wrap the block in a comment so it never renders.
         text = (
             "<!--\n---\n"
-            'generated_by: "claude ▸ skill:changelog"\n'
+            'generated_by: "claude ▸ skill:change-log"\n'
             'commit_range: "aaa..bbb"\n'
             "---\n-->\n<!DOCTYPE html><html><body>hi</body></html>"
         )
         prov = metadata.extract_provenance(text)
-        self.assertEqual(prov["generated_by"], "claude ▸ skill:changelog")
+        self.assertEqual(prov["generated_by"], "claude ▸ skill:change-log")
         self.assertEqual(prov["commit_range"], "aaa..bbb")
 
     def test_normal_file_returns_none(self):

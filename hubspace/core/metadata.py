@@ -15,7 +15,7 @@ _DECISIONS_SECTION = re.compile(
 )
 _DECISION_ITEM = re.compile(r"^\d+\.\s+(.+)$", re.MULTILINE)
 _H1            = re.compile(r"^#\s+(.+)$", re.MULTILINE)
-# S6 (2a) — provenance front matter written by the /changelog skill. The block
+# S6 (2a) — provenance front matter written by the /change-log skill. The block
 # may sit raw (`.md`) or wrapped in a leading HTML comment (`.html`, so it never
 # renders): `<!--\n---\n…\n---\n-->`. `generated_by` is the required signal.
 _PROV_BLOCK    = re.compile(r"^\s*(?:<!--\s*)?---\s*\n(.*?)\n---", re.DOTALL)
@@ -119,9 +119,9 @@ def extract_status(text: str) -> str:
 
 
 def extract_provenance(text: str) -> dict | None:
-    """Return the changelog skill's provenance front matter, or None.
+    """Return the change-log skill's provenance front matter, or None.
 
-    Hub does not generate these files — the `/changelog` skill (2a) drops a
+    Hub does not generate these files — the `/change-log` skill (2a) drops a
     self-contained artifact and stamps who/when/what-range into a front-matter
     block. Hub only *reads* it here to surface a provenance line; it never
     writes it. Requires `generated_by`; the rest are optional.
